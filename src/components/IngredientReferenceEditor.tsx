@@ -294,13 +294,14 @@ export function IngredientReferenceEditor({
     <div className="step-reference-editor">
       <div className="step-textarea-wrap">
         <textarea
-          rows={3}
+          className="step-textarea"
+          rows={5}
           value={step.text}
           onChange={(event) => updateText(event.target.value)}
           onSelect={(event) => refreshSelection(event.currentTarget)}
           onKeyUp={(event) => refreshSelection(event.currentTarget)}
           onMouseUp={(event) => refreshSelection(event.currentTarget)}
-          placeholder="Arbeitsschritt"
+          placeholder="Was passiert in diesem Schritt? Markdown ist möglich."
           aria-label={`Schritt ${stepIndex + 1}`}
         />
       </div>

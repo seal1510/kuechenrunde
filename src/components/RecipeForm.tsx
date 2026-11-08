@@ -25,9 +25,9 @@ import type { EditorImage } from '../recipe/repository'
 import { IngredientEditor } from './IngredientEditor'
 import { IngredientReferenceEditor } from './IngredientReferenceEditor'
 
-function EditorThumb({ image }: { image: EditorImage }) {
+function EditorThumb({ image, alt }: { image: EditorImage; alt: string }) {
   const url = useImageUrl(image.bytes, image.mimeType)
-  return url ? <img src={url} alt="" /> : <span className="muted">Bild</span>
+  return url ? <img src={url} alt={alt} /> : <span className="muted">Bild</span>
 }
 
 function TagEditor({
@@ -51,21 +51,23 @@ function TagEditor({
     setText('')
   }
   return (
-    <div className="field">
+    <div className="field tag-field">
       <span className="field-label">{label}</span>
-      <div className="chips">
-        {values.map((value) => (
-          <button
-            key={value}
-            type="button"
-            className="chip"
-            onClick={() => onChange(values.filter((entry) => entry !== value))}
-            aria-label={`${value} entfernen`}
-          >
-            {value} <span aria-hidden="true">×</span>
-          </button>
-        ))}
-      </div>
+      {values.length > 0 ? (
+        <div className="chips">
+          {values.map((value) => (
+            <button
+              key={value}
+              type="button"
+              className="chip"
+              onClick={() => onChange(values.filter((entry) => entry !== value))}
+              aria-label={`${value} entfernen`}
+            >
+              {value} <span aria-hidden="true">×</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="tag-add">
         <input
           value={text}
@@ -77,9 +79,15 @@ function TagEditor({
             }
           }}
           placeholder={placeholder}
+          aria-label={`${label} hinzufügen`}
         />
-        <button type="button" className="button" onClick={add}>
-          Hinzufügen
+        <button
+          type="button"
+          className="button tag-add-button"
+          onClick={add}
+          aria-label={`${label} hinzufügen`}
+        >
+          <span aria-hidden="true">+</span>
         </button>
       </div>
     </div>
@@ -148,6 +156,8 @@ export function RecipeForm({
       }),
     [previewInstructions, previewIngredients, previewOriginalServings, previewServings],
   )
+  const titleInvalid = Boolean(error && !draft.title.trim())
+  const errorId = `${formId}-error`
 
   function update<K extends keyof RecipeDraft>(key: K, value: RecipeDraft[K]) {
     onChange({ ...draft, [key]: value })
@@ -199,273 +209,394 @@ export function RecipeForm({
     onImagesChange(copy)
   }
 
+  const stepCount = draft.steps.length
+  const ingredientCount = draft.ingredients.length
+
   return (
     <form id={formId} className="editor-form" onSubmit={onSubmit}>
       {error ? (
-        <div className="notice danger" role="alert">
+        <div id={errorId} className="notice danger" role="alert">
           {error}
         </div>
       ) : null}
 
-      <section className="panel">
-        <h2>Grunddaten</h2>
-        <div className="form-grid">
-          <label className="field span-2">
-            <span className="field-label">Titel *</span>
-            <input value={draft.title} onChange={(event) => update('title', event.target.value)} required />
-          </label>
-          <label className="field span-2">
-            <span className="field-label">Beschreibung</span>
-            <textarea
-              rows={3}
-              value={draft.description}
-              onChange={(event) => update('description', event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Quelle / Link</span>
-            <input value={draft.sourceUrl} onChange={(event) => update('sourceUrl', event.target.value)} />
-          </label>
-          <label className="field">
-            <span className="field-label">Portionen</span>
-            <input
-              value={draft.servingsText}
-              onChange={(event) => update('servingsText', event.target.value)}
-              placeholder="z. B. 4 Portionen"
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Gesamtzeit</span>
-            <input
-              value={draft.totalTime}
-              onChange={(event) => update('totalTime', event.target.value)}
-              placeholder="z. B. 50 min"
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Zubereitungszeit</span>
-            <input
-              value={draft.prepTime}
-              onChange={(event) => update('prepTime', event.target.value)}
-              placeholder="z. B. 20 min"
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Kochzeit</span>
-            <input
-              value={draft.cookTime}
-              onChange={(event) => update('cookTime', event.target.value)}
-              placeholder="z. B. 30 min"
-            />
-          </label>
-          <label className="field span-2 check-field">
-            <input
-              type="checkbox"
-              checked={draft.favorite}
-              onChange={(event) => update('favorite', event.target.checked)}
-            />
-            Favorit
-          </label>
-          <label className="field span-2 check-field">
-            <input
-              type="checkbox"
-              checked={draft.wantToCook}
-              onChange={(event) => update('wantToCook', event.target.checked)}
-            />
-            Möchte ich kochen
-          </label>
-          <label className="field span-2">
-            <span className="field-label">Notizen</span>
-            <textarea rows={3} value={draft.notes} onChange={(event) => update('notes', event.target.value)} />
-          </label>
-        </div>
-      </section>
+      <div className="editor-layout">
+        <div className="editor-main-column">
+          <section className="panel editor-panel editor-basics">
+            <div className="editor-panel-head">
+              <h2>Grunddaten</h2>
+            </div>
 
-      <section className="panel">
-        <h2>Kategorien & Tags</h2>
-        <div className="form-grid">
-          <TagEditor
-            label="Küche"
-            values={draft.cuisine}
-            onChange={(values) => update('cuisine', values)}
-            placeholder="z. B. indisch, italienisch"
-          />
-          <TagEditor
-            label="Gerichtstyp"
-            values={draft.dishType}
-            onChange={(values) => update('dishType', values)}
-            placeholder="z. B. Curry, Pasta, Suppe"
-          />
-          <TagEditor
-            label="Tags"
-            values={draft.tags}
-            onChange={(values) => update('tags', values)}
-            placeholder="z. B. schnell, Meal Prep, Gäste"
-          />
-          <label className="field">
-            <span className="field-label">Aufwand</span>
-            <input
-              list="effort-options"
-              value={draft.effort}
-              onChange={(event) => update('effort', event.target.value)}
-              placeholder="z. B. einfach"
-            />
-            <datalist id="effort-options">
-              {EFFORT_OPTIONS.map((option) => (
-                <option key={option} value={option} />
-              ))}
-            </datalist>
-          </label>
-        </div>
-        <p className="muted small">Importierte Kategorien: {categoriesNote || '—'}</p>
-      </section>
-
-      <section className="panel">
-        <h2>Zutaten</h2>
-        <IngredientEditor
-          ingredients={draft.ingredients}
-          onChange={(ingredients) => update('ingredients', ingredients)}
-        />
-      </section>
-
-      <section className="panel">
-        <h2>Zubereitung</h2>
-        <div className="step-editor">
-          {draft.steps.map((step, index) => (
-            <div className="step-row" key={step.key}>
-              <span className="step-number">{index + 1}</span>
-              <div className="step-main">
-                <IngredientReferenceEditor
-                  step={step}
-                  stepIndex={index}
-                  ingredients={previewIngredients}
-                  instructions={referenceInstructions}
-                  onChange={(next) => updateStep(step.key, next)}
+            <div className="editor-title-row">
+              <label className="field editor-title-field">
+                <span className="field-label">Titel *</span>
+                <input
+                  className="editor-title-input"
+                  value={draft.title}
+                  onChange={(event) => update('title', event.target.value)}
+                  required
+                  aria-invalid={titleInvalid || undefined}
+                  aria-describedby={titleInvalid ? errorId : undefined}
                 />
-              </div>
-              <div className="step-actions">
-                <button type="button" className="button" onClick={() => moveStep(index, -1)} aria-label="Schritt nach oben">
-                  ↑
-                </button>
-                <button type="button" className="button" onClick={() => moveStep(index, 1)} aria-label="Schritt nach unten">
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  className="button danger-quiet"
-                  onClick={() =>
-                    update(
-                      'steps',
-                      draft.steps.filter((entry) => entry.key !== step.key),
-                    )
-                  }
-                  aria-label="Schritt entfernen"
-                >
-                  ×
-                </button>
+              </label>
+              <div className="editor-flags" role="group" aria-label="Rezept markieren">
+                <label className={`editor-flag${draft.favorite ? ' is-active' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={draft.favorite}
+                    onChange={(event) => update('favorite', event.target.checked)}
+                  />
+                  Favorit
+                </label>
+                <label className={`editor-flag${draft.wantToCook ? ' is-active' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={draft.wantToCook}
+                    onChange={(event) => update('wantToCook', event.target.checked)}
+                  />
+                  Möchte ich kochen
+                </label>
               </div>
             </div>
-          ))}
-        </div>
-        <button
-          type="button"
-          className="button"
-          onClick={() =>
-            update('steps', [
-              ...draft.steps,
-              { key: randomId(), text: '', references: [] },
-            ])
-          }
-        >
-          Schritt hinzufügen
-        </button>
 
-        <div className="reference-preview">
-          <div className="reference-preview-head">
-            <h3>Vorschau der Zubereitung</h3>
-            <label className="reference-preview-servings">
-              <span className="muted small">Portionen</span>
-              <input
-                type="number"
-                min={0.5}
-                step={0.5}
-                value={previewServings}
-                onChange={(event) => {
-                  const value = Number.parseFloat(event.target.value.replace(',', '.'))
-                  if (Number.isFinite(value) && value > 0) {
-                    setPreviewServings(Math.round(value * 10) / 10)
-                  }
-                }}
-                aria-label="Portionen für die Vorschau"
+            <label className="field">
+              <span className="field-label">Beschreibung</span>
+              <textarea
+                rows={3}
+                value={draft.description}
+                onChange={(event) => update('description', event.target.value)}
+                placeholder="Kurze Einordnung, Herkunft oder Besonderheiten"
               />
             </label>
-          </div>
-          {previewOriginalServings === null ? (
-            <p className="notice">
-              Die Originalportionen des Rezepts sind unklar. Verknüpfte Mengen bleiben in der
-              Vorschau unverändert, bis eine eindeutige Portionszahl angegeben ist.
-            </p>
-          ) : null}
-          {previewInstructions.length === 0 ? (
-            <p className="muted small">Noch keine Zubereitungsschritte.</p>
-          ) : (
-            <ol className="reference-preview-steps">
-              {preview.map((entry, index) => (
-                <li key={entry.instruction.id}>
-                  <span className="reference-preview-number">{index + 1}</span>
-                  <div className="reference-preview-text">
-                    <Markdown text={entry.text} />
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )}
-        </div>
-      </section>
 
-      <section className="panel">
-        <h2>Bilder</h2>
-        <p className="muted small">
-          Das erste Bild ist das Hauptbild / die Vorschau. Maximal 10 MB pro Bild.
-        </p>
-        {imageError ? <div className="notice danger">{imageError}</div> : null}
-        <div className="editor-images">
-          {images.map((image, index) => (
-            <figure key={image.id} className="editor-image">
-              <EditorThumb image={image} />
-              <figcaption>
-                {index === 0 ? 'Hauptbild' : `Bild ${index + 1}`}
-                <span className="editor-image-actions">
-                  {index > 0 ? (
-                    <button type="button" className="button" onClick={() => makePrimary(index)}>
-                      Als Hauptbild
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="button danger-quiet"
-                    onClick={() => onImagesChange(images.filter((entry) => entry.id !== image.id))}
-                  >
-                    Entfernen
-                  </button>
-                </span>
-              </figcaption>
-            </figure>
-          ))}
-          <label className="file-picker">
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={(event: ChangeEvent<HTMLInputElement>) => void handleImages(event.target.files)}
+            <div className="editor-meta-grid">
+              <label className="field">
+                <span className="field-label">Portionen</span>
+                <input
+                  value={draft.servingsText}
+                  onChange={(event) => update('servingsText', event.target.value)}
+                  placeholder="z. B. 4 Portionen"
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">Gesamtzeit</span>
+                <input
+                  value={draft.totalTime}
+                  onChange={(event) => update('totalTime', event.target.value)}
+                  placeholder="z. B. 50 min"
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">Zubereitungszeit</span>
+                <input
+                  value={draft.prepTime}
+                  onChange={(event) => update('prepTime', event.target.value)}
+                  placeholder="z. B. 20 min"
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">Kochzeit</span>
+                <input
+                  value={draft.cookTime}
+                  onChange={(event) => update('cookTime', event.target.value)}
+                  placeholder="z. B. 30 min"
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="panel editor-panel">
+            <div className="editor-panel-head">
+              <h2>Zutaten</h2>
+              <span className="editor-count">
+                {ingredientCount} {ingredientCount === 1 ? 'Zutat' : 'Zutaten'}
+              </span>
+            </div>
+            <IngredientEditor
+              ingredients={draft.ingredients}
+              onChange={(ingredients) => update('ingredients', ingredients)}
             />
-            Bilder hinzufügen
-          </label>
-        </div>
-      </section>
+          </section>
 
-      {children}
+          <section className="panel editor-panel">
+            <div className="editor-panel-head">
+              <h2>Zubereitung</h2>
+              <span className="editor-count">
+                {stepCount} {stepCount === 1 ? 'Schritt' : 'Schritte'}
+              </span>
+            </div>
+
+            <div className="step-editor" role="list" aria-label="Zubereitungsschritte">
+              {draft.steps.map((step, index) => (
+                <article className="step-card" key={step.key} role="listitem">
+                  <header className="step-card-head">
+                    <span className="step-number">{index + 1}</span>
+                    <span className="step-card-title">Schritt {index + 1}</span>
+                    <div
+                      className="step-actions"
+                      role="group"
+                      aria-label={`Aktionen für Schritt ${index + 1}`}
+                    >
+                      <button
+                        type="button"
+                        className="button quiet"
+                        onClick={() => moveStep(index, -1)}
+                        disabled={index === 0}
+                        aria-label={`Schritt ${index + 1} nach oben`}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="button quiet"
+                        onClick={() => moveStep(index, 1)}
+                        disabled={index === stepCount - 1}
+                        aria-label={`Schritt ${index + 1} nach unten`}
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        className="button danger-quiet"
+                        onClick={() =>
+                          update(
+                            'steps',
+                            draft.steps.filter((entry) => entry.key !== step.key),
+                          )
+                        }
+                        aria-label={`Schritt ${index + 1} entfernen`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </header>
+                  <IngredientReferenceEditor
+                    step={step}
+                    stepIndex={index}
+                    ingredients={previewIngredients}
+                    instructions={referenceInstructions}
+                    onChange={(next) => updateStep(step.key, next)}
+                  />
+                </article>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className="button editor-add-button"
+              onClick={() =>
+                update('steps', [
+                  ...draft.steps,
+                  { key: randomId(), text: '', references: [] },
+                ])
+              }
+            >
+              <span aria-hidden="true">+</span> Schritt hinzufügen
+            </button>
+
+            <details className="editor-preview">
+              <summary>
+                <span>Vorschau der Zubereitung</span>
+                <span className="editor-preview-meta">
+                  {previewInstructions.length}{' '}
+                  {previewInstructions.length === 1 ? 'Schritt' : 'Schritte'}
+                </span>
+              </summary>
+              <div className="editor-preview-body">
+                <div className="reference-preview-head">
+                  <p className="muted small">
+                    Markdown wird in der Vorschau und in der Kochansicht dargestellt.
+                  </p>
+                  <label className="reference-preview-servings">
+                    <span className="muted small">Portionen</span>
+                    <input
+                      type="number"
+                      min={0.5}
+                      step={0.5}
+                      value={previewServings}
+                      onChange={(event) => {
+                        const value = Number.parseFloat(event.target.value.replace(',', '.'))
+                        if (Number.isFinite(value) && value > 0) {
+                          setPreviewServings(Math.round(value * 10) / 10)
+                        }
+                      }}
+                      aria-label="Portionen für die Vorschau"
+                    />
+                  </label>
+                </div>
+                {previewOriginalServings === null ? (
+                  <p className="notice">
+                    Die Originalportionen des Rezepts sind unklar. Verknüpfte Mengen bleiben in der
+                    Vorschau unverändert, bis eine eindeutige Portionszahl angegeben ist.
+                  </p>
+                ) : null}
+                {previewInstructions.length === 0 ? (
+                  <p className="muted small">Noch keine Zubereitungsschritte.</p>
+                ) : (
+                  <ol className="reference-preview-steps">
+                    {preview.map((entry, index) => (
+                      <li key={entry.instruction.id}>
+                        <span className="reference-preview-number">{index + 1}</span>
+                        <div className="reference-preview-text">
+                          <Markdown text={entry.text} />
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            </details>
+          </section>
+        </div>
+
+        <aside className="editor-side-column" aria-label="Rezeptdetails">
+          <section className="panel editor-panel">
+            <div className="editor-panel-head">
+              <h2>Kategorien &amp; Tags</h2>
+            </div>
+            <div className="form-grid category-grid">
+              <TagEditor
+                label="Küche"
+                values={draft.cuisine}
+                onChange={(values) => update('cuisine', values)}
+                placeholder="z. B. indisch, italienisch"
+              />
+              <TagEditor
+                label="Gerichtstyp"
+                values={draft.dishType}
+                onChange={(values) => update('dishType', values)}
+                placeholder="z. B. Curry, Pasta, Suppe"
+              />
+              <TagEditor
+                label="Tags"
+                values={draft.tags}
+                onChange={(values) => update('tags', values)}
+                placeholder="z. B. schnell, Meal Prep, Gäste"
+              />
+              <label className="field">
+                <span className="field-label">Aufwand</span>
+                <input
+                  list="effort-options"
+                  value={draft.effort}
+                  onChange={(event) => update('effort', event.target.value)}
+                  placeholder="z. B. einfach"
+                />
+                <datalist id="effort-options">
+                  {EFFORT_OPTIONS.map((option) => (
+                    <option key={option} value={option} />
+                  ))}
+                </datalist>
+              </label>
+            </div>
+          </section>
+
+          <section className="panel editor-panel">
+            <div className="editor-panel-head">
+              <h2>Bilder</h2>
+              <span className="editor-count">
+                {images.length} {images.length === 1 ? 'Bild' : 'Bilder'}
+              </span>
+            </div>
+            <p className="muted small">
+              Das erste Bild ist das Hauptbild. Maximal 10 MB pro Bild.
+            </p>
+            {imageError ? (
+              <div className="notice danger" role="alert">
+                {imageError}
+              </div>
+            ) : null}
+            <div className="editor-images">
+              {images.map((image, index) => (
+                <figure
+                  key={image.id}
+                  className={`editor-image${index === 0 ? ' is-primary' : ''}`}
+                >
+                  <EditorThumb
+                    image={image}
+                    alt={index === 0 ? 'Hauptbild des Rezepts' : `Rezeptbild ${index + 1}`}
+                  />
+                  {index === 0 ? <span className="editor-image-badge">Hauptbild</span> : null}
+                  <figcaption>
+                    <span>{index === 0 ? 'Vorschau' : `Bild ${index + 1}`}</span>
+                    <span className="editor-image-actions">
+                      {index > 0 ? (
+                        <button
+                          type="button"
+                          className="button quiet"
+                          onClick={() => makePrimary(index)}
+                        >
+                          Als Hauptbild
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="button danger-quiet"
+                        onClick={() =>
+                          onImagesChange(images.filter((entry) => entry.id !== image.id))
+                        }
+                      >
+                        Entfernen
+                      </button>
+                    </span>
+                  </figcaption>
+                </figure>
+              ))}
+              <label className="file-picker editor-image-add">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    void handleImages(event.target.files)
+                  }
+                />
+                <span className="file-picker-plus" aria-hidden="true">
+                  +
+                </span>
+                <span>Bilder hinzufügen</span>
+              </label>
+            </div>
+          </section>
+
+          <section className="panel editor-panel editor-advanced">
+            <details>
+              <summary>
+                <span className="editor-disclosure-title" role="heading" aria-level={2}>
+                  Erweiterte Rezeptinformationen
+                </span>
+                <span className="editor-disclosure-hint">
+                  Quelle, Notizen und importierte Kategorien
+                </span>
+              </summary>
+              <div className="editor-disclosure-body">
+                <div className="form-grid">
+                  <label className="field span-2">
+                    <span className="field-label">Quelle / Link</span>
+                    <input
+                      value={draft.sourceUrl}
+                      onChange={(event) => update('sourceUrl', event.target.value)}
+                    />
+                  </label>
+                  <label className="field span-2">
+                    <span className="field-label">Notizen</span>
+                    <textarea
+                      rows={4}
+                      value={draft.notes}
+                      onChange={(event) => update('notes', event.target.value)}
+                    />
+                  </label>
+                </div>
+                <p className="muted small editor-imported-note">
+                  Importierte Kategorien: {categoriesNote || '—'}
+                </p>
+              </div>
+            </details>
+          </section>
+
+          {children}
+        </aside>
+      </div>
     </form>
   )
 }
