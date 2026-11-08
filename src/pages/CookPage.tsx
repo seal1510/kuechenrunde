@@ -173,7 +173,7 @@ export function CookStepView({
 
   const currentIndex = clampCookStepIndex(rawCurrentIndex, steps.length)
   const current = rendered[currentIndex]
-  const stepText = current?.text ?? steps[currentIndex]?.text ?? ''
+  const stepText = current?.annotatedText ?? current?.text ?? steps[currentIndex]?.text ?? ''
   const relevantIngredients = (current?.references ?? []).filter(
     (reference) => reference.ingredient !== null,
   )
@@ -307,7 +307,13 @@ export function CookOverview({
                       {isCurrent ? <span className="cook-current-badge">Aktuell</span> : null}
                     </div>
                     <div className="cook-overview-step-text">
-                      <Markdown text={rendered[index]?.text ?? step.text} />
+                      <Markdown
+                        text={
+                          rendered[index]?.annotatedText ??
+                          rendered[index]?.text ??
+                          step.text
+                        }
+                      />
                     </div>
                     <div className="cook-overview-step-action">
                       <button
@@ -410,6 +416,7 @@ export function CookPage({
             originalServings,
             targetServings,
             autoScale: true,
+            linkIngredients: true,
           })
         : [],
     [recipe, steps, originalServings, targetServings],

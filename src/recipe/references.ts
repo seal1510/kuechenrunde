@@ -12,6 +12,10 @@
  * touched. Amounts are parsed and scaled with the existing `domain/scaling`
  * logic. There is no global search-and-replace, so temperatures, times, step
  * numbers and every other unlinked number stay untouched.
+ *
+ * Cook mode may also highlight ingredient mentions without an explicit amount.
+ * A badge with the recipe total is only added when exactly one safe mention
+ * exists and no explicit or qualitative amount context is present.
  */
 
 import {
@@ -42,11 +46,25 @@ export interface RenderedReference {
   issue: ReferenceIssue | null
 }
 
+export interface IngredientMention {
+  ingredient: Ingredient
+  /** Range in the rendered instruction text. */
+  start: number
+  end: number
+  /** True when an explicit or qualitative amount context is already present. */
+  hasAmount: boolean
+  /** Safe whole-recipe amount for display, or null when it must stay hidden. */
+  amountText: string | null
+}
+
 export interface RenderedInstruction {
   instruction: Instruction
-  /** Instruction text with only resolved anchors replaced. */
+  /** Instruction text with resolved anchors replaced, without display markup. */
   text: string
+  /** Display text with safe inline ingredient highlighting and optional badges. */
+  annotatedText: string
   references: RenderedReference[]
+  mentions: IngredientMention[]
 }
 
 export interface QuantityPrefix {
@@ -471,6 +489,11 @@ interface AutoCandidate {
   value: string
 }
 
+interface InstructionReplacement extends AnchorRange {
+  value: string
+  ingredientId: string
+}
+
 /**
  * Quantities are only considered when they sit directly before an ingredient
  * name. This keeps temperatures, times, step numbers and geometry out of the
@@ -623,8 +646,20 @@ function normalizeMatchWord(value: string): string {
 
 /** Same length as the source so replacement offsets stay valid. */
 function searchableInstructionText(text: string): string {
+  const blank = (value: string) => ' '.repeat(value.length)
   return text
-    .replace(/\]\([^)]*\)/g, (match) => `]${' '.repeat(Math.max(0, match.length - 1))}`)
+    // Code must never receive ingredient markup or amount replacements.
+    .replace(/```[\s\S]*?```/g, blank)
+    .replace(/~~~[\s\S]*?~~~/g, blank)
+    .replace(/`[^`\n]*`/g, blank)
+    // Image alt text is not visible prose; link destinations are not prose.
+    .replace(/!\[[^\]]*\]\((?:[^()]|\([^()]*\))*\)/g, blank)
+    .replace(/\]\((?:[^()]|\([^()]*\))*\)/g, (match) =>
+      `]${' '.repeat(Math.max(0, match.length - 1))}`,
+    )
+    // Raw HTML tags (including attributes) are never part of the matched text.
+    .replace(/<[^>]*>/g, blank)
+    .replace(/^\[[^\]]+\]:.*$/gm, blank)
     .replace(/[*_`~]/g, ' ')
 }
 
@@ -834,21 +869,15 @@ function findAutoQuantityBefore(
   return null
 }
 
-function buildAutoMatchers(ingredients: readonly Ingredient[]): AutoIngredientMatcher[] {
-  // A phrase that belongs to more than one ingredient is ambiguous, even when
-  // only one of them has a usable quantity. Such phrases are never auto-scaled.
-  const phrasesById = new Map<string, string[][]>()
-  const phraseOwners = new Map<string, Set<string>>()
-  for (const ingredient of ingredients) {
-    const variants = ingredientNamePhrases(ingredient.name)
-    if (variants.length === 0) continue
-    phrasesById.set(ingredient.id, variants)
-    for (const variant of variants) {
-      const key = variant.join(' ')
-      const owners = phraseOwners.get(key) ?? new Set<string>()
-      owners.add(ingredient.id)
-      phraseOwners.set(key, owners)
-    }
+function buildAutoMatchers(
+  ingredients: readonly Ingredient[],
+  phrases: readonly MentionPhrase[],
+): AutoIngredientMatcher[] {
+  const variantsById = new Map<string, string[][]>()
+  for (const phrase of phrases) {
+    const variants = variantsById.get(phrase.ingredient.id) ?? []
+    variants.push(phrase.words)
+    variantsById.set(phrase.ingredient.id, variants)
   }
 
   const matchers: AutoIngredientMatcher[] = []
@@ -863,9 +892,7 @@ function buildAutoMatchers(ingredients: readonly Ingredient[]): AutoIngredientMa
     // An unknown unit cannot be compared reliably, so leave the text alone.
     if (rawUnit && unit === null) continue
 
-    const variants = (phrasesById.get(ingredient.id) ?? []).filter(
-      (variant) => phraseOwners.get(variant.join(' '))?.size === 1,
-    )
+    const variants = variantsById.get(ingredient.id) ?? []
     if (variants.length === 0) continue
     matchers.push({
       ingredientId: ingredient.id,
@@ -883,7 +910,7 @@ function automaticReplacements(
   factor: number,
   blockedIngredientIds: ReadonlySet<string>,
   blockedRanges: readonly AnchorRange[],
-): Array<AnchorRange & { value: string }> {
+): InstructionReplacement[] {
   const candidates: AutoCandidate[] = []
   for (const matcher of matchers) {
     if (blockedIngredientIds.has(matcher.ingredientId)) continue
@@ -967,7 +994,385 @@ function automaticReplacements(
   return selected.map((candidate) => ({
     ...candidate.quantityRange,
     value: candidate.value,
+    ingredientId: candidate.ingredientId,
   }))
+}
+
+interface MentionPhrase {
+  words: string[]
+  ingredient: Ingredient
+  exact: boolean
+}
+
+interface MentionCandidate extends AnchorRange {
+  ingredient: Ingredient
+  exact: boolean
+}
+
+/** Short compound heads that are common enough to be safe standalone names. */
+const SHORT_HEAD_WORDS = new Set([
+  'öl',
+  'oel',
+  'ei',
+  'eier',
+  'salz',
+  'reis',
+  'mark',
+  'brot',
+  'wein',
+  'saft',
+  'tee',
+  'dill',
+  'fett',
+  'fond',
+  'sud',
+  'mus',
+  'korn',
+  'gin',
+  'rum',
+  'obst',
+  'pilz',
+])
+
+const MENTION_MEAT_CUES = [
+  'fleisch',
+  'filet',
+  'brust',
+  'hack',
+  'schnitzel',
+  'hähnchen',
+  'haehnchen',
+  'huhn',
+  'hühner',
+  'huehner',
+  'rind',
+  'rinder',
+  'schwein',
+  'schweine',
+  'pute',
+  'puten',
+  'lamm',
+  'kalb',
+  'wurst',
+  'speck',
+  'schinken',
+  'geflügel',
+  'gefluegel',
+]
+
+const MENTION_FISH_CUES = [
+  'fisch',
+  'lachs',
+  'thunfisch',
+  'forelle',
+  'garnele',
+  'garnelen',
+  'meeresfrüchte',
+  'meeresfruechte',
+  'kabeljau',
+  'dorsch',
+  'hering',
+  'sardine',
+  'sardinen',
+  'makrele',
+]
+
+const MENTION_POULTRY_CUES = [
+  'hähnchen',
+  'haehnchen',
+  'huhn',
+  'hühner',
+  'huehner',
+  'geflügel',
+  'gefluegel',
+]
+
+const MENTION_NON_FOOD_HINTS = [
+  'brühe',
+  'bruehe',
+  'fond',
+  'suppe',
+  'sud',
+  'gewürz',
+  'gewuerz',
+  'pulver',
+  'sauce',
+  'soße',
+  'sosse',
+  'öl',
+  'oel',
+  'essig',
+  'eiweiß',
+  'eiweiss',
+  'eigelb',
+  'eidotter',
+]
+
+function containsCue(value: string, cues: readonly string[]): boolean {
+  return cues.some((cue) => value.includes(cue))
+}
+
+/**
+ * Conservative shortened names for compound ingredient names. The head noun
+ * or a short compound head may be used only when the phrase is unique across
+ * the whole recipe. This is what makes "Brühe" point at "Hühnerbrühe".
+ */
+function shortenedNamePhrases(name: string): string[][] {
+  const variants = new Map<string, string[]>()
+  const addWord = (word: string) => {
+    if (word.length < 2) return
+    for (const variantWords of lastWordVariants([word])) {
+      const variant = variantWords[0]
+      if (variant) variants.set(variant, [variant])
+    }
+  }
+
+  for (const phrase of ingredientNamePhrases(name)) {
+    const last = phrase[phrase.length - 1]
+    if (!last) continue
+
+    if (phrase.length > 1 && (last.length >= 3 || SHORT_HEAD_WORDS.has(last))) {
+      addWord(last)
+    }
+
+    if (last.length >= 9) {
+      for (let start = 1; start < last.length - 3; start += 1) {
+        const suffix = last.slice(start)
+        if (suffix.length >= 5) addWord(suffix)
+      }
+    }
+
+    if (last.length >= 6) {
+      for (const head of SHORT_HEAD_WORDS) {
+        if (last.length > head.length && last.endsWith(head)) addWord(head)
+      }
+    }
+  }
+
+  const normalizedName = nameWords(name).join(' ')
+  const looksLikeEgg = /(?:ei|eier|eiern)$/.test(normalizedName)
+  if (!looksLikeEgg && !containsCue(normalizedName, MENTION_NON_FOOD_HINTS)) {
+    if (containsCue(normalizedName, MENTION_FISH_CUES)) {
+      addWord('fisch')
+    } else {
+      if (containsCue(normalizedName, MENTION_MEAT_CUES)) addWord('fleisch')
+      if (containsCue(normalizedName, MENTION_POULTRY_CUES)) {
+        addWord('hähnchen')
+        addWord('huhn')
+        addWord('geflügel')
+      }
+    }
+  }
+
+  return [...variants.values()]
+}
+
+function buildMentionPhrases(ingredients: readonly Ingredient[]): MentionPhrase[] {
+  const ingredientById = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]))
+  const exactWords = new Map<string, string[]>()
+  const exactOwners = new Map<string, Set<string>>()
+
+  for (const ingredient of ingredients) {
+    for (const words of ingredientNamePhrases(ingredient.name)) {
+      const key = words.join(' ')
+      if (!exactWords.has(key)) exactWords.set(key, words)
+      const owners = exactOwners.get(key) ?? new Set<string>()
+      owners.add(ingredient.id)
+      exactOwners.set(key, owners)
+    }
+  }
+
+  const exactKeys = new Set(exactWords.keys())
+  const shortenedWords = new Map<string, string[]>()
+  const shortenedOwners = new Map<string, Set<string>>()
+  for (const ingredient of ingredients) {
+    for (const words of shortenedNamePhrases(ingredient.name)) {
+      const key = words.join(' ')
+      // Exact ingredient names always win over a shortened form of another
+      // ingredient, even if that exact name is itself ambiguous.
+      if (exactKeys.has(key)) continue
+      if (!shortenedWords.has(key)) shortenedWords.set(key, words)
+      const owners = shortenedOwners.get(key) ?? new Set<string>()
+      owners.add(ingredient.id)
+      shortenedOwners.set(key, owners)
+    }
+  }
+
+  const phrases: MentionPhrase[] = []
+  for (const [key, owners] of exactOwners) {
+    if (owners.size !== 1) continue
+    const ingredientId = [...owners][0]
+    const ingredient = ingredientId ? ingredientById.get(ingredientId) : undefined
+    const words = exactWords.get(key)
+    if (ingredient && words) phrases.push({ words, ingredient, exact: true })
+  }
+  for (const [key, owners] of shortenedOwners) {
+    if (owners.size !== 1) continue
+    const ingredientId = [...owners][0]
+    const ingredient = ingredientId ? ingredientById.get(ingredientId) : undefined
+    const words = shortenedWords.get(key)
+    if (ingredient && words) phrases.push({ words, ingredient, exact: false })
+  }
+  return phrases
+}
+
+function containsSentenceBoundary(value: string): number {
+  return value.search(/[.!?;\n]/)
+}
+
+const SPELLED_QUANTITY_RE =
+  /\b(?:zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|halb|halbe|halben|halber|halbes|viertel|dreiviertel|anderthalb|eineinhalb)\b/iu
+
+const INDEFINITE_QUANTITY_BEFORE_RE =
+  /(?:^|[^\p{L}])(?:ein|eine|einen|einem|einer|eines)\s+$/iu
+
+function hasQuantityInClause(value: string): boolean {
+  AUTO_QUANTITY_RE.lastIndex = 0
+  return AUTO_QUANTITY_RE.test(value) || SPELLED_QUANTITY_RE.test(value)
+}
+
+const QUALITATIVE_CONTEXT_RE =
+  /(?:^|[^\p{L}])(?:nach\s+geschmack|nach\s+belieben|nach\s+bedarf|nach\s+gefühl|nach\s+gefuehl|nach\s+augenmaß|nach\s+augenmass|abschmecken|zum\s+abschmecken|optional|garnieren|zum\s+garnieren|bestreichen|zum\s+bestreichen|bestreuen|zum\s+bestreuen|dekorieren|zum\s+dekorieren|servieren|zum\s+servieren|etwas|ein\s+paar|einige|wenig(?:e|er|es|en)?)(?![\p{L}])/iu
+
+function clauseAroundMention(searchText: string, start: number, end: number): string {
+  const beforeWindow = searchText.slice(Math.max(0, start - 64), start)
+  const lastBoundary = Math.max(
+    beforeWindow.lastIndexOf('.'),
+    beforeWindow.lastIndexOf('!'),
+    beforeWindow.lastIndexOf('?'),
+    beforeWindow.lastIndexOf(';'),
+    beforeWindow.lastIndexOf('\n'),
+  )
+  const beforeClause = beforeWindow.slice(lastBoundary + 1)
+
+  const afterWindow = searchText.slice(end, Math.min(searchText.length, end + 64))
+  const firstBoundary = containsSentenceBoundary(afterWindow)
+  const afterClause = firstBoundary === -1 ? afterWindow : afterWindow.slice(0, firstBoundary)
+  return `${beforeClause} ${afterClause}`
+}
+
+/**
+ * A mention already has an amount when a number or a qualitative amount hint
+ * is nearby in the same clause. This deliberately over-approximates:
+ * suppressing a total badge is safe.
+ */
+function hasAmountContextNearMention(
+  searchText: string,
+  start: number,
+  end: number,
+): boolean {
+  const beforeMention = searchText.slice(Math.max(0, start - 24), start)
+  if (INDEFINITE_QUANTITY_BEFORE_RE.test(beforeMention)) return true
+
+  const clause = clauseAroundMention(searchText, start, end)
+  return hasQuantityInClause(clause) || QUALITATIVE_CONTEXT_RE.test(clause)
+}
+
+function detectMentions(
+  searchText: string,
+  phrases: readonly MentionPhrase[],
+): MentionCandidate[] {
+  const candidates: MentionCandidate[] = []
+  for (const phrase of phrases) {
+    for (const range of nameMatchRanges(searchText, phrase.words)) {
+      candidates.push({
+        ...range,
+        ingredient: phrase.ingredient,
+        exact: phrase.exact,
+      })
+    }
+  }
+
+  const deduped = new Map<string, MentionCandidate>()
+  for (const candidate of candidates) {
+    const key = `${candidate.ingredient.id}:${candidate.start}:${candidate.end}`
+    const existing = deduped.get(key)
+    if (!existing || (candidate.exact && !existing.exact)) {
+      deduped.set(key, candidate)
+    }
+  }
+
+  const byRange = new Map<string, MentionCandidate[]>()
+  for (const candidate of deduped.values()) {
+    const key = `${candidate.start}:${candidate.end}`
+    const group = byRange.get(key)
+    if (group) group.push(candidate)
+    else byRange.set(key, [candidate])
+  }
+  const ambiguous = new Set<string>()
+  for (const [key, group] of byRange) {
+    if (new Set(group.map((candidate) => candidate.ingredient.id)).size > 1) {
+      ambiguous.add(key)
+    }
+  }
+
+  const selected: MentionCandidate[] = []
+  const sorted = [...deduped.values()]
+    .filter((candidate) => !ambiguous.has(`${candidate.start}:${candidate.end}`))
+    .sort((a, b) => {
+      if (a.exact !== b.exact) return a.exact ? -1 : 1
+      return b.end - b.start - (a.end - a.start)
+    })
+
+  for (const candidate of sorted) {
+    if (selected.some((entry) => overlaps(candidate, [entry]))) continue
+    selected.push(candidate)
+  }
+
+  return selected.sort((a, b) => a.start - b.start)
+}
+
+function scaledTotalAmountText(
+  ingredient: Ingredient,
+  factor: number | null,
+): string | null {
+  if (factor === null) return null
+  const quantityText = ingredientQuantityText(ingredient)
+  if (typeof quantityText !== 'string' || !isStrictQuantityText(quantityText)) {
+    return null
+  }
+  // Do not turn an ambiguous thousands separator into a precise total.
+  if (/\d{1,3}(?:\.\d{3})+/.test(quantityText)) return null
+  const scaled = scaleQuantityText(quantityText, factor)
+  if (scaled === null) return null
+  const unit = ingredient.unit?.trim() ?? ''
+  return [scaled, unit].filter(Boolean).join(' ')
+}
+
+function escapeBadgeText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/#/g, '&#35;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/\\/g, '&#92;')
+    .replace(/`/g, '&#96;')
+    .replace(/\*/g, '&#42;')
+    .replace(/_/g, '&#95;')
+    .replace(/\[/g, '&#91;')
+    .replace(/\]/g, '&#93;')
+    .replace(/\|/g, '&#124;')
+    .replace(/~/g, '&#126;')
+}
+
+function annotateInstructionText(
+  text: string,
+  mentions: readonly IngredientMention[],
+): string {
+  let annotated = text
+  for (const mention of [...mentions].sort((a, b) => b.start - a.start)) {
+    const label = text.slice(mention.start, mention.end)
+    const amount = mention.amountText
+    const badge = amount
+      ? `<span class="cook-ingredient-badge" title="Rezeptgesamtmenge" aria-label="Rezeptgesamtmenge: ${escapeBadgeText(amount)}">${escapeBadgeText(amount)} gesamt</span>`
+      : ''
+    const wrapped = `<span class="cook-ingredient-mention">${label}${badge}</span>`
+    annotated =
+      annotated.slice(0, mention.start) + wrapped + annotated.slice(mention.end)
+  }
+  return annotated
 }
 
 export interface RenderOptions {
@@ -976,15 +1381,18 @@ export interface RenderOptions {
   targetServings: number
   /** Cook mode opts into conservative automatic detection of instruction amounts. */
   autoScale?: boolean
+  /** Cook mode opts into display-only ingredient highlighting inside instructions. */
+  linkIngredients?: boolean
 }
 
 /**
  * Render all instruction texts for one portion count. Explicit references win
  * and are never auto-scaled again. When `autoScale` is enabled (cook mode),
  * every other ingredient amount that sits directly before a matching
- * ingredient name is replaced through the same shared quantity parser. A
- * missing ingredient, unknown amount, unsafe remainder, ambiguous name or
- * stale anchor leaves the original text exactly as it is.
+ * ingredient name is replaced through the same shared quantity parser.
+ * `linkIngredients` additionally adds display-only, conservative ingredient
+ * highlighting. A missing ingredient, unknown amount, unsafe remainder,
+ * ambiguous name or stale anchor leaves the original text exactly as it is.
  */
 export function renderRecipeInstructions(
   instructions: readonly Instruction[],
@@ -1002,18 +1410,22 @@ export function renderRecipeInstructions(
       ? options.targetServings / options.originalServings
       : null
   const usageByIngredient = new Map<string, UsageState>()
+  const mentionPhrases =
+    options.autoScale || options.linkIngredients ? buildMentionPhrases(ingredients) : []
   const autoMatchers =
     options.autoScale && factor !== null && factor !== 1
-      ? buildAutoMatchers(ingredients)
+      ? buildAutoMatchers(ingredients, mentionPhrases)
       : []
+  const manuallyReferencedIngredientIds = new Set<string>()
+  const automaticallyScaledIngredientIds = new Set<string>()
 
-  return instructions.map((instruction, instructionIndex) => {
+  const base = instructions.map((instruction, instructionIndex) => {
     const text = instruction.text
     const references = normalizeReferenceAnchors(text, instruction.references ?? [])
     const used: AnchorRange[] = []
     const manualRanges: AnchorRange[] = []
     const manualIngredientIds = new Set<string>()
-    const replacements: Array<AnchorRange & { value: string }> = []
+    const replacements: InstructionReplacement[] = []
     const renderedReferences: RenderedReference[] = []
 
     for (const [referenceIndex, reference] of references.entries()) {
@@ -1021,6 +1433,7 @@ export function renderRecipeInstructions(
       const ingredient = ingredientById.get(reference.ingredientId) ?? null
       if (!ingredient) issues.push('missing-ingredient')
       manualIngredientIds.add(reference.ingredientId)
+      manuallyReferencedIngredientIds.add(reference.ingredientId)
 
       const usage = usageByIngredient.get(reference.ingredientId) ?? newUsage()
       if (!usageByIngredient.has(reference.ingredientId)) {
@@ -1036,19 +1449,19 @@ export function renderRecipeInstructions(
             instructionIndex,
             referenceIndex: referenceIndex + 1,
           })
-        const base = baseAmountFor(ingredient, reference, usage, unsafeRemainder)
-        if (base.issue) issues.push(base.issue)
-        amountText = base.text
-        if (!base.text && !base.issue) issues.push('missing-quantity')
-        if (base.text && !isStrictQuantityText(base.text)) {
+        const baseAmount = baseAmountFor(ingredient, reference, usage, unsafeRemainder)
+        if (baseAmount.issue) issues.push(baseAmount.issue)
+        amountText = baseAmount.text
+        if (!baseAmount.text && !baseAmount.issue) issues.push('missing-quantity')
+        if (baseAmount.text && !isStrictQuantityText(baseAmount.text)) {
           issues.push('missing-quantity')
           amountText = null
-        } else if (base.text && factor !== null) {
-          if (base.scaledFromRemainder !== undefined) {
-            amountText = formatScaledNumber(base.scaledFromRemainder * factor)
+        } else if (baseAmount.text && factor !== null) {
+          if (baseAmount.scaledFromRemainder !== undefined) {
+            amountText = formatScaledNumber(baseAmount.scaledFromRemainder * factor)
             scaled = true
           } else {
-            const scaledText = scaleQuantityText(base.text, factor)
+            const scaledText = scaleQuantityText(baseAmount.text, factor)
             if (scaledText !== null) {
               amountText = scaledText
               scaled = true
@@ -1056,7 +1469,7 @@ export function renderRecipeInstructions(
               issues.push('missing-quantity')
             }
           }
-        } else if (base.text) {
+        } else if (baseAmount.text) {
           issues.push(
             options.originalServings === null
               ? 'unknown-original-servings'
@@ -1071,7 +1484,11 @@ export function renderRecipeInstructions(
 
       if (scaled && anchor && !overlaps(anchor, used)) {
         used.push(anchor)
-        replacements.push({ ...anchor, value: amountText ?? reference.anchor })
+        replacements.push({
+          ...anchor,
+          value: amountText ?? reference.anchor,
+          ingredientId: reference.ingredientId,
+        })
       } else if (scaled && anchor) {
         issues.push('overlapping-anchor')
       }
@@ -1088,15 +1505,17 @@ export function renderRecipeInstructions(
     }
 
     if (autoMatchers.length > 0 && factor !== null) {
-      replacements.push(
-        ...automaticReplacements(
-          searchableInstructionText(text),
-          autoMatchers,
-          factor,
-          manualIngredientIds,
-          manualRanges,
-        ),
+      const automatic = automaticReplacements(
+        searchableInstructionText(text),
+        autoMatchers,
+        factor,
+        manualIngredientIds,
+        manualRanges,
       )
+      for (const replacement of automatic) {
+        automaticallyScaledIngredientIds.add(replacement.ingredientId)
+      }
+      replacements.push(...automatic)
     }
 
     let renderedText = text
@@ -1108,6 +1527,62 @@ export function renderRecipeInstructions(
     }
 
     return { instruction, text: renderedText, references: renderedReferences }
+  })
+
+  if (!options.linkIngredients) {
+    return base.map((entry) => ({
+      ...entry,
+      annotatedText: entry.text,
+      mentions: [],
+    }))
+  }
+
+  const withMentions = base.map((entry) => {
+    const searchText = searchableInstructionText(entry.text)
+    const mentions: IngredientMention[] = detectMentions(searchText, mentionPhrases).map(
+      (candidate) => ({
+        ingredient: candidate.ingredient,
+        start: candidate.start,
+        end: candidate.end,
+        hasAmount: hasAmountContextNearMention(searchText, candidate.start, candidate.end),
+        amountText: null,
+      }),
+    )
+    return { ...entry, mentions }
+  })
+
+  const mentionCounts = new Map<string, number>()
+  const ingredientsWithAmount = new Set<string>([
+    ...manuallyReferencedIngredientIds,
+    ...automaticallyScaledIngredientIds,
+  ])
+  for (const entry of withMentions) {
+    for (const mention of entry.mentions) {
+      mentionCounts.set(
+        mention.ingredient.id,
+        (mentionCounts.get(mention.ingredient.id) ?? 0) + 1,
+      )
+      if (mention.hasAmount) ingredientsWithAmount.add(mention.ingredient.id)
+    }
+  }
+
+  return withMentions.map((entry) => {
+    const mentions = entry.mentions.map<IngredientMention>((mention) => {
+      const canShowTotal =
+        mentionCounts.get(mention.ingredient.id) === 1 &&
+        !ingredientsWithAmount.has(mention.ingredient.id)
+      return {
+        ...mention,
+        amountText: canShowTotal ? scaledTotalAmountText(mention.ingredient, factor) : null,
+      }
+    })
+    return {
+      instruction: entry.instruction,
+      text: entry.text,
+      annotatedText: annotateInstructionText(entry.text, mentions),
+      references: entry.references,
+      mentions,
+    }
   })
 }
 

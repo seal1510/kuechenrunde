@@ -47,11 +47,13 @@ function render(
   originalServings: number | null,
   targetServings: number,
   autoScale = true,
+  linkIngredients = true,
 ) {
   return renderRecipeInstructions(instructions, ingredients, {
     originalServings,
     targetServings,
     autoScale,
+    linkIngredients,
   })
 }
 
@@ -687,6 +689,8 @@ describe('automatic ingredient amount scaling', () => {
     )
 
     expect(rendered[0]?.text).toBe('500 g Hähnchen anbraten.')
+    expect(rendered[0]?.mentions).toEqual([])
+    expect(rendered[0]?.annotatedText).toBe('500 g Hähnchen anbraten.')
   })
 
   it('never mutates the stored instruction or ingredient', () => {
@@ -704,5 +708,393 @@ describe('automatic ingredient amount scaling', () => {
 
     expect(step.text).toBe('500 g Hähnchen anbraten.')
     expect(huhn).toEqual(before)
+  })
+})
+
+describe('automatic ingredient mentions', () => {
+  it('highlights several exact ingredients in one sentence and adds safe total badges', () => {
+    const ingredients = [
+      ingredient({ id: 'paprika', name: 'Paprika', quantity: 2, quantityText: '2' }),
+      ingredient({ id: 'zwiebel', name: 'Zwiebel', quantity: 1, quantityText: '1' }),
+    ]
+    const rendered = render(
+      [instruction('Die Paprika und Zwiebel würfeln.')],
+      ingredients,
+      2,
+      4,
+    )
+    const mentions = rendered[0]?.mentions ?? []
+
+    expect(mentions.map((mention) => mention.ingredient.name)).toEqual([
+      'Paprika',
+      'Zwiebel',
+    ])
+    expect(mentions.map((mention) => mention.amountText)).toEqual(['4', '2'])
+    expect(mentions.every((mention) => !mention.hasAmount)).toBe(true)
+    expect(rendered[0]?.annotatedText).toContain(
+      '<span class="cook-ingredient-mention">Paprika',
+    )
+    expect(rendered[0]?.annotatedText).toContain(
+      '<span class="cook-ingredient-mention">Zwiebel',
+    )
+    expect(rendered[0]?.annotatedText).toContain('>4 gesamt</span>')
+    expect(rendered[0]?.annotatedText).toContain('>2 gesamt</span>')
+  })
+
+  it('matches singular and plural ingredient forms', () => {
+    const ingredients = [
+      ingredient({ id: 'zwiebel', name: 'Zwiebel', quantity: 2, quantityText: '2' }),
+    ]
+    const rendered = render([instruction('Die Zwiebeln schneiden.')], ingredients, 2, 4)
+
+    expect(rendered[0]?.mentions).toHaveLength(1)
+    expect(rendered[0]?.mentions[0]?.ingredient.name).toBe('Zwiebel')
+    expect(rendered[0]?.mentions[0]?.amountText).toBe('4')
+    expect(rendered[0]?.annotatedText).toContain(
+      '<span class="cook-ingredient-mention">Zwiebeln<span class="cook-ingredient-badge"',
+    )
+  })
+
+  it('links unique shortened names and safe category terms', () => {
+    const ingredients = [
+      ingredient({
+        id: 'huhn',
+        name: 'Hähnchenbrustfilet',
+        quantity: 500,
+        quantityText: '500',
+        unit: 'g',
+      }),
+      ingredient({
+        id: 'bruehe',
+        name: 'Hühnerbrühe',
+        quantity: 500,
+        quantityText: '500',
+        unit: 'ml',
+      }),
+    ]
+    const rendered = render(
+      [instruction('Das Fleisch mit der Brühe ablöschen.')],
+      ingredients,
+      2,
+      4,
+    )
+    const mentions = rendered[0]?.mentions ?? []
+
+    expect(mentions.map((mention) => mention.ingredient.name)).toEqual([
+      'Hähnchenbrustfilet',
+      'Hühnerbrühe',
+    ])
+    expect(mentions.map((mention) => mention.amountText)).toEqual(['1000 g', '1000 ml'])
+    expect(rendered[0]?.annotatedText).toContain(
+      '<span class="cook-ingredient-mention">Fleisch',
+    )
+    expect(rendered[0]?.annotatedText).toContain(
+      '<span class="cook-ingredient-mention">Brühe',
+    )
+    expect(rendered[0]?.annotatedText).toContain('1000 g gesamt')
+    expect(rendered[0]?.annotatedText).toContain('1000 ml gesamt')
+  })
+
+  it('links an unambiguous poultry term to a compound ingredient', () => {
+    const ingredients = [
+      ingredient({
+        id: 'huhn',
+        name: 'Hähnchenbrustfilet',
+        quantity: 500,
+        quantityText: '500',
+        unit: 'g',
+      }),
+    ]
+    const rendered = render([instruction('Das Hähnchen anbraten.')], ingredients, 2, 4)
+
+    expect(rendered[0]?.mentions).toHaveLength(1)
+    expect(rendered[0]?.mentions[0]?.ingredient.name).toBe('Hähnchenbrustfilet')
+    expect(rendered[0]?.mentions[0]?.amountText).toBe('1000 g')
+    expect(rendered[0]?.annotatedText).toContain(
+      '<span class="cook-ingredient-mention">Hähnchen',
+    )
+  })
+
+  it('does not link ambiguous shortened or duplicate names', () => {
+    const broths = [
+      ingredient({ id: 'huhn', name: 'Hühnerbrühe', quantity: 500, quantityText: '500', unit: 'ml' }),
+      ingredient({ id: 'gemuese', name: 'Gemüsebrühe', quantity: 500, quantityText: '500', unit: 'ml' }),
+    ]
+    const brothRendered = render([instruction('Die Brühe hinzufügen.')], broths, 2, 4)
+    expect(brothRendered[0]?.mentions).toEqual([])
+    expect(brothRendered[0]?.annotatedText).toBe('Die Brühe hinzufügen.')
+
+    const salts = [
+      ingredient({ id: 'salz-a', name: 'Salz', quantity: 1, quantityText: '1', unit: 'TL' }),
+      ingredient({ id: 'salz-b', name: 'Salz', quantity: 2, quantityText: '2', unit: 'TL' }),
+    ]
+    const saltRendered = render([instruction('Salz hinzufügen.')], salts, 2, 4)
+    expect(saltRendered[0]?.mentions).toEqual([])
+    expect(saltRendered[0]?.annotatedText).toBe('Salz hinzufügen.')
+  })
+
+  it('highlights multiple uses without showing the total amount in every step', () => {
+    const ingredients = [
+      ingredient({
+        id: 'bruehe',
+        name: 'Hühnerbrühe',
+        quantity: 500,
+        quantityText: '500',
+        unit: 'ml',
+      }),
+    ]
+    const rendered = render(
+      [
+        instruction('200 ml Brühe hinzufügen.'),
+        instruction('Die restliche Brühe dazugeben.'),
+      ],
+      ingredients,
+      2,
+      4,
+    )
+
+    expect(rendered[0]?.text).toBe('400 ml Brühe hinzufügen.')
+    expect(rendered[0]?.mentions[0]?.hasAmount).toBe(true)
+    expect(rendered[0]?.mentions[0]?.amountText).toBeNull()
+    expect(rendered[1]?.text).toBe('Die restliche Brühe dazugeben.')
+    expect(rendered[1]?.mentions[0]?.hasAmount).toBe(false)
+    expect(rendered[1]?.mentions[0]?.amountText).toBeNull()
+    expect(rendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+    expect(rendered[1]?.annotatedText).not.toContain('cook-ingredient-badge')
+  })
+
+  it('does not add a badge beside an already present amount', () => {
+    const ingredients = [
+      ingredient({
+        id: 'huhn',
+        name: 'Hähnchen',
+        quantity: 500,
+        quantityText: '500',
+        unit: 'g',
+      }),
+    ]
+    const rendered = render([instruction('500 g Hähnchen anbraten.')], ingredients, 2, 4)
+
+    expect(rendered[0]?.text).toBe('1000 g Hähnchen anbraten.')
+    expect(rendered[0]?.mentions[0]?.hasAmount).toBe(true)
+    expect(rendered[0]?.mentions[0]?.amountText).toBeNull()
+    expect(rendered[0]?.annotatedText).toContain(
+      '<span class="cook-ingredient-mention">Hähnchen</span>',
+    )
+    expect(rendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+
+    const amountAfterName = render(
+      [instruction('Das Hähnchen (500 g) anbraten.')],
+      ingredients,
+      2,
+      4,
+    )
+    expect(amountAfterName[0]?.text).toBe('Das Hähnchen (500 g) anbraten.')
+    expect(amountAfterName[0]?.mentions[0]?.hasAmount).toBe(true)
+    expect(amountAfterName[0]?.mentions[0]?.amountText).toBeNull()
+    expect(amountAfterName[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+  })
+
+  it('does not add a total badge beside a spelled-out amount', () => {
+    const ingredients = [
+      ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
+    ]
+    const rendered = render([instruction('Zwei Zwiebeln schneiden.')], ingredients, 2, 4)
+
+    expect(rendered[0]?.text).toBe('Zwei Zwiebeln schneiden.')
+    expect(rendered[0]?.mentions[0]?.hasAmount).toBe(true)
+    expect(rendered[0]?.mentions[0]?.amountText).toBeNull()
+    expect(rendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+
+    const articleRendered = render(
+      [instruction('Eine Zwiebel schneiden.')],
+      ingredients,
+      2,
+      4,
+    )
+    expect(articleRendered[0]?.text).toBe('Eine Zwiebel schneiden.')
+    expect(articleRendered[0]?.mentions[0]?.hasAmount).toBe(true)
+    expect(articleRendered[0]?.mentions[0]?.amountText).toBeNull()
+    expect(articleRendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+  })
+
+  it('does not add a total badge in a qualitative amount context', () => {
+    const salt = ingredient({
+      id: 'salz',
+      name: 'Salz',
+      quantity: 1,
+      quantityText: '1',
+      unit: 'TL',
+    })
+    const saltRendered = render(
+      [instruction('Salz nach Geschmack hinzufügen.')],
+      [salt],
+      2,
+      4,
+    )
+    expect(saltRendered[0]?.mentions[0]?.hasAmount).toBe(true)
+    expect(saltRendered[0]?.mentions[0]?.amountText).toBeNull()
+    expect(saltRendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+
+    const onions = [
+      ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
+    ]
+    const onionRendered = render(
+      [instruction('Die Zwiebeln nach Belieben schneiden.')],
+      onions,
+      2,
+      4,
+    )
+    expect(onionRendered[0]?.mentions[0]?.hasAmount).toBe(true)
+    expect(onionRendered[0]?.mentions[0]?.amountText).toBeNull()
+    expect(onionRendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+  })
+
+  it('lets a manual reference suppress a later total badge for the same ingredient', () => {
+    const ingredients = [
+      ingredient({
+        id: 'butter',
+        name: 'Butter',
+        quantity: 500,
+        quantityText: '500',
+        unit: 'g',
+      }),
+    ]
+    const rendered = render(
+      [
+        instruction('100 g Butter erhitzen.', [
+          reference({
+            id: 'butter-ref',
+            ingredientId: 'butter',
+            anchor: '100',
+            anchorOffset: 0,
+            quantity: { kind: 'partial', quantityText: '100' },
+          }),
+        ]),
+        instruction('Die Butter schmelzen.'),
+      ],
+      ingredients,
+      2,
+      4,
+    )
+
+    expect(rendered[0]?.text).toBe('200 g Butter erhitzen.')
+    expect(rendered[1]?.mentions[0]?.amountText).toBeNull()
+    expect(rendered[1]?.annotatedText).not.toContain('cook-ingredient-badge')
+  })
+
+  it('keeps Markdown intact and never links code or link destinations', () => {
+    const ingredients = [
+      ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
+    ]
+    const text =
+      '**Die Zwiebeln** und [Zwiebeln](https://example.com/zwiebeln) sowie `Zwiebeln` schneiden.'
+    const rendered = render([instruction(text)], ingredients, 2, 4)
+
+    expect(rendered[0]?.mentions).toHaveLength(2)
+    expect(rendered[0]?.annotatedText).toContain(
+      '**Die <span class="cook-ingredient-mention">Zwiebeln</span>**',
+    )
+    expect(rendered[0]?.annotatedText).toContain(
+      '[<span class="cook-ingredient-mention">Zwiebeln</span>](https://example.com/zwiebeln)',
+    )
+    expect(rendered[0]?.annotatedText).toContain('`Zwiebeln`')
+    expect(rendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+  })
+
+  it('does not link ingredient names inside longer compound words', () => {
+    const oil = ingredient({ id: 'oel', name: 'Öl', quantity: 2, quantityText: '2', unit: 'EL' })
+    const oilRendered = render([instruction('2 EL Olivenöl verwenden.')], [oil], 2, 4)
+    expect(oilRendered[0]?.mentions).toEqual([])
+    expect(oilRendered[0]?.annotatedText).toBe('2 EL Olivenöl verwenden.')
+
+    const tomato = ingredient({ id: 'tomaten', name: 'Tomaten', quantity: 2, quantityText: '2' })
+    const tomatoRendered = render([instruction('2 EL Tomatenmark verwenden.')], [tomato], 2, 4)
+    expect(tomatoRendered[0]?.mentions).toEqual([])
+    expect(tomatoRendered[0]?.annotatedText).toBe('2 EL Tomatenmark verwenden.')
+  })
+
+  it('does not link image alt text or raw HTML attributes', () => {
+    const ingredients = [
+      ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
+    ]
+    const image = render(
+      [instruction('![Zwiebeln](https://example.com/zwiebeln.png) ansehen.')],
+      ingredients,
+      2,
+      4,
+    )
+    expect(image[0]?.mentions).toEqual([])
+    expect(image[0]?.annotatedText).toBe(
+      '![Zwiebeln](https://example.com/zwiebeln.png) ansehen.',
+    )
+
+    const html = render(
+      [instruction('<a href="zwiebeln">Zwiebeln</a> schneiden.')],
+      ingredients,
+      2,
+      4,
+    )
+    expect(html[0]?.mentions).toHaveLength(1)
+    expect(html[0]?.annotatedText).toContain('href="zwiebeln">')
+    expect(html[0]?.annotatedText).toContain(
+      '<span class="cook-ingredient-mention">Zwiebeln',
+    )
+  })
+
+  it('highlights ingredients with unclear quantities without inventing an amount', () => {
+    const ingredients = [
+      ingredient({
+        id: 'salz',
+        name: 'Salz',
+        quantity: null,
+        quantityText: null,
+        unit: null,
+        parseStatus: 'plain',
+      }),
+    ]
+    const rendered = render([instruction('Salz hinzufügen.')], ingredients, 2, 4)
+
+    expect(rendered[0]?.mentions).toHaveLength(1)
+    expect(rendered[0]?.mentions[0]?.amountText).toBeNull()
+    expect(rendered[0]?.annotatedText).toContain(
+      '<span class="cook-ingredient-mention">Salz</span>',
+    )
+    expect(rendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+
+    const ambiguousThousands = [
+      ingredient({
+        id: 'mehl',
+        name: 'Mehl',
+        quantity: 1.5,
+        quantityText: '1.500',
+        unit: 'g',
+      }),
+    ]
+    const ambiguousRendered = render(
+      [instruction('Mehl hinzufügen.')],
+      ambiguousThousands,
+      2,
+      4,
+    )
+    expect(ambiguousRendered[0]?.mentions[0]?.amountText).toBeNull()
+    expect(ambiguousRendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+  })
+
+  it('escapes badge text instead of injecting HTML', () => {
+    const ingredients = [
+      ingredient({
+        id: 'oel',
+        name: 'Öl',
+        quantity: 2,
+        quantityText: '2',
+        unit: '*<script>*',
+      }),
+    ]
+    const rendered = render([instruction('Das Öl hinzufügen.')], ingredients, 2, 4)
+
+    expect(rendered[0]?.mentions[0]?.amountText).toBe('4 *<script>*')
+    expect(rendered[0]?.annotatedText).not.toContain('<script>')
+    expect(rendered[0]?.annotatedText).toContain('&#42;&lt;script&gt;&#42;')
   })
 })

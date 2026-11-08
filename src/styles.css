@@ -5952,6 +5952,32 @@ body.calendar-dragging * {
   margin-top: 0.8rem;
 }
 
+.cook-ingredient-mention {
+  padding: 0.03em 0.16em;
+  border-radius: var(--radius-xs);
+  background: var(--accent-soft);
+  box-shadow: inset 0 -1px 0 var(--accent-border);
+  color: inherit;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.cook-ingredient-badge {
+  display: inline-block;
+  margin-left: 0.28em;
+  padding: 0.02em 0.44em;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--accent-strong);
+  font-size: max(0.7em, 0.75rem);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  vertical-align: 0.08em;
+  white-space: nowrap;
+}
+
 .cook-step-ingredients {
   display: flex;
   flex-direction: column;

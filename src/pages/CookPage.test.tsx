@@ -34,7 +34,17 @@ vi.mock('dexie-react-hooks', () => ({
 }))
 
 vi.mock('../components/Markdown', () => ({
-  Markdown: ({ text }: { text: string }) => <div data-markdown>{text}</div>,
+  Markdown: ({ text }: { text: string }) => {
+    const plain = text
+      .replace(/<span class="cook-ingredient-badge"[^>]*>.*?<\/span>/g, '')
+      .replace(/<span class="cook-ingredient-mention">/g, '')
+      .replace(/<\/span>/g, '')
+    return (
+      <div data-markdown data-annotated={text}>
+        {plain}
+      </div>
+    )
+  },
 }))
 
 function ingredient(overrides: Partial<Ingredient> = {}): Ingredient {
@@ -132,6 +142,57 @@ const recipe: Recipe = {
   updatedAt: 1,
 }
 
+function mentionRecipe(): Recipe {
+  return {
+    ...recipe,
+    id: 'r-mentions',
+    title: 'Paprika mit Brühe',
+    ingredients: [
+      ingredient({
+        id: 'paprika',
+        position: 0,
+        raw: '2 Paprika',
+        name: 'Paprika',
+        quantity: 2,
+        quantityText: '2',
+      }),
+      ingredient({
+        id: 'zwiebel',
+        position: 1,
+        raw: '1 Zwiebel',
+        name: 'Zwiebel',
+        quantity: 1,
+        quantityText: '1',
+      }),
+      ingredient({
+        id: 'bruehe',
+        position: 2,
+        raw: '500 ml Hühnerbrühe',
+        name: 'Hühnerbrühe',
+        quantity: 500,
+        quantityText: '500',
+        unit: 'ml',
+      }),
+    ],
+    instructions: [
+      {
+        id: 'm1',
+        position: 0,
+        raw: 'Die Paprika und Zwiebel würfeln.',
+        text: 'Die Paprika und Zwiebel würfeln.',
+        references: [],
+      },
+      {
+        id: 'm2',
+        position: 1,
+        raw: 'Mit der Brühe ablöschen.',
+        text: 'Mit der Brühe ablöschen.',
+        references: [],
+      },
+    ],
+  }
+}
+
 function cookData(sessionServings: number | null, sessionMissing = false) {
   return {
     recipe,
@@ -153,6 +214,7 @@ function overviewMarkup(value: Recipe = recipe, targetServings = 6, currentIndex
     originalServings,
     targetServings,
     autoScale: true,
+    linkIngredients: true,
   })
   const scaled = scaleRecipeIngredients(value.ingredients, originalServings, targetServings)
   const amounts = new Map(
@@ -422,6 +484,31 @@ describe('cook mode views', () => {
     expect(last).toContain('Letzter Schritt')
     expect(last).not.toMatch(/<button[^>]*disabled[^>]*>← Zurück<\/button>/)
     expect(last).toMatch(/<button[^>]*disabled[^>]*>Weiter →<\/button>/)
+  })
+
+  it('renders the same ingredient highlighting in both cook views', () => {
+    const withMentions = mentionRecipe()
+    live.reset({
+      recipe: withMentions,
+      sessionServings: null,
+      sessionId: null,
+      sessionMissing: false,
+      loadError: null,
+    })
+
+    const stepHtml = renderToStaticMarkup(
+      <CookPage recipeId="r-mentions" cookSessionId={null} />,
+    )
+    expect(stepHtml).toContain('cook-ingredient-mention')
+    expect(stepHtml).toContain('cook-ingredient-badge')
+    expect(stepHtml).toContain('Paprika')
+    expect(stepHtml).toContain('2 gesamt')
+
+    const overviewHtml = overviewMarkup(withMentions, 4, 0)
+    expect(overviewHtml).toContain('cook-ingredient-mention')
+    expect(overviewHtml).toContain('cook-ingredient-badge')
+    expect(overviewHtml).toContain('Paprika')
+    expect(overviewHtml).toContain('500 ml gesamt')
   })
 
   it('does not mutate the recipe while rendering both views', () => {
