@@ -199,6 +199,8 @@ describe('recipe cards', () => {
     expect(html).not.toContain('Portion')
     expect(html).not.toContain('recipe-card-thumb')
     expect(html).not.toContain('recipe-card-placeholder')
+    expect(html).not.toContain('recipe-card-monogram')
+    expect(html).toContain('recipe-card-footer')
   })
 
   it('renders bare Mela minute values as readable durations', () => {
@@ -238,5 +240,6 @@ describe('recipe cards', () => {
     expect(html).not.toContain('recipe-card-facts')
     expect(html).not.toContain('recipe-card-tags')
     expect(html).not.toContain('recipe-card-meta')
+    expect(html).not.toContain('recipe-card-footer')
   })
 })

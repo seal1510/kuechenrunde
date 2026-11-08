@@ -42,20 +42,24 @@ export function RecipeCard({
                 <span>{duration}</span>
               </p>
             ) : null}
-            {labels.length > 0 ? (
-              <div className="recipe-card-tags">
-                {labels.map((label) => (
-                  <span className="recipe-card-tag" key={label}>
-                    {label}
-                  </span>
-                ))}
+            {labels.length > 0 || recipe.favorite || recipe.wantToCook ? (
+              <div className="recipe-card-footer">
+                {labels.length > 0 ? (
+                  <div className="recipe-card-tags">
+                    {labels.map((label) => (
+                      <span className="recipe-card-tag" key={label}>
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {recipe.favorite || recipe.wantToCook ? (
+                  <p className="recipe-card-flags">
+                    {recipe.favorite ? <span className="flag">★ Favorit</span> : null}
+                    {recipe.wantToCook ? <span className="flag">Möchte ich kochen</span> : null}
+                  </p>
+                ) : null}
               </div>
-            ) : null}
-            {recipe.favorite || recipe.wantToCook ? (
-              <p className="recipe-card-flags">
-                {recipe.favorite ? <span className="flag">★ Favorit</span> : null}
-                {recipe.wantToCook ? <span className="flag">Möchte ich kochen</span> : null}
-              </p>
             ) : null}
           </div>
           {coverUrl ? (
@@ -64,11 +68,6 @@ export function RecipeCard({
             </div>
           ) : null}
         </div>
-        {coverUrl ? null : (
-          <span className="recipe-card-monogram" aria-hidden="true">
-            {recipe.title.trim().charAt(0).toLocaleUpperCase('de')}
-          </span>
-        )}
       </a>
     </article>
   )
