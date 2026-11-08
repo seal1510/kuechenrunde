@@ -1,10 +1,25 @@
-import { useMemo, useState } from 'react'
+/*
+ * openCook Web
+ * Copyright (C) 2026 openCook Web contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Planning surface for a library recipe. The recipe picker and the actual
+ * planning form live in one responsive panel and share the existing day
+ * selection, scaling and persistence logic.
+ */
+
+import { useMemo, useState, type MouseEvent } from 'react'
+import { formatDayLabel } from '../../domain/dates'
 import {
   cookedRedefinition,
   scalePlan,
 } from '../../domain/dishplan'
 import { resolveOriginalServings, scaledIngredientLine } from '../../domain/scaling'
-import { formatDuration, formatFactor, formatPortionCount } from '../../lib/format'
+import {
+  effectiveDuration,
+  formatFactor,
+  formatPortionCount,
+} from '../../lib/format'
 import {
   CookedPlanConflictError,
   deleteDishPlan,
@@ -23,69 +38,9 @@ import {
   type DaySelection,
 } from '../../domain/daySelection'
 import { DaySelectionEditor } from './DaySelectionEditor'
-
-function RecipePicker({
-  recipes,
-  onChoose,
-}: {
-  recipes: Recipe[]
-  onChoose: (recipeId: string) => void
-}) {
-  const [query, setQuery] = useState('')
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    if (!needle) return recipes
-    return recipes.filter(
-      (recipe) =>
-        recipe.title.toLowerCase().includes(needle) ||
-        recipe.ingredients.some((ingredient) => ingredient.name.toLowerCase().includes(needle)),
-    )
-  }, [recipes, query])
-
-  return (
-    <div className="recipe-search">
-      {recipes.length > 0 ? (
-        <label className="search-field">
-          <span className="visually-hidden">Rezepte durchsuchen</span>
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Rezept oder Zutat suchen …"
-            autoFocus
-          />
-        </label>
-      ) : null}
-      {recipes.length === 0 ? (
-        <div className="recipe-picker-empty">
-          <p className="muted small">Noch keine Rezepte vorhanden.</p>
-          <a className="button primary" href="#/recipe/new">
-            Neues Rezept
-          </a>
-        </div>
-      ) : filtered.length === 0 ? (
-        <p className="muted small">Keine Rezepte gefunden.</p>
-      ) : (
-        <ul className="recipe-option-list recipe-search-results">
-          {filtered.map((recipe) => (
-            <li key={recipe.id}>
-              <button type="button" className="recipe-option" onClick={() => onChoose(recipe.id)}>
-                <span>{recipe.title}</span>
-                <span className="muted small">
-                  {recipe.categories.slice(0, 2).join(', ')}
-                  {recipe.totalTime ? ` · ${formatDuration(recipe.totalTime)}` : ''}
-                  {recipe.servingsNumber
-                    ? ` · ${formatPortionCount(recipe.servingsNumber)}`
-                    : ''}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
+import { draftSignature, useDiscardGuard } from './discardGuard'
+import { DiscardPrompt, PlanningPanel } from './PlanningPanel'
+import { RecipeCover, RecipePicker } from './RecipePicker'
 
 export interface DishDialogProps {
   mode: 'create' | 'edit'
@@ -115,7 +70,10 @@ export function DishDialog({
   onClose,
 }: DishDialogProps) {
   const [recipeId, setRecipeId] = useState<string | null>(initialRecipeId ?? null)
-  const [showPicker, setShowPicker] = useState(mode === 'create' && !initialRecipeId)
+  const [view, setView] = useState<'picker' | 'plan'>(() =>
+    mode === 'create' && !initialRecipeId ? 'picker' : 'plan',
+  )
+  const [query, setQuery] = useState('')
   const [selection, setSelection] = useState<DaySelection>(() =>
     createDaySelection(initialEntries, initialDate),
   )
@@ -124,7 +82,9 @@ export function DishDialog({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const recipe = recipeId ? recipes.find((candidate) => candidate.id === recipeId) : undefined
+  const recipe = recipeId
+    ? recipes.find((candidate) => candidate.id === recipeId)
+    : undefined
   // The cooking event is optional: old plans and repaired appointments may not
   // have one. The plan's stored id is then still the best link target so
   // CookPage can show its "missing session" fallback instead of hiding the
@@ -146,6 +106,18 @@ export function DishDialog({
     ? scalePlan(recipe, planDays, needsCorrection ? correctionNumber : null)
     : null
   const valid = Boolean(recipe) && isSelectionValid(selection)
+  const removesWholePlan = initialEntries.length > 1 || Boolean(session)
+  const showingPicker = mode === 'create' && (view === 'picker' || !recipe)
+  const duration = recipe ? effectiveDuration(recipe) : ''
+
+  const discard = useDiscardGuard(
+    draftSignature({
+      recipeId,
+      days: planDays,
+      correction,
+      saveCorrection,
+    }),
+  )
 
   function selectDay(date: string) {
     setSelection((current) => toggleDay(current, date))
@@ -155,6 +127,34 @@ export function DishDialog({
   function changeServings(date: string, delta: number) {
     setSelection((current) => adjustDayServings(current, date, delta))
     setError(null)
+  }
+
+  function chooseRecipe(id: string) {
+    setRecipeId(id)
+    setView('plan')
+    setError(null)
+  }
+
+  function handleRequestClose() {
+    if (busy) return
+    if (discard.cancelIfPrompted()) return
+    discard.request(onClose)
+  }
+
+  function handleMoveRequest() {
+    if (!onMoveRequest || busy) return
+    discard.request(onMoveRequest)
+  }
+
+  function handleCookNavigation(
+    event: MouseEvent<HTMLAnchorElement>,
+  ) {
+    if (!discard.dirty || busy) return
+    event.preventDefault()
+    const href = event.currentTarget.getAttribute('href') ?? ''
+    discard.request(() => {
+      window.location.hash = href
+    })
   }
 
   async function persist(allowCookedChange: boolean): Promise<void> {
@@ -214,15 +214,12 @@ export function DishDialog({
 
   async function handleDelete() {
     const count = initialEntries.length
-    if (
-      !window.confirm(
-        count > 1
-          ? `Alle ${count} Tage dieses Gerichts entfernen?`
-          : 'Dieses Gericht entfernen?',
-      )
-    ) {
-      return
-    }
+    const question = removesWholePlan
+      ? count > 1
+        ? `Alle ${count} Esstage dieser gemeinsamen Planung entfernen?`
+        : 'Diese gemeinsame Planung entfernen?'
+      : 'Dieses Gericht entfernen?'
+    if (!window.confirm(question)) return
     setBusy(true)
     try {
       if (session?.id) {
@@ -238,173 +235,229 @@ export function DishDialog({
     }
   }
 
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="modal dish-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={mode === 'create' ? 'Gericht einplanen' : 'Gericht bearbeiten'}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="modal-head">
-          <div>
-            <h2>{mode === 'create' ? 'Gericht einplanen' : 'Gericht bearbeiten'}</h2>
-            {mode === 'edit' && recipe ? (
-              <p className="muted small">{recipe.title}</p>
-            ) : null}
-          </div>
-          <button type="button" className="button quiet" onClick={onClose}>
-            Schließen
+  const footer = (
+    <>
+      {discard.prompted ? (
+        <DiscardPrompt
+          onKeepEditing={discard.cancel}
+          onDiscard={discard.confirm}
+        />
+      ) : null}
+      <div className="plan-panel-actions">
+        <div className="plan-panel-actions-secondary">
+          {mode === 'edit' && recipe ? (
+            <a
+              className="button"
+              href={cookHash(recipe.id, cookSessionId)}
+              onClick={handleCookNavigation}
+            >
+              Kochen
+            </a>
+          ) : null}
+          {mode === 'edit' && onMoveRequest ? (
+            <button
+              type="button"
+              className="button quiet"
+              onClick={handleMoveRequest}
+              disabled={busy}
+            >
+              Verschieben
+            </button>
+          ) : null}
+          {mode === 'edit' && initialEntries.length > 0 ? (
+            <button
+              type="button"
+              className="button danger-quiet"
+              onClick={() => void handleDelete()}
+              disabled={busy}
+            >
+              {removesWholePlan
+                ? 'Ganze Planung entfernen'
+                : 'Gericht entfernen'}
+            </button>
+          ) : null}
+        </div>
+        <div className="plan-panel-actions-primary">
+          <button
+            type="button"
+            className="button"
+            onClick={handleRequestClose}
+            disabled={busy}
+          >
+            Abbrechen
+          </button>
+          <button
+            type="button"
+            className="button primary"
+            onClick={() => void handleSubmit()}
+            disabled={busy || !valid}
+          >
+            {busy ? 'Speichere …' : mode === 'create' ? 'Einplanen' : 'Speichern'}
           </button>
         </div>
+      </div>
+    </>
+  )
 
-        {mode === 'create' && (showPicker || !recipe) ? (
-          <RecipePicker
-            recipes={recipes}
-            onChoose={(id) => {
-              setRecipeId(id)
-              setShowPicker(false)
-            }}
-          />
-        ) : (
-          <>
-            {mode === 'create' && recipe ? (
-              <div className="selected-recipe">
-                <div>
-                  <strong>{recipe.title}</strong>
-                  <p className="muted small">
-                    {recipe.totalTime ? formatDuration(recipe.totalTime) : ''}
-                  </p>
-                </div>
+  return (
+    <PlanningPanel
+      title={
+        showingPicker
+          ? 'Rezept auswählen'
+          : mode === 'create'
+            ? 'Gericht einplanen'
+            : 'Gericht bearbeiten'
+      }
+      subtitle={formatDayLabel(initialDate)}
+      backLabel="Zurück zur Planung"
+      onBack={
+        showingPicker && recipe
+          ? () => {
+              setView('plan')
+              setError(null)
+            }
+          : undefined
+      }
+      onRequestClose={handleRequestClose}
+      closeDisabled={busy}
+      footer={showingPicker ? undefined : footer}
+      focusKey={showingPicker ? 'picker' : 'plan'}
+      className={`dish-dialog${showingPicker ? ' is-picking' : ''}`}
+    >
+      {showingPicker ? (
+        <RecipePicker
+          recipes={recipes}
+          query={query}
+          onQueryChange={setQuery}
+          selectedRecipeId={recipeId}
+          onChoose={chooseRecipe}
+        />
+      ) : (
+        <>
+          {recipe ? (
+            <div className="plan-recipe">
+              <RecipeCover recipe={recipe} className="plan-recipe-cover" />
+              <div className="plan-recipe-text">
+                <p className="plan-recipe-kicker">Rezept</p>
+                <h3>{recipe.title}</h3>
+                <p className="muted small">
+                  {knownOriginal !== null
+                    ? `${formatPortionCount(knownOriginal)} im Original`
+                    : 'Originalportionen unklar'}
+                  {duration ? ` · ${duration}` : ''}
+                </p>
+              </div>
+              {mode === 'create' ? (
                 <button
                   type="button"
-                  className="button quiet"
-                  onClick={() => setShowPicker(true)}
+                  className="button quiet plan-recipe-change"
+                  onClick={() => {
+                    setView('picker')
+                    setError(null)
+                  }}
+                  disabled={busy}
                 >
                   Rezept ändern
                 </button>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
+          ) : (
+            <div className="notice danger" role="alert">
+              Das Rezept ist nicht mehr in der Bibliothek.
+            </div>
+          )}
 
-            <DaySelectionEditor
-              initialDate={initialDate}
-              selection={selection}
-              weekStartDay={weekStartDay}
-              busy={busy}
-              onToggleDay={selectDay}
-              onChangeServings={changeServings}
-            />
+          <DaySelectionEditor
+            initialDate={initialDate}
+            selection={selection}
+            weekStartDay={weekStartDay}
+            busy={busy}
+            removalHint={mode === 'edit' && initialEntries.length > 0}
+            onToggleDay={selectDay}
+            onChangeServings={changeServings}
+          />
 
-            <div className="dish-total">
-              <span className="muted small">Gesamt</span>
-              <strong>{formatPortionCount(total)}</strong>
-              {scale?.scaling.factor !== null && scale?.scaling.factor !== undefined ? (
-                <span className="muted small">
-                  aus {formatPortionCount(scale.originalServings ?? total)} · Faktor{' '}
-                  {formatFactor(scale.scaling.factor)}
-                </span>
+          <div className="plan-summary" aria-live="polite">
+            <strong className="plan-summary-total">
+              {formatPortionCount(total)}
+            </strong>
+            <span className="plan-summary-detail">
+              {knownOriginalSummary(knownOriginal, correctionNumber)}
+              {scale?.scaling.factor !== null &&
+              scale?.scaling.factor !== undefined
+                ? ` · Faktor ${formatFactor(scale.scaling.factor)}`
+                : ''}
+            </span>
+          </div>
+
+          {needsCorrection ? (
+            <>
+              <label className="field dish-original">
+                <span className="field-label">Originalportionen des Rezepts</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={correction}
+                  placeholder="z. B. 4"
+                  onChange={(event) => setCorrection(event.target.value)}
+                />
+              </label>
+              <label className="check-field dish-correction-save">
+                <input
+                  type="checkbox"
+                  checked={saveCorrection}
+                  onChange={(event) => setSaveCorrection(event.target.checked)}
+                />
+                Originalportionen im Rezept speichern
+              </label>
+            </>
+          ) : null}
+
+          {recipe && scale ? (
+            <details className="scaling dish-scaling">
+              <summary>
+                {scale.scaling.factor === null
+                  ? 'Zutaten (unverändert)'
+                  : `Zutaten für ${formatPortionCount(total)}`}
+              </summary>
+              {scale.scaling.items.length === 0 ? (
+                <p className="muted small">Keine Zutaten hinterlegt.</p>
               ) : (
-                <span className="muted small">Mengen bleiben unverändert</span>
+                <ul className="scaling-list">
+                  {scale.scaling.items.map((item) => (
+                    <li
+                      key={item.ingredient.id}
+                      className={item.scaled ? '' : 'is-unscaled'}
+                    >
+                      <span>{scaledIngredientLine(item)}</span>
+                    </li>
+                  ))}
+                </ul>
               )}
+            </details>
+          ) : null}
+
+          {error ? (
+            <div className="notice danger" role="alert">
+              {error}
             </div>
-
-            {needsCorrection ? (
-              <>
-                <label className="field dish-original">
-                  <span className="field-label">Originalportionen des Rezepts</span>
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={correction}
-                    placeholder="z. B. 4"
-                    onChange={(event) => setCorrection(event.target.value)}
-                  />
-                </label>
-                <label className="check-field dish-correction-save">
-                  <input
-                    type="checkbox"
-                    checked={saveCorrection}
-                    onChange={(event) => setSaveCorrection(event.target.checked)}
-                  />
-                  Originalportionen im Rezept speichern
-                </label>
-              </>
-            ) : null}
-
-            {recipe && scale ? (
-              <details className="scaling dish-scaling">
-                <summary>
-                  {scale.scaling.factor === null
-                    ? 'Zutaten (unverändert)'
-                    : `Zutaten für ${formatPortionCount(total)}`}
-                </summary>
-                {scale.scaling.items.length === 0 ? (
-                  <p className="muted small">Keine Zutaten hinterlegt.</p>
-                ) : (
-                  <ul className="scaling-list">
-                    {scale.scaling.items.map((item) => (
-                      <li key={item.ingredient.id} className={item.scaled ? '' : 'is-unscaled'}>
-                        <span>{scaledIngredientLine(item)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </details>
-            ) : null}
-
-            {error ? (
-              <div className="notice danger" role="alert">
-                {error}
-              </div>
-            ) : null}
-
-            <div className="dialog-actions">
-              <div className="dialog-actions-left">
-                {mode === 'edit' && recipe ? (
-                  <a className="button primary" href={cookHash(recipe.id, cookSessionId)}>
-                    Kochen
-                  </a>
-                ) : null}
-                {mode === 'edit' && onMoveRequest ? (
-                  <button
-                    type="button"
-                    className="button quiet"
-                    onClick={onMoveRequest}
-                    disabled={busy}
-                  >
-                    Verschieben
-                  </button>
-                ) : null}
-                {mode === 'edit' && initialEntries.length > 0 ? (
-                  <button
-                    type="button"
-                    className="button danger-quiet"
-                    onClick={() => void handleDelete()}
-                    disabled={busy}
-                  >
-                    Gericht entfernen
-                  </button>
-                ) : null}
-              </div>
-              <div className="dialog-actions-right">
-                <button type="button" className="button" onClick={onClose} disabled={busy}>
-                  Abbrechen
-                </button>
-                <button
-                  type="button"
-                  className="button primary"
-                  onClick={() => void handleSubmit()}
-                  disabled={busy || !valid}
-                >
-                  {busy ? 'Speichere …' : mode === 'create' ? 'Einplanen' : 'Speichern'}
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+          ) : null}
+        </>
+      )}
+    </PlanningPanel>
   )
+}
+
+function knownOriginalSummary(
+  knownOriginal: number | null,
+  correction: number | null,
+): string {
+  if (knownOriginal !== null) {
+    return `aus einem Rezept für ${formatPortionCount(knownOriginal)}`
+  }
+  if (correction !== null) {
+    return `für ${formatPortionCount(correction)} im Rezept`
+  }
+  return 'Originalportionen noch unklar · Mengen bleiben unverändert'
 }

@@ -1,4 +1,5 @@
 import { formatDayLabel } from '../../domain/dates'
+import { PlanningPanel } from './PlanningPanel'
 
 export interface AddEntryDialogProps {
   date: string
@@ -20,36 +21,42 @@ export function AddEntryDialog({
   onClose,
 }: AddEntryDialogProps) {
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="modal add-entry-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Eintrag für ${formatDayLabel(date)} hinzufügen`}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="modal-head">
-          <div>
-            <h2>Hinzufügen</h2>
-            <p className="muted small">{formatDayLabel(date)}</p>
-          </div>
-          <button type="button" className="button quiet" onClick={onClose}>
-            Schließen
-          </button>
-        </div>
-
-        <div className="add-entry-options">
-          <button type="button" className="add-entry-option" onClick={onChooseRecipe}>
-            Rezept
-          </button>
-          <button type="button" className="add-entry-option" onClick={onChooseFreeDish}>
-            Freies Gericht
-          </button>
-          <button type="button" className="add-entry-option" onClick={onChooseNote}>
-            Kommentar
-          </button>
-        </div>
+    <PlanningPanel
+      title="Hinzufügen"
+      subtitle={formatDayLabel(date)}
+      onRequestClose={onClose}
+      className="add-entry-dialog"
+    >
+      <div className="add-entry-options">
+        <button
+          type="button"
+          className="add-entry-option"
+          onClick={onChooseRecipe}
+        >
+          <span className="add-entry-option-title">Rezept</span>
+          <span className="add-entry-option-hint">
+            Aus der Rezeptbibliothek planen
+          </span>
+        </button>
+        <button
+          type="button"
+          className="add-entry-option"
+          onClick={onChooseFreeDish}
+        >
+          <span className="add-entry-option-title">Freies Gericht</span>
+          <span className="add-entry-option-hint">
+            Gericht ohne gespeichertes Rezept notieren
+          </span>
+        </button>
+        <button
+          type="button"
+          className="add-entry-option"
+          onClick={onChooseNote}
+        >
+          <span className="add-entry-option-title">Kommentar</span>
+          <span className="add-entry-option-hint">Notiz zum Tag festhalten</span>
+        </button>
       </div>
-    </div>
+    </PlanningPanel>
   )
 }

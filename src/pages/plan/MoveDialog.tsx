@@ -1,3 +1,12 @@
+/*
+ * openCook Web
+ * Copyright (C) 2026 openCook Web contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Keyboard-accessible alternative to pointer dragging, for dishes and notes.
+ * It uses the shared planning panel and the same week/day grid semantics.
+ */
+
 import { useState } from 'react'
 import {
   addDays,
@@ -7,6 +16,7 @@ import {
   weekdayShort,
 } from '../../domain/dates'
 import { shiftWeekStart, weekStartFor } from '../../domain/daySelection'
+import { PlanningPanel } from './PlanningPanel'
 
 export interface MoveDialogProps {
   initialDate: string
@@ -19,7 +29,6 @@ export interface MoveDialogProps {
   onClose: () => void
 }
 
-/** Keyboard-accessible alternative to pointer dragging, for dishes and notes. */
 export function MoveDialog({
   initialDate,
   heading,
@@ -46,77 +55,81 @@ export function MoveDialog({
   })
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="modal move-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={heading}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="modal-head">
-          <div>
-            <h2>{heading}</h2>
-            {subtitle ? <p className="muted small">{subtitle}</p> : null}
-          </div>
-          <button type="button" className="button quiet" onClick={onClose} disabled={busy}>
-            Schließen
-          </button>
-        </div>
-
-        <div className="dish-weeknav" role="group" aria-label="Zielwoche">
-          <button
-            type="button"
-            className="button quiet dish-week-arrow"
-            aria-label="Vorherige Woche"
-            onClick={() => setWeekStart((current) => shiftWeekStart(current, -1))}
-            disabled={busy}
-          >
-            ‹
-          </button>
-          <span className="dish-week-range" aria-live="polite">
-            {formatWeekRange(weekStart)}
-          </span>
-          <button
-            type="button"
-            className="button quiet dish-week-arrow"
-            aria-label="Nächste Woche"
-            onClick={() => setWeekStart((current) => shiftWeekStart(current, 1))}
-            disabled={busy}
-          >
-            ›
-          </button>
-        </div>
-
-        <div className="dish-day-grid" role="group" aria-label="Zieltag auswählen">
-          {days.map((day) => (
+    <PlanningPanel
+      title={heading}
+      subtitle={subtitle}
+      onRequestClose={() => {
+        if (!busy) onClose()
+      }}
+      closeDisabled={busy}
+      className="move-dialog"
+      footer={
+        <div className="plan-panel-actions">
+          <div className="plan-panel-actions-primary">
             <button
-              key={day.date}
               type="button"
-              className={`dish-day-choice${day.current ? ' is-current' : ''}`}
-              aria-label={`${formatDayLabel(day.date)} als Ziel wählen`}
-              disabled={busy || day.current}
-              onClick={() => onMove(day.date)}
+              className="button"
+              onClick={onClose}
+              disabled={busy}
             >
-              <span className="dish-day-weekday">{day.weekday}</span>
-              <span className="dish-day-date">
-                {String(day.day).padStart(2, '0')}.{String(day.month).padStart(2, '0')}.
-              </span>
-              {day.current ? (
-                <span className="dish-day-check" aria-hidden="true">
-                  •
-                </span>
-              ) : null}
+              Abbrechen
             </button>
-          ))}
-        </div>
-
-        {error ? (
-          <div className="notice danger" role="alert">
-            {error}
           </div>
-        ) : null}
+        </div>
+      }
+    >
+      <div className="dish-weeknav" role="group" aria-label="Zielwoche">
+        <button
+          type="button"
+          className="button quiet dish-week-arrow"
+          aria-label="Vorherige Woche"
+          onClick={() => setWeekStart((current) => shiftWeekStart(current, -1))}
+          disabled={busy}
+        >
+          ‹
+        </button>
+        <span className="dish-week-range" aria-live="polite">
+          {formatWeekRange(weekStart)}
+        </span>
+        <button
+          type="button"
+          className="button quiet dish-week-arrow"
+          aria-label="Nächste Woche"
+          onClick={() => setWeekStart((current) => shiftWeekStart(current, 1))}
+          disabled={busy}
+        >
+          ›
+        </button>
       </div>
-    </div>
+
+      <div className="dish-day-grid" role="group" aria-label="Zieltag auswählen">
+        {days.map((day) => (
+          <button
+            key={day.date}
+            type="button"
+            className={`dish-day-choice${day.current ? ' is-current' : ''}`}
+            aria-label={`${formatDayLabel(day.date)} als Ziel wählen`}
+            disabled={busy || day.current}
+            onClick={() => onMove(day.date)}
+          >
+            <span className="dish-day-weekday">{day.weekday}</span>
+            <span className="dish-day-date">
+              {String(day.day).padStart(2, '0')}.{String(day.month).padStart(2, '0')}.
+            </span>
+            {day.current ? (
+              <span className="dish-day-check" aria-hidden="true">
+                •
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+
+      {error ? (
+        <div className="notice danger" role="alert">
+          {error}
+        </div>
+      ) : null}
+    </PlanningPanel>
   )
 }

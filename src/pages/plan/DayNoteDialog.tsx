@@ -1,7 +1,19 @@
+/*
+ * openCook Web
+ * Copyright (C) 2026 openCook Web contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Day comment editor. It reuses the shared planning panel so comments stay a
+ * first-class part of the weekly plan, including on phones and with the
+ * keyboard open.
+ */
+
 import { useState } from 'react'
 import { formatDayLabel } from '../../domain/dates'
 import { deleteDayNote, saveDayNote } from '../../mealplan/dayNoteService'
 import type { DayNote } from '../../types'
+import { draftSignature, useDiscardGuard } from './discardGuard'
+import { DiscardPrompt, PlanningPanel } from './PlanningPanel'
 
 export interface DayNoteDialogProps {
   date: string
@@ -20,6 +32,13 @@ export function DayNoteDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const hasSavedNote = initialText.trim().length > 0
+  const discard = useDiscardGuard(draftSignature({ text }))
+
+  function handleRequestClose() {
+    if (busy) return
+    if (discard.cancelIfPrompted()) return
+    discard.request(onClose)
+  }
 
   async function handleSave() {
     setBusy(true)
@@ -72,82 +91,87 @@ export function DayNoteDialog({
     }
   }
 
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="modal note-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Kommentar für ${formatDayLabel(date)}`}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="modal-head">
-          <div>
-            <h2>Kommentar</h2>
-            <p className="muted small">{formatDayLabel(date)}</p>
-          </div>
-          <button type="button" className="button quiet" onClick={onClose} disabled={busy}>
-            Schließen
-          </button>
-        </div>
-
-        <label className="visually-hidden" htmlFor="day-note-text">
-          Kommentar
-        </label>
-        <textarea
-          id="day-note-text"
-          className="note-textarea"
-          value={text}
-          rows={5}
-          autoFocus
-          placeholder="Kommentar zum Tag …"
-          onChange={(event) => setText(event.target.value)}
+  const footer = (
+    <>
+      {discard.prompted ? (
+        <DiscardPrompt
+          onKeepEditing={discard.cancel}
+          onDiscard={discard.confirm}
         />
-
-        {error ? (
-          <div className="notice danger" role="alert">
-            {error}
-          </div>
-        ) : null}
-
-        <div className="note-dialog-actions">
-          <div className="dialog-actions-left">
-            {hasSavedNote && onMoveRequest ? (
-              <button
-                type="button"
-                className="button quiet"
-                onClick={() => void handleMove()}
-                disabled={busy || !text.trim()}
-              >
-                Verschieben
-              </button>
-            ) : null}
-            {hasSavedNote ? (
-              <button
-                type="button"
-                className="button danger-quiet"
-                onClick={() => void handleDelete()}
-                disabled={busy}
-              >
-                Löschen
-              </button>
-            ) : null}
-          </div>
-          <div className="dialog-actions-right">
-            <button type="button" className="button" onClick={onClose} disabled={busy}>
-              Abbrechen
-            </button>
+      ) : null}
+      <div className="plan-panel-actions">
+        <div className="plan-panel-actions-secondary">
+          {hasSavedNote && onMoveRequest ? (
             <button
               type="button"
-              className="button primary"
-              onClick={() => void handleSave()}
+              className="button quiet"
+              onClick={() => void handleMove()}
+              disabled={busy || !text.trim()}
+            >
+              Verschieben
+            </button>
+          ) : null}
+          {hasSavedNote ? (
+            <button
+              type="button"
+              className="button danger-quiet"
+              onClick={() => void handleDelete()}
               disabled={busy}
             >
-              {busy ? 'Speichere …' : 'Speichern'}
+              Kommentar löschen
             </button>
-          </div>
+          ) : null}
+        </div>
+        <div className="plan-panel-actions-primary">
+          <button
+            type="button"
+            className="button"
+            onClick={handleRequestClose}
+            disabled={busy}
+          >
+            Abbrechen
+          </button>
+          <button
+            type="button"
+            className="button primary"
+            onClick={() => void handleSave()}
+            disabled={busy}
+          >
+            {busy ? 'Speichere …' : 'Speichern'}
+          </button>
         </div>
       </div>
-    </div>
+    </>
+  )
+
+  return (
+    <PlanningPanel
+      title="Kommentar"
+      subtitle={formatDayLabel(date)}
+      onRequestClose={handleRequestClose}
+      closeDisabled={busy}
+      footer={footer}
+      className="note-dialog"
+    >
+      <label className="visually-hidden" htmlFor="day-note-text">
+        Kommentar
+      </label>
+      <textarea
+        id="day-note-text"
+        className="note-textarea"
+        value={text}
+        rows={5}
+        data-autofocus
+        autoFocus
+        placeholder="Kommentar zum Tag …"
+        onChange={(event) => setText(event.target.value)}
+      />
+
+      {error ? (
+        <div className="notice danger" role="alert">
+          {error}
+        </div>
+      ) : null}
+    </PlanningPanel>
   )
 }

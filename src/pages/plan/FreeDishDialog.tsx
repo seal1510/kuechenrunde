@@ -3,13 +3,14 @@
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Planning dialog for a free dish. It uses the same seven-day picker, eater
- * steppers and ingredient editor as library recipes, but stores its name,
- * reference portions and ingredients only in the meal plan.
+ * Planning dialog for a free dish. It uses the same responsive panel, eat-day
+ * picker, portion steppers and ingredient editor as library recipes, but
+ * stores its name, reference portions and ingredients only in the meal plan.
  */
 
 import { useMemo, useState } from 'react'
 import { IngredientEditor } from '../../components/IngredientEditor'
+import { formatDayLabel } from '../../domain/dates'
 import { formatPortionCount } from '../../lib/format'
 import { cookedRedefinition } from '../../domain/dishplan'
 import { scaleDishIngredients } from '../../domain/dishSource'
@@ -32,6 +33,8 @@ import { saveFreeDishPlan } from '../../mealplan/freeDishService'
 import { removeMealEntry } from '../../mealplan/service'
 import type { CookSession, FreeDish, Ingredient, MealPlanEntry } from '../../types'
 import { DaySelectionEditor } from './DaySelectionEditor'
+import { draftSignature, useDiscardGuard } from './discardGuard'
+import { DiscardPrompt, PlanningPanel } from './PlanningPanel'
 
 function ingredientRows(ingredients: readonly Ingredient[]): DraftIngredient[] {
   return ingredients.map((ingredient) => ({
@@ -117,6 +120,17 @@ export function FreeDishDialog({
     isSelectionValid(selection) &&
     reference !== null &&
     reference > 0
+  const removesWholePlan = initialEntries.length > 1 || Boolean(session)
+
+  const discard = useDiscardGuard(
+    draftSignature({
+      name,
+      days: planDays,
+      rows,
+      referenceText,
+      referenceTouched,
+    }),
+  )
 
   function selectDay(date: string) {
     setSelection((current) => toggleDay(current, date))
@@ -126,6 +140,17 @@ export function FreeDishDialog({
   function changeServings(date: string, delta: number) {
     setSelection((current) => adjustDayServings(current, date, delta))
     setError(null)
+  }
+
+  function handleRequestClose() {
+    if (busy) return
+    if (discard.cancelIfPrompted()) return
+    discard.request(onClose)
+  }
+
+  function handleMoveRequest() {
+    if (!onMoveRequest || busy) return
+    discard.request(onMoveRequest)
   }
 
   async function persist(allowCookedChange: boolean): Promise<void> {
@@ -184,15 +209,12 @@ export function FreeDishDialog({
 
   async function handleDelete() {
     const count = initialEntries.length
-    if (
-      !window.confirm(
-        count > 1
-          ? `Alle ${count} Tage dieses Gerichts entfernen?`
-          : 'Dieses Gericht entfernen?',
-      )
-    ) {
-      return
-    }
+    const question = removesWholePlan
+      ? count > 1
+        ? `Alle ${count} Esstage dieser gemeinsamen Planung entfernen?`
+        : 'Diese gemeinsame Planung entfernen?'
+      : 'Dieses Gericht entfernen?'
+    if (!window.confirm(question)) return
     setBusy(true)
     try {
       if (session?.id) {
@@ -208,140 +230,154 @@ export function FreeDishDialog({
     }
   }
 
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="modal dish-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={mode === 'create' ? 'Freies Gericht einplanen' : 'Freies Gericht bearbeiten'}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="modal-head">
-          <div>
-            <h2>{mode === 'create' ? 'Freies Gericht einplanen' : 'Gericht bearbeiten'}</h2>
-          </div>
-          <button type="button" className="button quiet" onClick={onClose}>
-            Schließen
-          </button>
-        </div>
-
-        <label className="field free-dish-name">
-          <span className="field-label">Name des Gerichts</span>
-          <input
-            value={name}
-            onChange={(event) => {
-              setName(event.target.value)
-              setError(null)
-            }}
-            placeholder="z. B. Nudeln mit Pesto"
-            autoFocus
-          />
-        </label>
-
-        <DaySelectionEditor
-          initialDate={initialDate}
-          selection={selection}
-          weekStartDay={weekStartDay}
-          busy={busy}
-          onToggleDay={selectDay}
-          onChangeServings={changeServings}
+  const footer = (
+    <>
+      {discard.prompted ? (
+        <DiscardPrompt
+          onKeepEditing={discard.cancel}
+          onDiscard={discard.confirm}
         />
-
-        <div className="dish-total">
-          <span className="muted small">Gesamt</span>
-          <strong>{formatPortionCount(total)}</strong>
-        </div>
-
-        <details className="free-dish-ingredients">
-          <summary>Zutaten</summary>
-          <div className="free-dish-reference">
-            <span className="muted small">Zutatenmengen für</span>
-            <input
-              className="free-dish-reference-input"
-              type="number"
-              min={1}
-              step={1}
-              inputMode="decimal"
-              value={referenceValue}
-              aria-label="Zutatenmengen für Portionen"
-              onChange={(event) => {
-                setReferenceText(event.target.value)
-                setReferenceTouched(true)
-                setError(null)
-              }}
-            />
-            <span className="muted small">Portionen</span>
-          </div>
-          <IngredientEditor
-            ingredients={rows}
-            onChange={setRows}
-            showGroup={false}
-          />
-          {previewIngredients.length === 0 ? (
-            <p className="muted small">Keine Zutaten hinterlegt.</p>
-          ) : preview ? (
-            <details className="scaling dish-scaling">
-              <summary>
-                {preview.factor === null
-                  ? 'Zutaten (unverändert)'
-                  : `Zutaten für ${formatPortionCount(total)}`}
-              </summary>
-              <ul className="scaling-list">
-                {preview.items.map((item) => (
-                  <li key={item.ingredient.id} className={item.scaled ? '' : 'is-unscaled'}>
-                    <span>{scaledIngredientLine(item)}</span>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
-        </details>
-
-        {error ? (
-          <div className="notice danger" role="alert">
-            {error}
-          </div>
-        ) : null}
-
-        <div className="dialog-actions">
-          <div className="dialog-actions-left">
-            {mode === 'edit' && onMoveRequest ? (
-              <button
-                type="button"
-                className="button quiet"
-                onClick={onMoveRequest}
-                disabled={busy}
-              >
-                Verschieben
-              </button>
-            ) : null}
-            {mode === 'edit' && initialEntries.length > 0 ? (
-              <button
-                type="button"
-                className="button danger-quiet"
-                onClick={() => void handleDelete()}
-                disabled={busy}
-              >
-                Gericht entfernen
-              </button>
-            ) : null}
-          </div>
-          <div className="dialog-actions-right">
-            <button type="button" className="button" onClick={onClose} disabled={busy}>
-              Abbrechen
-            </button>
+      ) : null}
+      <div className="plan-panel-actions">
+        <div className="plan-panel-actions-secondary">
+          {mode === 'edit' && onMoveRequest ? (
             <button
               type="button"
-              className="button primary"
-              onClick={() => void handleSubmit()}
-              disabled={busy || !valid}
+              className="button quiet"
+              onClick={handleMoveRequest}
+              disabled={busy}
             >
-              {busy ? 'Speichere …' : mode === 'create' ? 'Einplanen' : 'Speichern'}
+              Verschieben
             </button>
-          </div>
+          ) : null}
+          {mode === 'edit' && initialEntries.length > 0 ? (
+            <button
+              type="button"
+              className="button danger-quiet"
+              onClick={() => void handleDelete()}
+              disabled={busy}
+            >
+              {removesWholePlan
+                ? 'Ganze Planung entfernen'
+                : 'Gericht entfernen'}
+            </button>
+          ) : null}
+        </div>
+        <div className="plan-panel-actions-primary">
+          <button
+            type="button"
+            className="button"
+            onClick={handleRequestClose}
+            disabled={busy}
+          >
+            Abbrechen
+          </button>
+          <button
+            type="button"
+            className="button primary"
+            onClick={() => void handleSubmit()}
+            disabled={busy || !valid}
+          >
+            {busy ? 'Speichere …' : mode === 'create' ? 'Einplanen' : 'Speichern'}
+          </button>
         </div>
       </div>
-    </div>
+    </>
+  )
+
+  return (
+    <PlanningPanel
+      title={mode === 'create' ? 'Freies Gericht einplanen' : 'Gericht bearbeiten'}
+      subtitle={formatDayLabel(initialDate)}
+      onRequestClose={handleRequestClose}
+      closeDisabled={busy}
+      footer={footer}
+    >
+      <label className="field free-dish-name">
+        <span className="field-label">Name des Gerichts</span>
+        <input
+          value={name}
+          onChange={(event) => {
+            setName(event.target.value)
+            setError(null)
+          }}
+          placeholder="z. B. Nudeln mit Pesto"
+          data-autofocus
+          autoFocus
+        />
+      </label>
+
+      <DaySelectionEditor
+        initialDate={initialDate}
+        selection={selection}
+        weekStartDay={weekStartDay}
+        busy={busy}
+        removalHint={mode === 'edit' && initialEntries.length > 0}
+        onToggleDay={selectDay}
+        onChangeServings={changeServings}
+      />
+
+      <div className="plan-summary" aria-live="polite">
+        <strong className="plan-summary-total">
+          {formatPortionCount(total)}
+        </strong>
+        <span className="plan-summary-detail">
+          {reference
+            ? `Zutaten für ${formatPortionCount(reference)}`
+            : 'Zutaten-Portionen fehlen'}
+        </span>
+      </div>
+
+      <details className="free-dish-ingredients">
+        <summary>Zutaten</summary>
+        <div className="free-dish-reference">
+          <span className="muted small">Zutatenmengen für</span>
+          <input
+            className="free-dish-reference-input"
+            type="number"
+            min={1}
+            step={1}
+            inputMode="decimal"
+            value={referenceValue}
+            aria-label="Zutatenmengen für Portionen"
+            onChange={(event) => {
+              setReferenceText(event.target.value)
+              setReferenceTouched(true)
+              setError(null)
+            }}
+          />
+          <span className="muted small">Portionen</span>
+        </div>
+        <IngredientEditor
+          ingredients={rows}
+          onChange={setRows}
+          showGroup={false}
+        />
+        {previewIngredients.length === 0 ? (
+          <p className="muted small">Keine Zutaten hinterlegt.</p>
+        ) : preview ? (
+          <details className="scaling dish-scaling">
+            <summary>
+              {preview.factor === null
+                ? 'Zutaten (unverändert)'
+                : `Zutaten für ${formatPortionCount(total)}`}
+            </summary>
+            <ul className="scaling-list">
+              {preview.items.map((item) => (
+                <li key={item.ingredient.id} className={item.scaled ? '' : 'is-unscaled'}>
+                  <span>{scaledIngredientLine(item)}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+      </details>
+
+      {error ? (
+        <div className="notice danger" role="alert">
+          {error}
+        </div>
+      ) : null}
+    </PlanningPanel>
   )
 }

@@ -136,6 +136,8 @@ describe('free dish planning dialog', () => {
     )
 
     expect(html).toContain('Gericht bearbeiten')
+    expect(html).toContain('role="dialog"')
+    expect(html).toContain('plan-panel')
     expect(html).toContain('value="Nudeln mit Pesto"')
     expect(html.match(/dish-day-choice/g)).toHaveLength(7)
     expect(html).toContain('Do, 28.05.')
@@ -149,7 +151,7 @@ describe('free dish planning dialog', () => {
     expect(html).toContain('Zutaten für 5 Portionen')
     expect(html).toContain('500 g Nudeln')
     expect(html).toContain('Verschieben')
-    expect(html).toContain('Gericht entfernen')
+    expect(html).toContain('Ganze Planung entfernen')
   })
 
   it('offers the shared move action without a drag handle', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 
@@ -21,19 +21,5 @@ export function Markdown({ text, className = '' }: { text: string; className?: s
   return <div className={`markdown ${className}`.trim()} dangerouslySetInnerHTML={{ __html: html }} />
 }
 
-/** Object URL for image bytes, revoked when the bytes or component change. */
-export function useImageUrl(bytes: ArrayBuffer | undefined, mimeType: string | undefined): string | null {
-  const [url, setUrl] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!bytes || !mimeType) {
-      setUrl(null)
-      return
-    }
-    const objectUrl = URL.createObjectURL(new Blob([bytes], { type: mimeType }))
-    setUrl(objectUrl)
-    return () => URL.revokeObjectURL(objectUrl)
-  }, [bytes, mimeType])
-
-  return url
-}
+/** Object URL helper, re-exported for existing callers. */
+export { useImageUrl } from '../lib/useImageUrl'

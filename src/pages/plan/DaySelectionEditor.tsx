@@ -23,6 +23,8 @@ export interface DaySelectionEditorProps {
   selection: DaySelection
   weekStartDay: number
   busy?: boolean
+  /** Explain that deselecting a day removes it from the saved plan. */
+  removalHint?: boolean
   onToggleDay: (date: string) => void
   onChangeServings: (date: string, delta: number) => void
 }
@@ -32,6 +34,7 @@ export function DaySelectionEditor({
   selection,
   weekStartDay,
   busy = false,
+  removalHint = false,
   onToggleDay,
   onChangeServings,
 }: DaySelectionEditorProps) {
@@ -94,8 +97,11 @@ export function DaySelectionEditor({
       {selectedDays.length > 0 ? (
         <>
           <div className="dish-selected-head">
-            <span>Esstage</span>
-            <span>Mitesser</span>
+            <span>
+              {selectedDays.length}{' '}
+              {selectedDays.length === 1 ? 'Esstag' : 'Esstage'}
+            </span>
+            <span>Portionen</span>
           </div>
           <ul className="dish-selected-days">
             {selectedDays.map((day) => (
@@ -104,12 +110,12 @@ export function DaySelectionEditor({
                 <div
                   className="servings-stepper"
                   role="group"
-                  aria-label={`Mitesser am ${formatDayLabel(day.date)}`}
+                  aria-label={`Portionen am ${formatDayLabel(day.date)}`}
                 >
                   <button
                     type="button"
                     className="servings-step"
-                    aria-label={`Mitesser am ${formatDayLabel(day.date)} verringern`}
+                    aria-label={`Portionen am ${formatDayLabel(day.date)} verringern`}
                     disabled={busy || day.servings <= MIN_DAY_SERVINGS}
                     onClick={() => onChangeServings(day.date, -1)}
                   >
@@ -121,16 +127,31 @@ export function DaySelectionEditor({
                   <button
                     type="button"
                     className="servings-step"
-                    aria-label={`Mitesser am ${formatDayLabel(day.date)} erhöhen`}
+                    aria-label={`Portionen am ${formatDayLabel(day.date)} erhöhen`}
                     disabled={busy || day.servings >= MAX_DAY_SERVINGS}
                     onClick={() => onChangeServings(day.date, 1)}
                   >
                     +
                   </button>
                 </div>
+                <button
+                  type="button"
+                  className="dish-selected-remove"
+                  aria-label={`Esstag ${formatDayLabel(day.date)} entfernen`}
+                  title="Esstag entfernen"
+                  disabled={busy}
+                  onClick={() => onToggleDay(day.date)}
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
               </li>
             ))}
           </ul>
+          {removalHint ? (
+            <p className="muted small dish-days-hint">
+              Abgewählte Tage werden beim Speichern aus dieser Planung entfernt.
+            </p>
+          ) : null}
         </>
       ) : (
         <p className="muted small dish-days-empty">

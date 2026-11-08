@@ -1,9 +1,15 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { CookSession, MealPlanEntry, Recipe } from '../../types'
 import { DishDialog } from './DishDialog'
 
-function recipe(): Recipe {
+// Recipe covers are loaded from IndexedDB in the browser. The server-rendered
+// tests only need the equal-sized placeholder, so the hook stays inert here.
+vi.mock('dexie-react-hooks', () => ({
+  useLiveQuery: () => undefined,
+}))
+
+function recipe(overrides: Partial<Recipe> = {}): Recipe {
   return {
     id: 'r1',
     importId: 'mela-r1',
@@ -45,6 +51,7 @@ function recipe(): Recipe {
     raw: {},
     createdAt: 1,
     updatedAt: 1,
+    ...overrides,
   }
 }
 
@@ -243,5 +250,92 @@ describe('cook mode entry from the week plan', () => {
 
     expect(html).not.toContain('href="#/recipe/r1/cook')
     expect(html).not.toContain('>Kochen<')
+  })
+})
+
+describe('modern recipe selection and portion summary', () => {
+  it('opens a compact searchable recipe picker inside the responsive panel', () => {
+    const html = renderToStaticMarkup(
+      <DishDialog
+        mode="create"
+        initialDate="2026-05-29"
+        initialEntries={[]}
+        recipes={[
+          recipe(),
+          recipe({
+            id: 'r2',
+            title:
+              'Ofengemüse mit gerösteten Kichererbsen und Zitronen-Joghurt',
+            categories: ['Vegetarisch'],
+          }),
+        ]}
+        weekStartDay={3}
+        onDone={() => undefined}
+        onClose={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('role="dialog"')
+    expect(html).toContain('aria-modal="true"')
+    expect(html).toContain('Rezept auswählen')
+    expect(html).toContain('Rezept oder Zutat suchen')
+    expect(html.match(/class="plan-picker-card"/g)).toHaveLength(2)
+    expect(html).toContain('plan-picker-cover')
+    expect(html).toContain('plan-picker-title')
+    expect(html).toContain(
+      'Ofengemüse mit gerösteten Kichererbsen und Zitronen-Joghurt',
+    )
+    // No image is available in this render: the placeholder is equally sized.
+    expect(html).toContain('plan-cover-initial')
+    expect(html).not.toContain('<img')
+  })
+
+  it('shows the total, original recipe amount, factor and per-day removal', () => {
+    const html = renderToStaticMarkup(
+      <DishDialog
+        mode="edit"
+        initialDate="2026-05-29"
+        initialRecipeId="r1"
+        initialEntries={[
+          entry('friday', '2026-05-29', 2),
+          entry('tuesday', '2026-06-02', 3),
+        ]}
+        recipes={[recipe()]}
+        weekStartDay={3}
+        onMoveRequest={() => undefined}
+        onDone={() => undefined}
+        onClose={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('plan-summary')
+    expect(html).toContain('5 Portionen')
+    expect(html).toContain('aus einem Rezept für 4 Portionen')
+    expect(html).toContain('Faktor 1,25')
+    expect(html).toContain('Esstag Fr, 29.05. entfernen')
+    expect(html).toContain('Ganze Planung entfernen')
+    expect(html).toContain('Zutaten für 5 Portionen')
+    expect(html).toContain('Abgewählte Tage werden beim Speichern')
+  })
+
+  it('offers a way back to the planning form after reopening the picker', () => {
+    const html = renderToStaticMarkup(
+      <DishDialog
+        mode="create"
+        initialDate="2026-05-29"
+        initialRecipeId="r1"
+        initialEntries={[]}
+        recipes={[recipe()]}
+        weekStartDay={3}
+        onDone={() => undefined}
+        onClose={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('Gericht einplanen')
+    expect(html).toContain('Rezept ändern')
+    expect(html).toContain('im Original')
+    expect(html).toContain('Abbrechen')
+    expect(html).toContain('Einplanen')
   })
 })
