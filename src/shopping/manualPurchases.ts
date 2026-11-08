@@ -14,11 +14,13 @@ import {
   resolveCanonicalKey,
 } from '../domain/shopping'
 import {
-  isDateInShoppingPeriod,
-  shoppingPeriod,
+  periodContainsDate,
+  shoppingPeriodFromRange,
   standardShoppingListId,
 } from '../domain/shoppingLists'
+import { addDays } from '../domain/dates'
 import type { ShoppingList, ShoppingManualItem, ShoppingPurchase } from '../types'
+import { resolveShoppingPeriod } from './cycle'
 import { loadShoppingPeriodDemand, manualItemKey } from './demand'
 import { ShoppingListError } from './errors'
 
@@ -28,22 +30,19 @@ function dateOf(item: ShoppingManualItem): string {
   return item.shoppingDate || item.weekStart || ''
 }
 
-function periodOf(date: string): string {
+async function periodOf(date: string): Promise<string> {
   if (!DATE_RE.test(date)) {
     throw new ShoppingListError('invalid-period', 'Der Einkaufstag des Artikels ist ungültig.')
   }
-  try {
-    return shoppingPeriod(date).start
-  } catch {
-    throw new ShoppingListError('invalid-period', 'Der Einkaufstag des Artikels ist ungültig.')
-  }
+  return (await resolveShoppingPeriod(date)).start
 }
 
 function contextFor(
   item: ShoppingManualItem,
   lists: Map<string, ShoppingList>,
+  periodStart: string,
 ): { key: string; listId: string; isFree: boolean } {
-  const datePeriod = periodOf(dateOf(item))
+  const datePeriod = periodStart
   if (item.listId) {
     const list = lists.get(item.listId)
     if (!list) {
@@ -67,14 +66,29 @@ function contextKeyForOther(
   lists: Map<string, ShoppingList>,
 ): string {
   try {
-    return contextFor(item, lists).key
+    if (item.listId) {
+      const list = lists.get(item.listId)
+      if (list?.kind === 'free') return `free:${list.id}`
+      if (list?.kind === 'standard') return `standard:${list.periodStart ?? ''}`
+    }
+    return `standard:${item.weekStart ?? item.shoppingDate ?? ''}`
   } catch {
     return `invalid:${item.id}`
   }
 }
 
-function samePeriod(a: string, b: string): boolean {
-  return DATE_RE.test(a) && DATE_RE.test(b) && shoppingPeriod(a).start === b
+function samePeriod(a: string, b: string, lists: readonly ShoppingList[]): boolean {
+  if (!DATE_RE.test(a) || !DATE_RE.test(b)) return false
+  const persisted = lists.find(
+    (list) =>
+      list.kind === 'standard' &&
+      list.periodStart === b &&
+      list.periodEnd !== null &&
+      periodContainsDate({ start: b, end: list.periodEnd }, a),
+  )
+  if (persisted) return true
+  const range = shoppingPeriodFromRange(b, addDays(b, 6))
+  return periodContainsDate(range, a)
 }
 
 function purchaseIsInContext(
@@ -93,7 +107,7 @@ function purchaseIsInContext(
   }
   // Legacy purchases written by the old page have no list. They can only be
   // attributed through the period of their action date.
-  return samePeriod(purchase.shoppingDate, periodStart)
+  return samePeriod(purchase.shoppingDate, periodStart, Array.from(lists.values()))
 }
 
 function purchaseIsCompatible(
@@ -125,7 +139,7 @@ export interface ManualPurchaseContext {
 export async function loadManualPurchaseContext(
   item: ShoppingManualItem,
 ): Promise<ManualPurchaseContext> {
-  const periodStart = periodOf(dateOf(item))
+  const periodStart = await periodOf(dateOf(item))
   const [lists, rules, allManualItems, allPurchases, demand] = await Promise.all([
     db.shoppingLists.toArray(),
     db.shoppingItemRules.toArray(),
@@ -134,7 +148,7 @@ export async function loadManualPurchaseContext(
     loadShoppingPeriodDemand(periodStart),
   ])
   const listById = new Map(lists.map((list) => [list.id, list]))
-  const context = contextFor(item, listById)
+  const context = contextFor(item, listById, periodStart)
   const key = manualItemKey(item)
   const sameContextItems = allManualItems.filter(
     (other) =>

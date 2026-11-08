@@ -1,14 +1,25 @@
 import Dexie, { type Table } from 'dexie'
 import { parseIngredientLine, plainIngredientText } from './import/ingredients'
 import { shoppingIdentityMappings } from './domain/shopping'
-import { normalizeWeekday, startOfWeekOn } from './domain/dates'
+import { addDays, normalizeWeekday, startOfWeekOn } from './domain/dates'
 import {
   shoppingPeriod,
+  shoppingPeriodFromRange,
   standardShoppingListId,
+  standardShoppingListName,
   standardShoppingListRecord,
 } from './domain/shoppingLists'
 import { normalizeInstructionList } from './recipe/references'
-import { normalizeLegacyShoppingRows } from './shopping/legacyNormalization'
+import {
+  LEGACY_STANDARD_PERIOD_START_DAY,
+  normalizeLegacyShoppingRows,
+} from './shopping/legacyNormalization'
+import {
+  DEFAULT_SHOPPING_PERIOD_START_DAY,
+  DEFAULT_STANDARD_SHOPPING_LIST_NAME,
+  SHOPPING_PERIOD_START_DAY_KEY,
+  STANDARD_SHOPPING_LIST_NAME_KEY,
+} from './settings/shopping'
 import type {
   CookProgress,
   CookSession,
@@ -613,7 +624,7 @@ export class OpenCookDatabase extends Dexie {
         const standardIdForDate = (date: string): string | null => {
           if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
           try {
-            const period = shoppingPeriod(date)
+            const period = shoppingPeriod(date, LEGACY_STANDARD_PERIOD_START_DAY)
             periods.add(period.start)
             return standardShoppingListId(period.start)
           } catch {
@@ -645,7 +656,9 @@ export class OpenCookDatabase extends Dexie {
           const start = listId.slice('standard:'.length)
           if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return
           try {
-            periods.add(shoppingPeriod(start).start)
+            periods.add(
+              shoppingPeriod(start, LEGACY_STANDARD_PERIOD_START_DAY).start,
+            )
           } catch {
             // Ignore an invalid legacy reference instead of failing the upgrade.
           }
@@ -657,7 +670,13 @@ export class OpenCookDatabase extends Dexie {
         const existingIds = new Set(existingLists.map((list) => list.id))
         const newLists = Array.from(periods)
           .filter((periodStart) => !existingIds.has(standardShoppingListId(periodStart)))
-          .map((periodStart) => standardShoppingListRecord(periodStart, now))
+          .map((periodStart) =>
+            standardShoppingListRecord(
+              shoppingPeriodFromRange(periodStart, addDays(periodStart, 6)),
+              DEFAULT_STANDARD_SHOPPING_LIST_NAME,
+              now,
+            ),
+          )
         if (newLists.length > 0) await listTable.bulkPut(newLists)
         if (manualUpdates.length > 0) await manualTable.bulkPut(manualUpdates)
         if (purchaseUpdates.length > 0) await purchaseTable.bulkPut(purchaseUpdates)
@@ -710,7 +729,10 @@ export class OpenCookDatabase extends Dexie {
           const date = item.shoppingDate || item.weekStart || ''
           if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
           try {
-            const periodStart = shoppingPeriod(date).start
+            const periodStart = shoppingPeriod(
+              date,
+              LEGACY_STANDARD_PERIOD_START_DAY,
+            ).start
             const oldWeekStart =
               item.weekStart || startOfWeekOn(date, weekStartDay)
             if (oldWeekStart !== periodStart) {
@@ -724,7 +746,10 @@ export class OpenCookDatabase extends Dexie {
         for (const purchase of await purchaseTable.toArray()) {
           if (!/^\d{4}-\d{2}-\d{2}$/.test(purchase.shoppingDate)) continue
           try {
-            const periodStart = shoppingPeriod(purchase.shoppingDate).start
+            const periodStart = shoppingPeriod(
+              purchase.shoppingDate,
+              LEGACY_STANDARD_PERIOD_START_DAY,
+            ).start
             const oldWeekStart = startOfWeekOn(purchase.shoppingDate, weekStartDay)
             if (oldWeekStart !== periodStart) {
               purchaseUpdates.push({ ...purchase, legacyWeekAmbiguous: true })
@@ -784,6 +809,85 @@ export class OpenCookDatabase extends Dexie {
         }
         if (normalized.changedPurchases > 0) {
           await purchaseTable.bulkPut(normalized.purchases)
+        }
+      })
+    // v18 introduces the persistent shopping-cycle configuration. Existing
+    // installations start with Thursday (the historical shopping weekday) and
+    // a neutral standard-list name; both are only editable defaults. Period
+    // boundaries and ids of existing standard lists are preserved. Only the
+    // obsolete generated "Donnerstags-Einkauf" display name is replaced, and
+    // purchases keep their unknown provenance until a new write marks them.
+    this.version(18)
+      .stores({
+        recipes:
+          'id, &importId, title, updatedAt, *categories, *cuisine, *dishType, effort, *tags, favorite, wantToCook, importUrl',
+        images: 'id, recipeId, [recipeId+position]',
+        mealPlans:
+          'id, date, [date+slot], recipeId, freeDishId, pinned, cooked, cookSessionId, status',
+        mealDays: 'date',
+        settings: 'key',
+        cookSessions: 'id, recipeId, freeDishId, date, status, [recipeId+date]',
+        dayNotes: 'date, updatedAt',
+        freeDishes: 'id, updatedAt',
+        shoppingManualItems: 'id, shoppingDate, weekStart, listId',
+        shoppingChecks: 'id, weekStart, [weekStart+itemKey], itemKey',
+        shoppingPurchases:
+          'id, shoppingDate, itemKey, createdAt, [itemKey+shoppingDate], listId, manualItemId',
+        shoppingItemRules: 'key, updatedAt',
+        shoppingQuantityCorrections:
+          'id, shoppingDate, itemKey, [itemKey+shoppingDate]',
+        shoppingLists: 'id, kind, periodStart, createdAt',
+        shoppingDemandAllocations:
+          'id, periodStart, itemKey, listId, [periodStart+itemKey]',
+        pantryItems: null,
+        cookProgress: 'cookSessionId, updatedAt',
+      })
+      .upgrade(async (transaction) => {
+        const settingsTable = transaction.table<SettingRecord, string>('settings')
+        const dayRow = await settingsTable.get(SHOPPING_PERIOD_START_DAY_KEY)
+        if (
+          typeof dayRow?.value !== 'number' ||
+          !Number.isFinite(dayRow.value)
+        ) {
+          await settingsTable.put({
+            key: SHOPPING_PERIOD_START_DAY_KEY,
+            value: DEFAULT_SHOPPING_PERIOD_START_DAY,
+          })
+        }
+        const nameRow = await settingsTable.get(STANDARD_SHOPPING_LIST_NAME_KEY)
+        if (typeof nameRow?.value !== 'string' || !nameRow.value.trim()) {
+          await settingsTable.put({
+            key: STANDARD_SHOPPING_LIST_NAME_KEY,
+            value: DEFAULT_STANDARD_SHOPPING_LIST_NAME,
+          })
+        }
+
+        const listTable = transaction.table<ShoppingList, string>('shoppingLists')
+        for (const list of await listTable.toArray()) {
+          if (
+            list.kind !== 'standard' ||
+            !list.periodStart ||
+            !/^\d{4}-\d{2}-\d{2}$/.test(list.periodStart)
+          ) {
+            continue
+          }
+          const rawEnd =
+            typeof list.periodEnd === 'string' &&
+            /^\d{4}-\d{2}-\d{2}$/.test(list.periodEnd) &&
+            list.periodEnd >= list.periodStart
+              ? list.periodEnd
+              : addDays(list.periodStart, 6)
+          const period = shoppingPeriodFromRange(
+            list.periodStart,
+            rawEnd,
+            list.isTransition === true,
+          )
+          const name = String(list.name ?? '').startsWith('Donnerstags-Einkauf')
+            ? standardShoppingListName(DEFAULT_STANDARD_SHOPPING_LIST_NAME, period)
+            : list.name
+          if (list.periodEnd !== period.end || name !== list.name) {
+            await listTable.put({ ...list, periodEnd: period.end, name })
+          }
         }
       })
   }

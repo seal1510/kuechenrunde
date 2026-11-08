@@ -87,7 +87,7 @@ export function BackupPage() {
       setInspection(null)
       setResult(null)
       setConfirmDeleteAll(false)
-      setMessage('Alle lokalen Rezepte, Bilder und Wochenpläne wurden gelöscht. Einstellungen bleiben erhalten.')
+      setMessage('Alle lokalen Rezepte, Bilder, Wochenpläne und Einkaufsdaten wurden gelöscht. Einstellungen bleiben erhalten.')
     } catch (cause) {
       setError((cause as Error).message || 'Die Daten konnten nicht gelöscht werden.')
     } finally {
@@ -119,7 +119,9 @@ export function BackupPage() {
       inspection.conflicts.settings +
       inspection.conflicts.cookSessions +
       inspection.conflicts.dayNotes +
-      inspection.conflicts.freeDishes
+      inspection.conflicts.freeDishes +
+      inspection.conflicts.shoppingCycle +
+      inspection.conflicts.orphanedManualPurchaseReferences
     : 0
 
   return (
@@ -216,7 +218,14 @@ export function BackupPage() {
                 Kochvorgänge, {inspection.conflicts.mealDays} Tagesflags,{' '}
                 {inspection.conflicts.dayNotes} Tagesnotizen,{' '}
                 {inspection.conflicts.freeDishes} freie Gerichte,{' '}
-                {inspection.conflicts.settings} Einstellungen existieren bereits.
+                {inspection.conflicts.settings} Einstellungen existieren bereits
+                {inspection.conflicts.shoppingCycle > 0
+                  ? `, die Einkaufskonfiguration weicht in ${inspection.conflicts.shoppingCycle} Punkt(en) ab`
+                  : ''}
+                {inspection.conflicts.orphanedManualPurchaseReferences > 0
+                  ? `, ${inspection.conflicts.orphanedManualPurchaseReferences} Kauf/Käufe verweisen auf fehlende manuelle Artikel`
+                  : ''}
+                .
               </p>
               <p className="muted small">
                 „Zusammenführen“ lässt lokale Einträge gewinnen und ergänzt nur fehlende.
@@ -269,6 +278,13 @@ export function BackupPage() {
             Einkaufsartikel, {result.addedShoppingPurchases} Einkäufe und{' '}
             {result.addedShoppingQuantityCorrections} Mengenkorrekturen übernommen.
           </p>
+          {result.orphanedManualPurchaseReferences > 0 ? (
+            <p className="notice danger">
+              {result.orphanedManualPurchaseReferences} Kauf/Käufe verweisen auf einen
+              manuellen Artikel, der lokal bzw. im Backup fehlt. Die Käufe bleiben
+              erhalten und werden als Prüfkonflikt ausgewiesen.
+            </p>
+          ) : null}
           {result.detachedMealLinks > 0 ? (
             <p className="muted">
               {result.detachedMealLinks} Essenstermin(e) behielten ihre Portionen, aber die
@@ -299,9 +315,9 @@ export function BackupPage() {
       <section className="panel danger-zone">
         <h2>Datenverwaltung</h2>
         <p className="muted small">
-          Alle lokalen Rezepte, Bilder, Essenstermine, Kochvorgänge, freien Gerichte, Tagesflags
-          und Tagesnotizen löschen. Die Haushaltsgröße bleibt erhalten. Ein Backup vorher wird
-          ausdrücklich empfohlen.
+          Alle lokalen Rezepte, Bilder, Essenstermine, Kochvorgänge, freien Gerichte, Tagesflags,
+          Tagesnotizen und Einkaufsdaten löschen. Einstellungen wie Haushaltsgröße und
+          Einkaufskonfiguration bleiben erhalten. Ein Backup vorher wird ausdrücklich empfohlen.
         </p>
         {confirmDeleteAll ? (
           <div className="notice danger">

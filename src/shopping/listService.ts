@@ -10,7 +10,7 @@
  */
 
 import { db } from '../db'
-import { todayKey } from '../domain/dates'
+import { addDays, todayKey } from '../domain/dates'
 import {
   parseShoppingQuantityPosition,
   resolveCanonicalKey,
@@ -20,12 +20,14 @@ import {
 } from '../domain/shopping'
 import {
   fromAmountMilli,
-  isDateInShoppingPeriod,
   openAmount,
+  periodContainsDate,
   resolveOpenShoppingAmounts,
   resolveShoppingDistribution,
+  resolveShoppingPeriodFromData,
   shoppingAllocationId,
-  shoppingPeriod,
+  shoppingPeriodFromList,
+  shoppingPeriodFromRange,
   standardShoppingListId,
   standardShoppingListRecord,
   toAmountMilli,
@@ -35,7 +37,9 @@ import {
   type ShoppingPurchaseContribution,
   type ShoppingUnquantifiedPlacement,
 } from '../domain/shoppingLists'
+import { getShoppingSettings } from '../settings/shopping'
 import { randomId } from '../lib/id'
+import { requireDateKey, resolveShoppingPeriod } from './cycle'
 import {
   loadShoppingDistribution,
   loadShoppingPeriodDemand,
@@ -77,25 +81,37 @@ function optionalText(value: string | null | undefined): string | undefined {
   return clean ? clean : undefined
 }
 
-function requirePeriod(anchor: string): ShoppingPeriod {
+async function requirePeriod(anchor: string): Promise<ShoppingPeriod> {
   const clean = cleanText(anchor)
   if (!DATE_RE.test(clean)) {
     throw new ShoppingListError('invalid-period', 'Der Einkaufszeitraum ist kein gültiges Datum.')
   }
-  try {
-    return shoppingPeriod(clean)
-  } catch {
-    throw new ShoppingListError('invalid-period', 'Der Einkaufszeitraum ist kein gültiges Datum.')
-  }
+  return resolveShoppingPeriod(clean)
+}
+
+function listContainsDate(list: ShoppingList, date: string): boolean {
+  return Boolean(
+    list.kind === 'standard' &&
+      list.periodStart &&
+      list.periodEnd &&
+      periodContainsDate({ start: list.periodStart, end: list.periodEnd }, date),
+  )
+}
+
+function periodForPersistedStart(
+  periodStart: string,
+  lists: readonly ShoppingList[],
+): ShoppingPeriod {
+  const list = lists.find(
+    (entry) => entry.kind === 'standard' && entry.periodStart === periodStart,
+  )
+  if (list) return shoppingPeriodFromList(list)
+  return shoppingPeriodFromRange(periodStart, addDays(periodStart, 6))
 }
 
 function categoryOrNull(value: string | null | undefined): ShoppingCategoryId | null {
   const clean = cleanText(value)
   return CATEGORY_SET.has(clean) ? (clean as ShoppingCategoryId) : null
-}
-
-function virtualStandard(period: ShoppingPeriod): ShoppingList {
-  return standardShoppingListRecord(period.start, 0)
 }
 
 function sortLists(lists: readonly ShoppingList[]): ShoppingList[] {
@@ -118,18 +134,21 @@ export async function listShoppingLists(): Promise<ShoppingList[]> {
 
 /** Read-only lookup; returns `null` when the standard list was never needed. */
 export async function getStandardShoppingList(anchor: string): Promise<ShoppingList | null> {
-  const period = requirePeriod(anchor)
+  const period = await requirePeriod(anchor)
   return (await db.shoppingLists.get(standardShoppingListId(period.start))) ?? null
 }
 
 /** Lazily create the one standard list for a period. Idempotent. */
 export async function ensureStandardShoppingList(anchor: string): Promise<ShoppingList> {
-  const period = requirePeriod(anchor)
+  const [period, settings] = await Promise.all([
+    requirePeriod(anchor),
+    getShoppingSettings(),
+  ])
   const id = standardShoppingListId(period.start)
   return db.transaction('rw', db.shoppingLists, async () => {
     const existing = await db.shoppingLists.get(id)
     if (existing) return existing
-    const record = standardShoppingListRecord(period.start, Date.now())
+    const record = standardShoppingListRecord(period, settings.standardListName, Date.now())
     await db.shoppingLists.put(record)
     return record
   })
@@ -171,7 +190,7 @@ export async function renameShoppingList(id: string, name: string): Promise<Shop
     if (existing.kind !== 'free') {
       throw new ShoppingListError(
         'standard-list-protected',
-        'Der Donnerstags-Einkauf kann nicht umbenannt werden.',
+        'Der Standard-Einkaufszettel kann nicht wie eine freie Liste umbenannt werden.',
       )
     }
     const next: ShoppingList = { ...existing, name: cleanName, updatedAt: Date.now() }
@@ -196,14 +215,14 @@ export interface DeleteFreeShoppingListResult {
 }
 
 async function ensureStandardRecordInTransaction(
-  periodStart: string,
+  period: ShoppingPeriod,
+  baseName: string,
   now: number,
 ): Promise<ShoppingList> {
-  const period = shoppingPeriod(periodStart)
   const id = standardShoppingListId(period.start)
   const existing = await db.shoppingLists.get(id)
   if (existing) return existing
-  const record = standardShoppingListRecord(period.start, now)
+  const record = standardShoppingListRecord(period, baseName, now)
   await db.shoppingLists.put(record)
   return record
 }
@@ -211,7 +230,7 @@ async function ensureStandardRecordInTransaction(
 /**
  * Delete a free list in one transaction.
  *
- * - Automatic allocations move back to the Thursday list of their period.
+ * - Automatic allocations move back to the standard list of their stored period.
  * - Purchases stay with the moved item; they are never guessed across items.
  * - Manual articles are only deleted with the explicit confirmation flag.
  * - An allocation or purchase whose period cannot be reconstructed aborts the
@@ -221,6 +240,10 @@ export async function deleteFreeShoppingList(
   id: string,
   options: DeleteFreeShoppingListOptions = {},
 ): Promise<DeleteFreeShoppingListResult> {
+  const [settings, listsBefore] = await Promise.all([
+    getShoppingSettings(),
+    db.shoppingLists.toArray(),
+  ])
   return db.transaction(
     'rw',
     [
@@ -237,7 +260,7 @@ export async function deleteFreeShoppingList(
       if (list.kind !== 'free') {
         throw new ShoppingListError(
           'standard-list-protected',
-          'Der Donnerstag-Standardzettel kann nicht wie eine freie Liste gelöscht werden.',
+          'Der Standard-Einkaufszettel kann nicht wie eine freie Liste gelöscht werden.',
         )
       }
 
@@ -282,8 +305,8 @@ export async function deleteFreeShoppingList(
       const now = Date.now()
       let movedAllocations = 0
       for (const allocation of allocations) {
-        const period = shoppingPeriod(allocation.periodStart)
-        await ensureStandardRecordInTransaction(period.start, now)
+        const period = periodForPersistedStart(allocation.periodStart, listsBefore)
+        await ensureStandardRecordInTransaction(period, settings.standardListName, now)
         const targetListId = standardShoppingListId(period.start)
         const nextId = shoppingAllocationId(
           period.start,
@@ -332,8 +355,12 @@ export async function deleteFreeShoppingList(
           removedManualPurchases += 1
           continue
         }
-        const period = shoppingPeriod(purchase.shoppingDate)
-        await ensureStandardRecordInTransaction(period.start, now)
+        const period = resolveShoppingPeriodFromData(
+          purchase.shoppingDate,
+          settings,
+          listsBefore,
+        )
+        await ensureStandardRecordInTransaction(period, settings.standardListName, now)
         await db.shoppingPurchases.put({
           ...purchase,
           listId: standardShoppingListId(period.start),
@@ -362,7 +389,7 @@ export async function deleteFreeShoppingList(
 /* ------------------------------------------------------------------ */
 
 /**
- * The complete automatic demand for one Thursday–Wednesday period, derived by
+ * The complete automatic demand for one persisted shopping period, derived by
  * the existing aggregation exactly once. No purchase or manual article is
  * included here.
  */
@@ -433,7 +460,7 @@ export interface MoveShoppingItemResult {
 export async function moveShoppingItem(
   input: MoveShoppingItemInput,
 ): Promise<MoveShoppingItemResult> {
-  const period = requirePeriod(input.periodStart)
+  const period = await requirePeriod(input.periodStart)
   const demand = await getShoppingPeriodDemand(period.start)
   const item = requireDemandItem(demand, input.itemKey)
   const target = await requireTargetList(input.targetListId, demand.period)
@@ -467,7 +494,7 @@ export async function moveShoppingItem(
       for (const purchase of purchases) {
         if (purchase.manualItemId) continue
         if (!DATE_RE.test(purchase.shoppingDate)) continue
-        if (!isDateInShoppingPeriod(purchase.shoppingDate, demand.period.start)) continue
+        if (!periodContainsDate(demand.period, purchase.shoppingDate)) continue
         if (resolveCanonicalKey(purchase.itemKey, rules) !== item.key) continue
         await db.shoppingPurchases.put({
           ...purchase,
@@ -509,7 +536,7 @@ export interface MoveShoppingPositionResult {
 export async function moveShoppingPosition(
   input: MoveShoppingPositionInput,
 ): Promise<MoveShoppingPositionResult> {
-  const period = requirePeriod(input.periodStart)
+  const period = await requirePeriod(input.periodStart)
   const demand = await getShoppingPeriodDemand(period.start)
   const item = requireDemandItem(demand, input.itemKey)
   const dimension = cleanText(input.dimension)
@@ -532,7 +559,7 @@ export async function moveShoppingPosition(
       const affectedPurchases = purchases.filter((purchase) => {
         if (purchase.manualItemId) return false
         if (!DATE_RE.test(purchase.shoppingDate)) return false
-        if (!isDateInShoppingPeriod(purchase.shoppingDate, demand.period.start)) return false
+        if (!periodContainsDate(demand.period, purchase.shoppingDate)) return false
         return resolveCanonicalKey(purchase.itemKey, rules) === item.key
       })
       // Validate every affected purchase before the first write. A row with
@@ -624,14 +651,14 @@ export interface AssignShoppingSubquantityResult {
 }
 
 /**
- * Assign a fixed subset to one list. The rest stays on Thursday and follows
+ * Assign a fixed subset to one list. The rest stays on the standard list and follows
  * future demand changes. The amount must be exactly representable; ranges and
  * non-numeric lines are rejected instead of approximated.
  */
 export async function assignShoppingSubquantity(
   input: AssignShoppingSubquantityInput,
 ): Promise<AssignShoppingSubquantityResult> {
-  const period = requirePeriod(input.periodStart)
+  const period = await requirePeriod(input.periodStart)
   const demand = await getShoppingPeriodDemand(period.start)
   const item = requireDemandItem(demand, input.itemKey)
   if (item.positions.length === 0 && (item.unparsedAmounts.length > 0 || item.missingQuantity)) {
@@ -773,7 +800,7 @@ export interface ResetShoppingAllocationsInput {
 export async function resetShoppingAllocations(
   input: ResetShoppingAllocationsInput,
 ): Promise<number> {
-  const period = requirePeriod(input.periodStart)
+  const period = await requirePeriod(input.periodStart)
   const itemKey = optionalText(input.itemKey)
   const dimension = optionalText(input.dimension)
   return db.transaction('rw', db.shoppingDemandAllocations, async () => {
@@ -938,7 +965,7 @@ export async function getOpenDemandByList(
       manualPurchases.set(purchase.manualItemId, list)
       continue
     }
-    if (!isDateInShoppingPeriod(purchase.shoppingDate, period.start)) continue
+    if (!periodContainsDate(period, purchase.shoppingDate)) continue
     const listId = resolvePurchaseList(purchase)
     const resolvedList = listById.get(listId)
     if (purchase.legacyWeekAmbiguous && resolvedList?.kind !== 'free') {
@@ -1010,7 +1037,7 @@ export async function getOpenDemandByList(
       listId = list.id
       listIsFree = list.kind === 'free'
     }
-    if (!listIsFree && !isDateInShoppingPeriod(date, period.start)) continue
+    if (!listIsFree && !periodContainsDate(period, date)) continue
     // Free lists are period independent. A week conflict only applies when the
     // article actually belongs to a standard shopping period.
     if (item.legacyWeekAmbiguous && !listIsFree) {
@@ -1023,7 +1050,14 @@ export async function getOpenDemandByList(
     }
     if (listIsFree === false && item.listId) {
       const list = listById.get(item.listId)
-      if (list?.kind === 'standard' && list.periodStart !== shoppingPeriod(date).start) {
+      if (
+        list?.kind === 'standard' &&
+        !(
+          list.periodStart &&
+          list.periodEnd &&
+          periodContainsDate({ start: list.periodStart, end: list.periodEnd }, date)
+        )
+      ) {
         serviceConflicts.push({
           code: 'manual-list-period-mismatch',
           listId: list.id,
@@ -1049,7 +1083,7 @@ export async function getOpenDemandByList(
           !purchase.manualItemId &&
           !purchase.listId &&
           DATE_RE.test(purchase.shoppingDate) &&
-          isDateInShoppingPeriod(purchase.shoppingDate, period.start) &&
+          periodContainsDate(period, purchase.shoppingDate) &&
           resolveCanonicalKey(purchase.itemKey, rules) === key,
       )
       if (!automaticKeys.has(key) && sameKeyManualItems.length === 1) {
@@ -1061,7 +1095,7 @@ export async function getOpenDemandByList(
             !purchase.manualItemId &&
             !purchase.listId &&
             DATE_RE.test(purchase.shoppingDate) &&
-            isDateInShoppingPeriod(purchase.shoppingDate, period.start) &&
+            periodContainsDate(period, purchase.shoppingDate) &&
             resolveCanonicalKey(purchase.itemKey, rules) === key,
         )
         if (fallback.length > 0) {
@@ -1203,8 +1237,8 @@ export async function createManualListItem(
   const shoppingDate = input.shoppingDate
     ? cleanText(input.shoppingDate)
     : (list.periodStart ?? todayKey())
-  const datePeriod = requirePeriod(shoppingDate)
-  if (list.kind === 'standard' && list.periodStart !== datePeriod.start) {
+  requireDateKey(shoppingDate, 'Der Einkaufstag')
+  if (list.kind === 'standard' && !listContainsDate(list, shoppingDate)) {
     throw new ShoppingListError(
       'list-period-mismatch',
       'Der Einkaufstag gehört nicht zum Zeitraum des Standardzettels.',
@@ -1264,21 +1298,19 @@ export async function updateManualListItem(
         patch.shoppingDate === undefined
           ? (existing.shoppingDate || existing.weekStart || target?.periodStart || todayKey())
           : cleanText(patch.shoppingDate)
-      const datePeriod = requirePeriod(shoppingDate)
-      if (target?.kind === 'standard') {
-        if (target.periodStart !== datePeriod.start) {
-          // Moving to a standard list of another period implies moving the
-          // article into that period. This is only allowed atomically; an
-          // explicitly supplied conflicting date is rejected.
-          if (patch.listId !== undefined && patch.shoppingDate === undefined) {
-            shoppingDate = target.periodStart ?? shoppingDate
-          } else {
-            throw new ShoppingListError(
-              'list-period-mismatch',
-              'Der Einkaufstag gehört nicht zum Zeitraum des Standardzettels.',
-              { listId: target.id, periodStart: target.periodStart, shoppingDate },
-            )
-          }
+      requireDateKey(shoppingDate, 'Der Einkaufstag')
+      if (target?.kind === 'standard' && !listContainsDate(target, shoppingDate)) {
+        // Moving to a standard list of another period implies moving the
+        // article into that period. This is only allowed atomically; an
+        // explicitly supplied conflicting date is rejected.
+        if (patch.listId !== undefined && patch.shoppingDate === undefined) {
+          shoppingDate = target.periodStart ?? shoppingDate
+        } else {
+          throw new ShoppingListError(
+            'list-period-mismatch',
+            'Der Einkaufstag gehört nicht zum Zeitraum des Standardzettels.',
+            { listId: target.id, periodStart: target.periodStart, shoppingDate },
+          )
         }
       }
 
@@ -1346,11 +1378,8 @@ export async function moveManualItem(
       }
       const currentDate = existing.shoppingDate || existing.weekStart || todayKey()
       let shoppingDate = currentDate
-      if (target.kind === 'standard') {
-        const datePeriod = requirePeriod(currentDate)
-        if (datePeriod.start !== target.periodStart) {
-          shoppingDate = target.periodStart ?? currentDate
-        }
+      if (target.kind === 'standard' && !listContainsDate(target, currentDate)) {
+        shoppingDate = target.periodStart ?? currentDate
       }
       const now = Date.now()
       const next: ShoppingManualItem = {
@@ -1410,6 +1439,7 @@ export async function setManualItemPurchased(
     )
   }
   const adoptable = context.adoptablePurchase
+  const settings = await getShoppingSettings()
 
   return db.transaction(
     'rw',
@@ -1424,8 +1454,13 @@ export async function setManualItemPurchased(
       if (listId.startsWith('standard:')) {
         const existingList = await db.shoppingLists.get(listId)
         if (!existingList) {
+          const periodStart = listId.slice('standard:'.length)
           await db.shoppingLists.put(
-            standardShoppingListRecord(listId.slice('standard:'.length), Date.now()),
+            standardShoppingListRecord(
+              shoppingPeriodFromRange(periodStart, addDays(periodStart, 6)),
+              settings.standardListName,
+              Date.now(),
+            ),
           )
         }
       }
@@ -1472,6 +1507,7 @@ export async function setManualItemPurchased(
           itemKey: manualItemKey(item),
           listId,
           manualItemId: item.id,
+          periodStart: context.periodStart,
           amounts,
           snapshot: parsed ? [parsed] : [],
           qualitative: amounts.length === 0,

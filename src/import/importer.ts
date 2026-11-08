@@ -114,8 +114,11 @@ export async function importMelaRecipes(
 }
 
 /**
- * Delete every recipe, image, cooking event, plan entry, free dish, day flag
- * and day note (test-data reset).
+ * Delete every recipe, image, cooking event, plan entry, free dish, day flag,
+ * day note and all shopping data (test-data reset). Settings are deliberately
+ * kept, matching the existing UI contract (household size and the shopping
+ * configuration stay editable). The whole reset is one transaction, so a
+ * failure cannot leave a partially deleted shopping state behind.
  */
 export async function deleteAllData(): Promise<void> {
   await db.transaction(
@@ -129,6 +132,13 @@ export async function deleteAllData(): Promise<void> {
       db.cookProgress,
       db.dayNotes,
       db.freeDishes,
+      db.shoppingManualItems,
+      db.shoppingChecks,
+      db.shoppingPurchases,
+      db.shoppingItemRules,
+      db.shoppingQuantityCorrections,
+      db.shoppingLists,
+      db.shoppingDemandAllocations,
     ],
     async () => {
       await db.images.clear()
@@ -138,6 +148,13 @@ export async function deleteAllData(): Promise<void> {
       await db.cookProgress.clear()
       await db.dayNotes.clear()
       await db.freeDishes.clear()
+      await db.shoppingManualItems.clear()
+      await db.shoppingChecks.clear()
+      await db.shoppingPurchases.clear()
+      await db.shoppingItemRules.clear()
+      await db.shoppingQuantityCorrections.clear()
+      await db.shoppingLists.clear()
+      await db.shoppingDemandAllocations.clear()
       await db.recipes.clear()
     },
   )

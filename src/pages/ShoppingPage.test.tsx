@@ -19,8 +19,8 @@ const live = vi.hoisted(() => {
     },
     next: () => {
       // recipes, freeDishes, cookSessions, manualItems, purchases, rules,
-      // quantityCorrections, settings
-      const index = call % 8
+      // quantityCorrections, settings, shoppingLists
+      const index = call % 9
       call += 1
       return values[index]
     },
@@ -121,6 +121,7 @@ function baseValues(overrides: Partial<Record<string, unknown>> = {}): unknown[]
     overrides.rules ?? [],
     overrides.quantityCorrections ?? [],
     overrides.settings ?? [],
+    overrides.shoppingLists ?? [],
   ]
 }
 

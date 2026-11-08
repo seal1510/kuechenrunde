@@ -10,6 +10,7 @@
  */
 
 import { db } from '../db'
+import { addDays } from '../domain/dates'
 import {
   CATEGORY_ORDER_SETTING_KEY,
   DEFAULT_CATEGORY_ORDER,
@@ -25,7 +26,13 @@ import {
 import { manualItemKey, resolvePurchaseTargetForLegacyWrite } from './demand'
 import { ShoppingListError } from './errors'
 import { loadManualPurchaseContext } from './manualPurchases'
-import { shoppingAllocationId, shoppingPeriod, standardShoppingListRecord } from '../domain/shoppingLists'
+import {
+  periodContainsDate,
+  shoppingAllocationId,
+  standardShoppingListRecord,
+} from '../domain/shoppingLists'
+import { resolveShoppingPeriod } from './cycle'
+import { getShoppingSettings } from '../settings/shopping'
 import { randomId } from '../lib/id'
 import type {
   SettingRecord,
@@ -413,6 +420,7 @@ export async function mergeShoppingProducts(
       db.shoppingChecks,
       db.shoppingQuantityCorrections,
       db.shoppingDemandAllocations,
+      db.shoppingLists,
     ],
     async () => {
       const rules = await db.shoppingItemRules.toArray()
@@ -534,27 +542,41 @@ export async function resolveAmbiguousRule(
   })
 }
 
+function purchasePeriodStartOf(
+  purchase: ShoppingPurchase,
+  lists: readonly { id: string; kind: string; periodStart?: string | null; periodEnd?: string | null }[],
+): string | null {
+  if (purchase.listId?.startsWith('standard:')) {
+    return purchase.listId.slice('standard:'.length)
+  }
+  const containing = lists.find(
+    (list) =>
+      list.kind === 'standard' &&
+      typeof list.periodStart === 'string' &&
+      typeof list.periodEnd === 'string' &&
+      periodContainsDate({ start: list.periodStart, end: list.periodEnd }, purchase.shoppingDate),
+  )
+  return containing?.periodStart ?? null
+}
+
 async function refreshConfirmedTotals(itemKey: string): Promise<void> {
   const purchases = await db.shoppingPurchases.where('itemKey').equals(itemKey).toArray()
+  const lists = await db.shoppingLists.toArray()
   const byPeriod = new Map<string, ShoppingPurchase[]>()
   for (const purchase of purchases) {
-    let periodStart: string
-    try {
-      periodStart = shoppingPeriod(purchase.shoppingDate).start
-    } catch {
-      continue
-    }
+    const periodStart = purchasePeriodStartOf(purchase, lists)
+    if (!periodStart) continue
     const list = byPeriod.get(periodStart) ?? []
     list.push(purchase)
     byPeriod.set(periodStart, list)
   }
-  for (const rows of byPeriod.values()) {
+  for (const [periodStart, rows] of byPeriod) {
     rows.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
     const latest = rows[rows.length - 1]
     if (!latest) continue
     await db.shoppingPurchases.put({
       ...latest,
-      confirmedTotal: confirmedTotals(rows.slice(0, -1), latest.shoppingDate, latest.amounts),
+      confirmedTotal: confirmedTotals(rows.slice(0, -1), latest.amounts),
       updatedAt: Date.now(),
     })
   }
@@ -708,7 +730,6 @@ function toPurchasedAmounts(
 
 function confirmedTotals(
   previous: readonly ShoppingPurchase[],
-  shoppingDate: string,
   added: readonly ShoppingPurchasedAmount[],
 ): ShoppingPurchasedAmount[] {
   const byDimension = new Map<string, ShoppingPurchasedAmount>()
@@ -726,30 +747,33 @@ function confirmedTotals(
       existing.upper = Math.round((existing.upper + Math.max(0, entry.upper)) * 1000) / 1000
     }
   }
-  let targetPeriod: string | null = null
-  try {
-    targetPeriod = shoppingPeriod(shoppingDate).start
-  } catch {
-    targetPeriod = null
-  }
   for (const purchase of previous) {
-    if (!targetPeriod) break
-    let purchasePeriod: string
-    try {
-      purchasePeriod = shoppingPeriod(purchase.shoppingDate).start
-    } catch {
-      continue
-    }
-    if (purchasePeriod !== targetPeriod) continue
     for (const entry of purchase.amounts) add(entry)
   }
   for (const entry of added) add(entry)
   return Array.from(byDimension.values())
 }
 
+function purchaseBelongsToPeriod(
+  purchase: ShoppingPurchase,
+  periodStart: string,
+): boolean {
+  if (purchase.listId?.startsWith('standard:')) {
+    return purchase.listId.slice('standard:'.length) === periodStart
+  }
+  if (purchase.listId) return false
+  // Legacy rows without a list reference carry no reliable period identity.
+  // Use the historical regular seven-day window only as a conservative match;
+  // it never re-dates or rewrites the row.
+  const end = addDays(periodStart, 6)
+  return purchase.shoppingDate >= periodStart && purchase.shoppingDate <= end
+}
+
 export interface PurchaseInput {
   shoppingDate: string
   itemKey: string
+  /** Resolved period the purchase belongs to; used for cumulative totals. */
+  periodStart?: string
   /** Optional deterministic id for idempotent writes. */
   id?: string
   /** Owning shopping list; omitted for legacy callers. */
@@ -780,15 +804,23 @@ export async function addShoppingPurchaseRecord(
   // Monotonic timestamps make "last purchase" unambiguous even inside the
   // same millisecond.
   const now = Math.max(Date.now(), latest + 1)
+  const listId = optionalText(input.listId) ?? undefined
+  const periodStart =
+    optionalText(input.periodStart) ??
+    (listId?.startsWith('standard:') ? listId.slice('standard:'.length) : null)
+  const previousInPeriod = periodStart
+    ? previous.filter((entry) => purchaseBelongsToPeriod(entry, periodStart))
+    : []
   const purchase: ShoppingPurchase = {
     id: optionalText(input.id) ?? randomId(),
     shoppingDate,
     itemKey,
-    listId: optionalText(input.listId) ?? undefined,
+    listId,
     manualItemId: optionalText(input.manualItemId) ?? undefined,
+    provenance: 'recorded',
     confirmedTotal: input.confirmedTotal
-      ? confirmedTotals([], '', input.confirmedTotal)
-      : confirmedTotals(previous, shoppingDate, input.amounts),
+      ? confirmedTotals([], input.confirmedTotal)
+      : confirmedTotals(previousInPeriod, input.amounts),
     amounts: toPurchasedAmounts(
       input.amounts.map((entry) => ({
         dimension: entry.dimension,
@@ -820,12 +852,21 @@ export async function addShoppingPurchase(input: PurchaseInput): Promise<Shoppin
     listId = target.listId
     manualItemId = target.manualItemId
   }
+  const [period, settings] = await Promise.all([
+    resolveShoppingPeriod(
+      listId?.startsWith('standard:')
+        ? listId.slice('standard:'.length)
+        : shoppingDate,
+    ),
+    getShoppingSettings(),
+  ])
   return db.transaction('rw', [db.shoppingPurchases, db.shoppingLists], async () => {
     if (listId?.startsWith('standard:')) {
       const existing = await db.shoppingLists.get(listId)
       if (!existing) {
-        const periodStart = listId.slice('standard:'.length)
-        await db.shoppingLists.put(standardShoppingListRecord(periodStart, Date.now()))
+        await db.shoppingLists.put(
+          standardShoppingListRecord(period, settings.standardListName, Date.now()),
+        )
       }
     }
     return addShoppingPurchaseRecord({
@@ -834,6 +875,7 @@ export async function addShoppingPurchase(input: PurchaseInput): Promise<Shoppin
       itemKey,
       listId,
       manualItemId,
+      periodStart: period.start,
     })
   })
 }

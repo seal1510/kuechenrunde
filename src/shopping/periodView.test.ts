@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { addDays } from '../domain/dates'
 import { shoppingItemKey } from '../domain/shopping'
 import { shoppingPeriod } from '../domain/shoppingLists'
+import { periodForStart } from './periodView'
 import type { CookSession, Ingredient, Recipe, ShoppingManualItem, ShoppingPurchase } from '../types'
 import { buildShoppingPeriodView } from './periodView'
 
@@ -102,7 +103,7 @@ function view(sessions: CookSession[], extras: {
   purchases?: ShoppingPurchase[]
 } = {}, periodStart = '2026-11-05') {
   return buildShoppingPeriodView({
-    periodStart,
+    period: periodForStart(periodStart),
     recipes: [recipe()],
     freeDishes: [],
     cookSessions: sessions,
@@ -146,7 +147,7 @@ describe('shopping period view', () => {
   })
 
   it('navigates Thursday to Thursday across month and year boundaries', () => {
-    const period = shoppingPeriod('2026-12-31')
+    const period = shoppingPeriod('2026-12-31', 3)
     expect(period.start).toBe('2026-12-31')
     expect(addDays(period.start, -7)).toBe('2026-12-24')
     expect(addDays(period.start, 7)).toBe('2027-01-07')

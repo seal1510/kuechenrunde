@@ -406,7 +406,7 @@ describe('backup roundtrip', () => {
     await db.mealPlans.bulkPut(linked)
 
     const { bytes: archive, manifest } = await exportBackup()
-    expect(manifest.version).toBe(11)
+    expect(manifest.version).toBe(12)
     expect(manifest.includes).toContain('cookSessions')
     expect(manifest.includes).toContain('dayNotes')
     expect(manifest.includes).toContain('freeDishes')

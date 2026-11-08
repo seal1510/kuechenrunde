@@ -121,8 +121,7 @@ export function formatDayLabel(key: string): string {
   return `${weekdayShort(key)}, ${String(day).padStart(2, '0')}.${String(month).padStart(2, '0')}.`
 }
 
-export function formatWeekRange(start: string): string {
-  const end = addDays(start, 6)
+export function formatWeekRange(start: string, end: string = addDays(start, 6)): string {
   const a = parseDateKey(start)
   const b = parseDateKey(end)
   const left = `${String(a.day).padStart(2, '0')}.${String(a.month).padStart(2, '0')}.`

@@ -7,15 +7,27 @@
  * the Dexie schema migration and by backup inspection/restore, so an old
  * backup cannot bypass the treatment that an old database receives.
  *
- * The current calendar setting is deliberately never used here. For standard
- * list purchases without a stored historical week start the historical
- * grouping is not reconstructable and therefore remains a review conflict.
+ * The current shopping or calendar setting is deliberately never used here.
+ * Legacy rows without a persisted standard list predate the multi-list model,
+ * when the app grouped purchases into a fixed Thursday–Wednesday period. That
+ * historical format constant is only used to interpret old data; it never
+ * configures new periods. For standard-list rows without a stored historical
+ * week start the original grouping is not reconstructable and therefore
+ * remains a review conflict.
  */
 
-import { shoppingPeriod } from '../domain/shoppingLists'
+import { addDays, weekdayIndex } from '../domain/dates'
+import { periodContainsDate } from '../domain/shoppingLists'
 import type { ShoppingList, ShoppingManualItem, ShoppingPurchase } from '../types'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * The period model used before shopping lists were configurable. This is a
+ * historical data-format interpretation, not a user-facing setting and never a
+ * fallback for new periods.
+ */
+export const LEGACY_STANDARD_PERIOD_START_DAY = 3
 
 export interface LegacyShoppingNormalizationInput {
   manualItems: readonly ShoppingManualItem[]
@@ -38,17 +50,30 @@ export interface LegacyShoppingNormalizationResult {
   changedPurchases: number
 }
 
-function periodStartOf(date: string | null | undefined): string | null {
+function legacyPeriodStartOf(date: string): string | null {
   if (!date || !DATE_RE.test(date)) return null
-  try {
-    return shoppingPeriod(date).start
-  } catch {
-    return null
-  }
+  // 3 = Thursday; see LEGACY_STANDARD_PERIOD_START_DAY above.
+  return addDays(
+    date,
+    -((weekdayIndex(date) - LEGACY_STANDARD_PERIOD_START_DAY + 7) % 7),
+  )
 }
 
-function listMap(lists: readonly ShoppingList[]): Map<string, ShoppingList> {
-  return new Map(lists.map((list) => [list.id, list]))
+function standardListFor(
+  lists: Map<string, ShoppingList>,
+  listId: string | undefined,
+): ShoppingList | undefined {
+  if (!listId) return undefined
+  return lists.get(listId)
+}
+
+function listContains(list: ShoppingList | undefined, date: string): boolean {
+  return Boolean(
+    list?.kind === 'standard' &&
+      list.periodStart &&
+      list.periodEnd &&
+      periodContainsDate({ start: list.periodStart, end: list.periodEnd }, date),
+  )
 }
 
 function withFlag<T extends { legacyWeekAmbiguous?: boolean }>(
@@ -68,13 +93,16 @@ function normalizeManualItem(
   legacySource: boolean,
   forceAmbiguous: boolean,
 ): { item: ShoppingManualItem; changed: boolean } {
-  const list = item.listId ? lists.get(item.listId) : undefined
+  const list = standardListFor(lists, item.listId)
 
   // Free lists have no mandatory week. A differing date is never evidence of
   // an ambiguous week, and a previous false positive is cleared.
-  if (list?.kind === 'free') {
-    const next = withFlag(item, false)
-    return { item: next, changed: next !== item }
+  if (item.listId) {
+    const referenced = lists.get(item.listId)
+    if (referenced?.kind === 'free') {
+      const next = withFlag(item, false)
+      return { item: next, changed: next !== item }
+    }
   }
 
   if (forceAmbiguous) {
@@ -91,19 +119,22 @@ function normalizeManualItem(
   }
 
   const date = item.shoppingDate || item.weekStart
-  const datePeriod = periodStartOf(date)
-  if (!datePeriod) return { item, changed: false }
+  if (!date || !DATE_RE.test(date)) return { item, changed: false }
 
-  if (list?.kind === 'standard' && list.periodStart !== datePeriod) {
-    const next = withFlag(item, true)
+  const storedWeekStart =
+    item.weekStart && DATE_RE.test(item.weekStart) ? item.weekStart : null
+
+  if (list?.kind === 'standard') {
+    const unambiguous =
+      listContains(list, date) && storedWeekStart === list.periodStart
+    const next = withFlag(item, !unambiguous)
     return { item: next, changed: next !== item }
   }
 
-  // A stored weekStart is the only positive historical evidence we have.
-  const knownWeekStart = item.weekStart && DATE_RE.test(item.weekStart)
-    ? item.weekStart
-    : null
-  const unambiguous = knownWeekStart === datePeriod
+  // No persisted list: interpret only against the historical Thursday format.
+  const datePeriod = legacyPeriodStartOf(date)
+  if (!datePeriod) return { item, changed: false }
+  const unambiguous = storedWeekStart === datePeriod
   const next = withFlag(item, !unambiguous)
   return { item: next, changed: next !== item }
 }
@@ -121,21 +152,38 @@ function normalizePurchase(
     return { purchase: next, changed: next !== purchase }
   }
 
-  const list = purchase.listId ? lists.get(purchase.listId) : undefined
-  if (list?.kind === 'free') {
-    const next = withFlag(purchase, false)
+  const list = standardListFor(lists, purchase.listId)
+  if (purchase.listId) {
+    const referenced = lists.get(purchase.listId)
+    if (referenced?.kind === 'free') {
+      const next = withFlag(purchase, false)
+      return { purchase: next, changed: next !== purchase }
+    }
+  }
+
+  // An explicitly detected conflict (for example a list/date mismatch during
+  // backup inspection) wins over every optimistic provenance marker.
+  if (forceAmbiguous) {
+    const next = withFlag(purchase, true)
     return { purchase: next, changed: next !== purchase }
   }
 
-  if (forceAmbiguous) {
-    const next = withFlag(purchase, true)
+  // A row written by the current application carries an explicit provenance.
+  // It is a certain purchase and must never be downgraded to "unknown history".
+  if (purchase.provenance === 'recorded') {
+    const next = withFlag(purchase, false)
     return { purchase: next, changed: next !== purchase }
   }
 
   if (!legacySource) return { purchase, changed: false }
 
   // Standard-list purchases from an old source carry no historical week start.
-  // The current weekStartDay setting is not proof of the original grouping.
+  // The current setting is not proof of the original grouping.
+  if (list?.kind === 'standard') {
+    const next = withFlag(purchase, true)
+    return { purchase: next, changed: next !== purchase }
+  }
+
   const next = withFlag(purchase, true)
   return { purchase: next, changed: next !== purchase }
 }
@@ -143,7 +191,7 @@ function normalizePurchase(
 export function normalizeLegacyShoppingRows(
   input: LegacyShoppingNormalizationInput,
 ): LegacyShoppingNormalizationResult {
-  const lists = listMap(input.lists)
+  const lists = new Map(input.lists.map((list) => [list.id, list]))
   let changedManualItems = 0
   let changedPurchases = 0
 
@@ -174,4 +222,12 @@ export function normalizeLegacyShoppingRows(
     changedManualItems,
     changedPurchases,
   }
+}
+
+/**
+ * A persisted standard list for the legacy Thursday period containing [date],
+ * used only by data readers that must interpret pre-list rows.
+ */
+export function legacyStandardPeriodStart(date: string): string | null {
+  return legacyPeriodStartOf(date)
 }

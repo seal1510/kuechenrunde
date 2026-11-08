@@ -3,10 +3,11 @@
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * The shopping page always works on one complete Thursday–Wednesday shopping
- * period. This helper is the single place that turns the persisted rows into
- * that view, so the displayed demand, the conflict notice and the dates used
- * for writes cannot drift apart.
+ * The shopping page works on one complete persisted shopping period. This
+ * helper is the single place that turns the persisted rows into that view, so
+ * the displayed demand, the conflict notice and the dates used for writes
+ * cannot drift apart. The period boundaries are passed in explicitly and are
+ * never recomputed from the current shopping weekday.
  */
 
 import {
@@ -14,11 +15,10 @@ import {
   type ShoppingListResult,
 } from '../domain/shopping'
 import {
-  isDateInShoppingPeriod,
-  shoppingPeriod,
-  SHOPPING_PERIOD_START_DAY,
+  shoppingPeriodFromRange,
   type ShoppingPeriod,
 } from '../domain/shoppingLists'
+import { addDays } from '../domain/dates'
 import type {
   CookSession,
   FreeDish,
@@ -32,7 +32,7 @@ import type {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 export interface ShoppingPeriodViewInput {
-  periodStart: string
+  period: ShoppingPeriod
   recipes: readonly Recipe[]
   freeDishes: readonly FreeDish[]
   cookSessions: readonly CookSession[]
@@ -53,18 +53,28 @@ export interface ShoppingPeriodView {
   }
 }
 
-function isInPeriod(date: string | null | undefined, periodStart: string): boolean {
-  return Boolean(date) && DATE_RE.test(String(date)) && isDateInShoppingPeriod(String(date), periodStart)
+function isInPeriod(date: string | null | undefined, period: ShoppingPeriod): boolean {
+  return (
+    Boolean(date) &&
+    DATE_RE.test(String(date)) &&
+    String(date) >= period.start &&
+    String(date) <= period.end
+  )
+}
+
+/** Pure fallback for callers that only know a persisted period start. */
+export function periodForStart(periodStart: string): ShoppingPeriod {
+  return shoppingPeriodFromRange(periodStart, addDays(periodStart, 6))
 }
 
 export function buildShoppingPeriodView(input: ShoppingPeriodViewInput): ShoppingPeriodView {
-  const period = shoppingPeriod(input.periodStart)
+  const period = input.period
   const conflictManualItems: ShoppingManualItem[] = []
   const conflictPurchases: ShoppingPurchase[] = []
   const manualItems: ShoppingManualItem[] = []
   for (const item of input.manualItems) {
     const date = item.shoppingDate || item.weekStart
-    if (!isInPeriod(date, period.start)) continue
+    if (!isInPeriod(date, period)) continue
     if (item.legacyWeekAmbiguous) {
       conflictManualItems.push(item)
       continue
@@ -73,7 +83,7 @@ export function buildShoppingPeriodView(input: ShoppingPeriodViewInput): Shoppin
   }
   const purchases: ShoppingPurchase[] = []
   for (const purchase of input.purchases) {
-    if (!isInPeriod(purchase.shoppingDate, period.start)) continue
+    if (!isInPeriod(purchase.shoppingDate, period)) continue
     if (purchase.legacyWeekAmbiguous) {
       conflictPurchases.push(purchase)
       continue
@@ -82,7 +92,8 @@ export function buildShoppingPeriodView(input: ShoppingPeriodViewInput): Shoppin
   }
   const list = buildShoppingList({
     anchor: period.start,
-    weekStartDay: SHOPPING_PERIOD_START_DAY,
+    periodStart: period.start,
+    periodEnd: period.end,
     recipes: input.recipes,
     freeDishes: input.freeDishes,
     cookSessions: input.cookSessions,

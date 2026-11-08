@@ -112,7 +112,7 @@ function session(): CookSession {
 }
 
 function standardId(): string {
-  return standardShoppingListId(shoppingPeriod(PERIOD).start)
+  return standardShoppingListId(shoppingPeriod(PERIOD, 3).start)
 }
 
 function minimalBackup(version: number, shopping: Record<string, unknown>) {
@@ -203,8 +203,8 @@ describe('shopping lists in backups', () => {
 
     const inspection = await inspectBackup(toArrayBuffer(bytes))
     expect(inspection.shoppingLists.map((list) => list.name).sort()).toEqual([
-      'Donnerstags-Einkauf · 05.11. – 11.11.2026',
       'Markt Samstag',
+      'Wocheneinkauf · 05.11. – 11.11.2026',
     ])
     expect(inspection.shoppingDemandAllocations).toHaveLength(1)
     expect(inspection.shoppingDemandAllocations[0]?.quantityMilli).toBe(5000)

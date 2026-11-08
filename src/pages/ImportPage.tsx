@@ -275,7 +275,7 @@ export function ImportPage() {
         </p>
         {confirmDelete ? (
           <div className="notice danger">
-            <p>Wirklich alle lokalen Rezepte, Bilder, Planungen und Tagesnotizen löschen?</p>
+            <p>Wirklich alle lokalen Rezepte, Bilder, Planungen, Tagesnotizen und Einkaufsdaten löschen?</p>
             <div className="notice-actions">
               <button type="button" className="button danger" onClick={handleDeleteAll} disabled={deleting}>
                 {deleting ? 'Lösche …' : 'Endgültig löschen'}

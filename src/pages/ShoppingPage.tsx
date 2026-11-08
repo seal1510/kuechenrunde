@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
-import { addDays, formatDayLabel, todayKey } from '../domain/dates'
+import { formatDayLabel, todayKey, WEEKDAY_NAMES } from '../domain/dates'
 import {
   categoryLabel,
   categoryOrderWithMove,
@@ -31,8 +31,18 @@ import {
   type ShoppingCategoryId,
   type ShoppingListItem,
 } from '../domain/shopping'
-import { shoppingPeriod } from '../domain/shoppingLists'
+import { resolveShoppingPeriodFromData } from '../domain/shoppingLists'
 import { buildShoppingPeriodView } from '../shopping/periodView'
+import {
+  adjacentShoppingPeriodStart,
+  applyShoppingCycleChange,
+  previewShoppingCycleChange,
+  type ShoppingCycleChangePreview,
+} from '../shopping/cycle'
+import {
+  shoppingSettingsFromRows,
+  type ShoppingSettings,
+} from '../settings/shopping'
 import {
   addManualItem,
   addShoppingPurchase,
@@ -132,7 +142,7 @@ function CloseIcon() {
 
 export function ShoppingPage() {
   const today = useMemo(() => todayKey(), [])
-  const [periodStart, setPeriodStart] = useState(() => shoppingPeriod(today).start)
+  const [periodAnchor, setPeriodAnchor] = useState(today)
   const [addOpen, setAddOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [editingKey, setEditingKey] = useState<string | null>(null)
@@ -153,15 +163,29 @@ export function ShoppingPage() {
     [],
   )
   const settingsRows = useLiveQuery(() => db.settings.toArray(), [])
+  const shoppingLists = useLiveQuery(() => db.shoppingLists.toArray(), [])
 
   const categoryOrder = useMemo(
     () => categoryOrderFromRows(settingsRows ?? []),
     [settingsRows],
   )
+  const shoppingSettings = useMemo(
+    () => shoppingSettingsFromRows(settingsRows ?? []),
+    [settingsRows],
+  )
+  const period = useMemo(
+    () =>
+      resolveShoppingPeriodFromData(
+        periodAnchor,
+        shoppingSettings,
+        shoppingLists ?? [],
+      ),
+    [periodAnchor, shoppingSettings, shoppingLists],
+  )
   const view = useMemo(
     () =>
       buildShoppingPeriodView({
-        periodStart,
+        period,
         recipes: recipes ?? [],
         freeDishes: freeDishes ?? [],
         cookSessions: cookSessions ?? [],
@@ -172,7 +196,7 @@ export function ShoppingPage() {
         today,
       }),
     [
-      periodStart,
+      period,
       recipes,
       freeDishes,
       cookSessions,
@@ -183,7 +207,6 @@ export function ShoppingPage() {
       today,
     ],
   )
-  const period = view.period
   const list = view.list
   const conflicts = view.conflicts
   const conflictLabels = useMemo(() => {
@@ -232,7 +255,8 @@ export function ShoppingPage() {
     purchases === undefined ||
     rules === undefined ||
     quantityCorrections === undefined ||
-    settingsRows === undefined
+    settingsRows === undefined ||
+    shoppingLists === undefined
 
   async function run(action: () => Promise<unknown>) {
     try {
@@ -404,7 +428,16 @@ export function ShoppingPage() {
             type="button"
             className="shopping-nav-button"
             aria-label="Vorherige Einkaufsperiode"
-            onClick={() => setPeriodStart(addDays(period.start, -7))}
+            onClick={() =>
+              setPeriodAnchor(
+                adjacentShoppingPeriodStart(
+                  period.start,
+                  -1,
+                  shoppingSettings,
+                  shoppingLists ?? [],
+                ),
+              )
+            }
           >
             ‹
           </button>
@@ -415,7 +448,16 @@ export function ShoppingPage() {
             type="button"
             className="shopping-nav-button"
             aria-label="Nächste Einkaufsperiode"
-            onClick={() => setPeriodStart(addDays(period.start, 7))}
+            onClick={() =>
+              setPeriodAnchor(
+                adjacentShoppingPeriodStart(
+                  period.start,
+                  1,
+                  shoppingSettings,
+                  shoppingLists ?? [],
+                ),
+              )
+            }
           >
             ›
           </button>
@@ -424,7 +466,7 @@ export function ShoppingPage() {
           <button
             type="button"
             className="shopping-today"
-            onClick={() => setPeriodStart(shoppingPeriod(today).start)}
+            onClick={() => setPeriodAnchor(today)}
           >
             Heute
           </button>
@@ -586,6 +628,7 @@ export function ShoppingPage() {
       {settingsOpen ? (
         <SettingsDialog
           order={categoryOrder}
+          settings={shoppingSettings}
           onMove={moveCategory}
           onClose={() => setSettingsOpen(false)}
         />
@@ -1584,24 +1627,130 @@ function PurchaseConfirmDialog({ item, onCancel, onConfirm }: PurchaseConfirmDia
 
 interface SettingsDialogProps {
   order: readonly ShoppingCategoryId[]
+  settings: ShoppingSettings
   onMove: (id: ShoppingCategoryId, direction: -1 | 1) => void
   onClose: () => void
 }
 
-function SettingsDialog({ order, onMove, onClose }: SettingsDialogProps) {
+function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProps) {
+  const [day, setDay] = useState(settings.periodStartDay)
+  const [name, setName] = useState(settings.standardListName)
+  const [preview, setPreview] = useState<ShoppingCycleChangePreview | null>(null)
+  const [previewPending, setPreviewPending] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const trimmedName = name.replace(/\s+/g, ' ').trim()
+  const dirty =
+    day !== settings.periodStartDay || trimmedName !== settings.standardListName
+
+  async function refreshPreview(nextDay: number, nextName: string) {
+    setPreviewPending(true)
+    try {
+      setError('')
+      setPreview(
+        await previewShoppingCycleChange({
+          periodStartDay: nextDay,
+          standardListName: nextName,
+        }),
+      )
+    } catch (cause) {
+      setError(errorText(cause))
+    } finally {
+      setPreviewPending(false)
+    }
+  }
+
+  useEffect(() => {
+    void refreshPreview(settings.periodStartDay, settings.standardListName)
+    // The preview only describes the persisted state on open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function save() {
+    setBusy(true)
+    setError('')
+    try {
+      await applyShoppingCycleChange({
+        periodStartDay: day,
+        standardListName: name,
+      })
+      onClose()
+    } catch (cause) {
+      setError(errorText(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <Modal label="Einkaufslisten-Einstellungen" className="shopping-settings-modal" onClose={onClose}>
       <div className="shopping-panel-head">
         <div>
           <h2>Einstellungen</h2>
           <p className="shopping-panel-subline">
-            Kategorien in der Reihenfolge deines Einkaufswegs.
+            Einkaufszyklus, Standardzettel und Kategorien deines Einkaufswegs.
           </p>
         </div>
         <button type="button" className="shopping-icon-button" aria-label="Schließen" onClick={onClose}>
           <CloseIcon />
         </button>
       </div>
+
+      <label className="shopping-confirm-row">
+        <span>Regelmäßiger Einkaufstag</span>
+        <select
+          value={day}
+          onChange={(event) => {
+            const next = Number(event.target.value)
+            setDay(next)
+            void refreshPreview(next, name)
+          }}
+        >
+          {WEEKDAY_NAMES.map((label, index) => (
+            <option key={label} value={index}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="shopping-confirm-row">
+        <span>Name des Standard-Einkaufszettels</span>
+        <input
+          value={name}
+          maxLength={60}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Wocheneinkauf"
+        />
+      </label>
+
+      {error ? (
+        <p className="notice danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      {preview ? (
+        <div className={`notice${preview.blocked ? ' danger' : ''}`} role="status">
+          <p>
+            <strong>Aktueller Zeitraum:</strong> {preview.currentPeriod.label}
+          </p>
+          {preview.transition ? (
+            <p>
+              <strong>Einmaliger Übergangszeitraum:</strong> {preview.transition.label} (
+              {preview.transition.days.length} Tage). Bereits vorhandene Einkäufe und
+              Verteilungen bleiben ihrem bisherigen Zeitraum zugeordnet.
+            </p>
+          ) : (
+            <p>Kein verkürzter Übergangszeitraum nötig.</p>
+          )}
+          <p>
+            <strong>Erster regulärer Zeitraum:</strong> {preview.firstRegularPeriod.label}
+          </p>
+          {preview.blocked ? <p>{preview.conflict?.message}</p> : null}
+        </div>
+      ) : null}
+
       <ol className="shopping-category-order">
         {order.map((id, index) => (
           <li key={id}>
@@ -1630,7 +1779,15 @@ function SettingsDialog({ order, onMove, onClose }: SettingsDialogProps) {
         ))}
       </ol>
       <div className="shopping-panel-actions">
-        <button type="button" className="button primary" onClick={onClose}>
+        <button
+          type="button"
+          className="button primary"
+          onClick={() => void save()}
+          disabled={busy || previewPending || !dirty || preview?.blocked === true}
+        >
+          {busy ? 'Speichere …' : previewPending ? 'Prüfe …' : 'Einstellungen speichern'}
+        </button>
+        <button type="button" className="button quiet" onClick={onClose}>
           Fertig
         </button>
       </div>

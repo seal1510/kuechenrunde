@@ -26,6 +26,7 @@ export type ShoppingListErrorCode =
   | 'confirmation-required'
   | 'purchase-conflict'
   | 'orphaned-allocation'
+  | 'cycle-change-conflict'
 
 export class ShoppingListError extends Error {
   readonly code: ShoppingListErrorCode

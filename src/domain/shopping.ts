@@ -109,12 +109,26 @@ export interface ShoppingWeek {
 
 export function shoppingWeek(anchor: string, weekStartDay: number): ShoppingWeek {
   const start = startOfWeekOn(anchor, weekStartDay)
-  const days = Array.from({ length: 7 }, (_, index) => addDays(start, index))
+  return shoppingWeekFromRange(start, addDays(start, 6))
+}
+
+/**
+ * A persisted shopping period can be shorter than seven days (transition while
+ * the configured shopping weekday changes). Its boundaries are authoritative.
+ */
+export function shoppingWeekFromRange(start: string, end: string): ShoppingWeek {
+  const last = end >= start ? end : start
+  const days: string[] = []
+  for (let index = 0; ; index += 1) {
+    const day = addDays(start, index)
+    days.push(day)
+    if (day === last || index > 3660) break
+  }
   return {
     start,
-    end: days[6] ?? start,
+    end: days[days.length - 1] ?? start,
     days,
-    label: formatWeekRange(start),
+    label: formatWeekRange(start, days[days.length - 1] ?? start),
   }
 }
 
@@ -1239,7 +1253,15 @@ export interface ShoppingListResult {
 
 export interface ShoppingListInput {
   anchor: string
-  weekStartDay: number
+  /** Required for a computed regular week; ignored when persisted bounds are supplied. */
+  weekStartDay?: number
+  /**
+   * Persisted period boundaries. When both are supplied they decide the visible
+   * window, including a shortened transition period; `weekStartDay` is then
+   * only a compatibility field and must not move the period.
+   */
+  periodStart?: string
+  periodEnd?: string
   recipes: readonly Recipe[]
   freeDishes: readonly FreeDish[]
   cookSessions: readonly CookSession[]
@@ -1416,12 +1438,19 @@ function positionsEqual(
  * is involved in this calculation.
  */
 export function buildShoppingList(input: ShoppingListInput): ShoppingListResult {
-  const week = shoppingWeek(input.anchor, input.weekStartDay)
+  const week =
+    input.periodStart && input.periodEnd
+      ? shoppingWeekFromRange(input.periodStart, input.periodEnd)
+      : input.weekStartDay === undefined
+        ? (() => {
+            throw new Error('buildShoppingList needs a weekStartDay or explicit period bounds.')
+          })()
+        : shoppingWeek(input.anchor, input.weekStartDay)
   const warnings = new Set<string>()
   const groups = new Map<string, MutableGroup>()
   const rulesByKey = new Map(input.rules.map((rule) => [rule.key, rule]))
   const canonical = (key: string) => resolveKey(key, rulesByKey)
-  const inWeek = (date: string) => shoppingWeek(date, input.weekStartDay).start === week.start
+  const inWeek = (date: string) => date >= week.start && date <= week.end
 
   const sourceById = new Map<string, DishSource>()
   for (const recipe of input.recipes) sourceById.set(`recipe:${recipe.id}`, { kind: 'recipe', recipe })

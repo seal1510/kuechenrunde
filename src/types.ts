@@ -345,7 +345,7 @@ export interface SettingRecord {
 
 /**
  * One independent shopping list. A `standard` list always represents exactly
- * one Thursday–Wednesday shopping period and has a deterministic id derived
+ * one persisted shopping period and has a deterministic id derived
  * from that period. A `free` list has no mandatory period and can be renamed
  * or deleted at any time.
  */
@@ -355,10 +355,16 @@ export interface ShoppingList {
   id: string
   kind: ShoppingListKind
   name: string
-  /** Thursday of the shopping period; `null` for free lists. */
+  /** First day of the persisted shopping period; `null` for free lists. */
   periodStart: string | null
-  /** Wednesday of the shopping period; `null` for free lists. */
+  /** Last day of the persisted shopping period; `null` for free lists. */
   periodEnd: string | null
+  /**
+   * One-time shortened period created while the configured shopping weekday
+   * changes. Its persisted start/end are authoritative and are never
+   * recomputed from the current setting.
+   */
+  isTransition?: boolean
   createdAt: number
   updatedAt: number
 }
@@ -367,7 +373,7 @@ export interface ShoppingList {
  * How an automatically calculated demand position is distributed to a list.
  *
  * - `partial`: a fixed amount the user assigned to this list. The remainder
- *   stays on the Thursday list and grows/shrinks with the current demand.
+ *   stays on the standard list and grows/shrinks with the current demand.
  * - `full`: the complete position (including future demand changes) belongs to
  *   this list. A `dimension` of `"*"` means every dimension of the item.
  */
@@ -381,7 +387,7 @@ export type ShoppingAllocationMode = 'partial' | 'full'
 export interface ShoppingDemandAllocation {
   /** Deterministic: `${periodStart}|${itemKey}|${dimension}|${listId}`. */
   id: string
-  /** Thursday of the shopping period, "YYYY-MM-DD". */
+  /** First day of the persisted shopping period, "YYYY-MM-DD". */
   periodStart: string
   /** Canonical product identity from the existing shopping rules. */
   itemKey: string
@@ -417,7 +423,7 @@ export interface ShoppingManualItem {
   shoppingDate?: string
   /**
    * Owning shopping list. Missing on legacy rows; readers resolve such rows to
-   * the standard list of the Thursday–Wednesday period containing the date.
+   * the standard list of the persisted period containing the date.
    */
   listId?: string
   /**
@@ -487,6 +493,12 @@ export interface ShoppingPurchase {
   manualItemId?: string
   /** See `ShoppingManualItem.legacyWeekAmbiguous`. */
   legacyWeekAmbiguous?: boolean
+  /**
+   * Where this row came from. Rows written by the current application carry
+   * `recorded`; older rows without a value keep an unknown historical origin
+   * and are never silently treated as certain.
+   */
+  provenance?: 'recorded' | 'legacy'
   amounts: ShoppingPurchasedAmount[]
   /** Cumulative purchased totals for this week after this action. */
   confirmedTotal?: ShoppingPurchasedAmount[]

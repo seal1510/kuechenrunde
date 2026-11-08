@@ -20,11 +20,23 @@ import {
   shoppingItemKey,
 } from '../domain/shopping'
 import {
+  periodContainsDate,
   shoppingAllocationId,
   shoppingPeriod,
+  shoppingPeriodFromList,
+  shoppingPeriodFromRange,
   standardShoppingListId,
+  standardShoppingListName,
   standardShoppingListRecord,
 } from '../domain/shoppingLists'
+import { addDays } from '../domain/dates'
+import {
+  DEFAULT_STANDARD_SHOPPING_LIST_NAME,
+  SHOPPING_PERIOD_START_DAY_KEY,
+  STANDARD_SHOPPING_LIST_NAME_KEY,
+  shoppingSettingsFromRows,
+  type ShoppingSettings,
+} from '../settings/shopping'
 import {
   DEFAULT_HOUSEHOLD_SIZE,
   type CookSession,
@@ -54,13 +66,14 @@ export const BACKUP_FORMAT = 'opencook-web-backup'
  * discontinued pantry data, v8 adds week-scoped quantity corrections, v9 adds
  * structured instruction steps with explicit ingredient references, v10 adds
  * independent shopping lists and partial demand allocations, v11 persists and
- * normalises the legacy-week review flag. Older v1–v10 backups remain
- * importable; their pantry section is ignored, v5 checks are converted exactly
- * once, old rows are attached to the deterministic Thursday–Wednesday standard
- * list without changing their dates, and rows whose historical week cannot be
- * reconstructed are marked for review rather than treated as certain.
+ * normalises the legacy-week review flag, v12 adds the persistent shopping
+ * cycle configuration. Older v1–v11 backups remain importable; their pantry
+ * section is ignored, v5 checks are converted exactly once, old rows keep their
+ * persisted period boundaries (or the historical Thursday format when no list
+ * existed), and rows whose historical week cannot be reconstructed are marked
+ * for review rather than treated as certain.
  */
-export const BACKUP_VERSION = 11
+export const BACKUP_VERSION = 12
 export const MAX_BACKUP_BYTES = 200 * 1024 * 1024
 export const MAX_BACKUP_ENTRIES = 5_000
 export const MAX_BACKUP_ENTRY_BYTES = 20 * 1024 * 1024
@@ -136,6 +149,10 @@ export interface BackupConflicts {
   shoppingQuantityCorrections: number
   shoppingLists: number
   shoppingDemandAllocations: number
+  /** Purchases whose manual article is missing from the same backup/merge. */
+  orphanedManualPurchaseReferences: number
+  /** Shopping-cycle settings that differ from the local installation. */
+  shoppingCycle: number
 }
 
 export interface BackupInspection {
@@ -155,6 +172,8 @@ export interface BackupInspection {
   shoppingQuantityCorrections: ShoppingQuantityCorrection[]
   shoppingLists: ShoppingList[]
   shoppingDemandAllocations: ShoppingDemandAllocation[]
+  /** Shopping-cycle configuration contained in the backup (or neutral defaults). */
+  shoppingCycle: ShoppingSettings
   /** Repairs/normalisations applied while reading (e.g. detached broken links). */
   warnings: string[]
   conflicts: BackupConflicts
@@ -191,6 +210,7 @@ export interface RestoreResult {
   skippedShoppingLists: number
   addedShoppingDemandAllocations: number
   skippedShoppingDemandAllocations: number
+  orphanedManualPurchaseReferences: number
   detachedMealLinks: number
 }
 
@@ -653,42 +673,76 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
       })
     }
   }
+  const backupSettings = shoppingSettingsFromRows(settings)
   const listById = new Map(shoppingLists.map((list) => [list.id, list]))
-  const ensureStandardList = (periodStart: string): ShoppingList => {
-    const period = shoppingPeriod(periodStart)
+
+  const ensureStandardListRange = (period: ReturnType<typeof shoppingPeriodFromRange>): ShoppingList => {
     const id = standardShoppingListId(period.start)
     const existing = listById.get(id)
     if (existing) return existing
-    const record = standardShoppingListRecord(period.start, importNow)
+    const record = standardShoppingListRecord(period, backupSettings.standardListName, importNow)
     shoppingLists.push(record)
     listById.set(id, record)
     return record
   }
+
+  const persistedListContaining = (date: string): ShoppingList | undefined =>
+    Array.from(listById.values())
+      .filter(
+        (list): list is ShoppingList & { periodStart: string; periodEnd: string } =>
+          list.kind === 'standard' &&
+          typeof list.periodStart === 'string' &&
+          typeof list.periodEnd === 'string' &&
+          periodContainsDate({ start: list.periodStart, end: list.periodEnd }, date),
+      )
+      .sort((a, b) => b.periodStart.localeCompare(a.periodStart))[0]
+
+  const ensureStandardListForDate = (date: string): ShoppingList => {
+    const containing = persistedListContaining(date)
+    if (containing) return containing
+    // No persisted list covers the date. Only here may the backup's own
+    // shopping setting decide the new period; the local setting is irrelevant.
+    const regular = shoppingPeriod(date, backupSettings.periodStartDay)
+    return ensureStandardListRange(regular)
+  }
+
+  const ensureStandardListFromStart = (periodStart: string): ShoppingList => {
+    const existing = listById.get(standardShoppingListId(periodStart))
+    if (existing) return existing
+    return ensureStandardListRange(
+      shoppingPeriodFromRange(periodStart, addDays(periodStart, 6)),
+    )
+  }
+
   const repairListId = (
     rawListId: string | undefined,
     date: string,
     label: string,
   ): { listId: string; repaired: boolean } => {
-    let period: ReturnType<typeof shoppingPeriod>
-    try {
-      period = shoppingPeriod(date)
-    } catch {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return { listId: rawListId ?? '', repaired: false }
     }
     const mapped = rawListId ? (listIdRemap.get(rawListId) ?? rawListId) : ''
-    if (!mapped) return { listId: ensureStandardList(period.start).id, repaired: false }
+    if (!mapped) return { listId: ensureStandardListForDate(date).id, repaired: false }
     const list = listById.get(mapped)
     if (!list) {
       warnings.push(
-        `${label} verweist auf eine fehlende Einkaufsliste und wurde dem Donnerstags-Einkauf zugeordnet.`,
+        `${label} verweist auf eine fehlende Einkaufsliste und wurde dem Standardzettel des gespeicherten Zeitraums zugeordnet.`,
       )
-      return { listId: ensureStandardList(period.start).id, repaired: true }
+      return { listId: ensureStandardListForDate(date).id, repaired: true }
     }
-    if (list.kind === 'standard' && list.periodStart !== period.start) {
+    if (
+      list.kind === 'standard' &&
+      typeof list.periodStart === 'string' &&
+      typeof list.periodEnd === 'string' &&
+      !periodContainsDate({ start: list.periodStart, end: list.periodEnd }, date)
+    ) {
+      // Keep the persisted reference instead of silently moving the row to
+      // another period; mark it so the UI can surface a review conflict.
       warnings.push(
-        `${label} verweist auf einen Standardzettel eines anderen Zeitraums und wurde dem passenden Donnerstags-Einkauf zugeordnet.`,
+        `${label} verweist auf einen Standardzettel eines anderen Zeitraums und bleibt als Prüfkonflikt erhalten.`,
       )
-      return { listId: ensureStandardList(period.start).id, repaired: true }
+      return { listId: list.id, repaired: true }
     }
     return { listId: list.id, repaired: false }
   }
@@ -721,10 +775,9 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
         warnings.push(`Einkaufszuweisung ${index + 1} war unvollständig und wurde ignoriert.`)
         return
       }
-      const period = shoppingPeriod(allocation.periodStart)
       let listId: string
       if (allocation.listId.startsWith('standard:')) {
-        listId = ensureStandardList(period.start).id
+        listId = ensureStandardListFromStart(allocation.periodStart).id
       } else {
         listId = listIdRemap.get(allocation.listId) ?? allocation.listId
         if (!listById.has(listId)) {
@@ -735,7 +788,7 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
         }
       }
       const id = shoppingAllocationId(
-        period.start,
+        allocation.periodStart,
         allocation.itemKey,
         allocation.dimension,
         listId,
@@ -748,10 +801,25 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
       shoppingDemandAllocations.push({
         ...allocation,
         id,
-        periodStart: period.start,
         listId,
       })
     })
+  }
+
+  // A purchase that references a manual article must be checked against the
+  // article set actually present after the import. It is never deleted or
+  // re-booked as recipe demand; the dangling reference is surfaced instead.
+  const manualItemIds = new Set(shoppingManualItems.map((item) => item.id))
+  const orphanedManualPurchaseIds = shoppingPurchases
+    .filter(
+      (purchase) =>
+        purchase.manualItemId !== undefined && !manualItemIds.has(purchase.manualItemId),
+    )
+    .map((purchase) => purchase.id)
+  if (orphanedManualPurchaseIds.length > 0) {
+    warnings.push(
+      `${orphanedManualPurchaseIds.length} Kauf/Käufe verweisen auf einen manuellen Artikel, der im Backup fehlt. Die Käufe bleiben erhalten und werden als Prüfkonflikt gemeldet.`,
+    )
   }
 
   const shoppingItemRules: ShoppingItemRule[] = []
@@ -872,7 +940,25 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
   const existingImportIds = new Set(existingRecipes.map((recipe) => recipe.importId))
   const existingPlanIds = new Set(existingPlans.map((plan) => plan.id))
   const existingDayDates = new Set(existingDays.map((day) => day.date))
-  const existingSettings = new Set((await db.settings.toArray()).map((setting) => setting.key))
+  const localSettingRows = await db.settings.toArray()
+  const existingSettings = new Set(localSettingRows.map((setting) => setting.key))
+  const localShoppingCycle = shoppingSettingsFromRows(localSettingRows)
+  const backupHasShoppingCycle = settings.some(
+    (setting) =>
+      setting.key === SHOPPING_PERIOD_START_DAY_KEY ||
+      setting.key === STANDARD_SHOPPING_LIST_NAME_KEY,
+  )
+  const shoppingCycleConflicts = backupHasShoppingCycle
+    ? [
+        localShoppingCycle.periodStartDay !== backupSettings.periodStartDay,
+        localShoppingCycle.standardListName !== backupSettings.standardListName,
+      ].filter(Boolean).length
+    : 0
+  if (shoppingCycleConflicts > 0) {
+    warnings.push(
+      'Die Einkaufskonfiguration im Backup unterscheidet sich von dieser Installation. „Zusammenführen“ behält die lokale Einstellung; „Lokal ersetzen“ übernimmt die Backup-Einstellung. Bereits gespeicherte Einkaufsperioden behalten in beiden Fällen ihre gespeicherten Zeiträume.',
+    )
+  }
   const existingSessionIds = new Set(existingSessions.map((session) => session.id))
   const existingNoteDates = new Set(existingNotes.map((note) => note.date))
   const existingFreeDishIds = new Set(existingFreeDishes.map((freeDish) => freeDish.id))
@@ -906,6 +992,8 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     shoppingDemandAllocations: shoppingDemandAllocations.filter((entry) =>
       existingAllocationIds.has(entry.id),
     ).length,
+    orphanedManualPurchaseReferences: orphanedManualPurchaseIds.length,
+    shoppingCycle: shoppingCycleConflicts,
   }
 
   // The same normalisation as the Dexie v17 migration. Older backups without
@@ -937,6 +1025,7 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     shoppingQuantityCorrections,
     shoppingLists,
     shoppingDemandAllocations,
+    shoppingCycle: backupSettings,
     warnings,
     conflicts,
   }
@@ -1242,6 +1331,12 @@ function normalizeShoppingPurchase(value: unknown, index: number): ShoppingPurch
     listId: asString(value.listId).trim() || undefined,
     manualItemId: asString(value.manualItemId).trim() || undefined,
     legacyWeekAmbiguous: value.legacyWeekAmbiguous === true ? true : undefined,
+    provenance:
+      value.provenance === 'recorded'
+        ? 'recorded'
+        : value.provenance === 'legacy'
+          ? 'legacy'
+          : undefined,
     amounts: normalizePurchasedAmounts(value.amounts),
     confirmedTotal: normalizePurchasedAmounts(value.confirmedTotal),
     snapshot: normalizePurchasedAmounts(value.snapshot),
@@ -1321,14 +1416,28 @@ function normalizeShoppingList(value: unknown, index: number): ShoppingList | nu
   }
   const periodStart = asString(value.periodStart)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart)) return null
-  let period: ReturnType<typeof shoppingPeriod>
-  try {
-    period = shoppingPeriod(periodStart)
-  } catch {
-    return null
-  }
+  const rawEnd = asString(value.periodEnd)
+  const periodEnd =
+    /^\d{4}-\d{2}-\d{2}$/.test(rawEnd) && rawEnd >= periodStart
+      ? rawEnd
+      : addDays(periodStart, 6)
+  const isTransition = value.isTransition === true
+  const period = shoppingPeriodFromRange(periodStart, periodEnd, isTransition)
+  const rawName = asString(value.name).replace(/\s+/g, ' ').trim()
+  // The obsolete generated name is replaced by the neutral default, matching
+  // the Dexie v18 migration. A genuinely custom name is preserved.
+  const storedName =
+    rawName && !rawName.startsWith('Donnerstags-Einkauf')
+      ? rawName
+      : standardShoppingListName(DEFAULT_STANDARD_SHOPPING_LIST_NAME, period)
   return {
-    ...standardShoppingListRecord(period.start, createdAt),
+    id: standardShoppingListId(period.start),
+    kind: 'standard',
+    name: storedName,
+    periodStart: period.start,
+    periodEnd: period.end,
+    ...(isTransition ? { isTransition: true } : {}),
+    createdAt,
     updatedAt,
   }
 }
@@ -1352,12 +1461,6 @@ function normalizeShoppingDemandAllocation(
   ) {
     return null
   }
-  let period: ReturnType<typeof shoppingPeriod>
-  try {
-    period = shoppingPeriod(periodStart)
-  } catch {
-    return null
-  }
   let quantityMilli: number | undefined
   if (mode === 'partial') {
     const rawMilli = Number(value.quantityMilli)
@@ -1370,8 +1473,8 @@ function normalizeShoppingDemandAllocation(
     }
   }
   return {
-    id: shoppingAllocationId(period.start, itemKey, dimension, listId),
-    periodStart: period.start,
+    id: shoppingAllocationId(periodStart, itemKey, dimension, listId),
+    periodStart,
     itemKey,
     dimension,
     listId,
@@ -1415,6 +1518,7 @@ export async function restoreBackup(
     skippedShoppingLists: 0,
     addedShoppingDemandAllocations: 0,
     skippedShoppingDemandAllocations: 0,
+    orphanedManualPurchaseReferences: 0,
     detachedMealLinks: 0,
   }
 
@@ -1516,6 +1620,14 @@ export async function restoreBackup(
         result.addedShoppingLists = inspection.shoppingLists.length
         result.addedShoppingDemandAllocations =
           inspection.shoppingDemandAllocations.length
+        const backupManualIds = new Set(
+          inspection.shoppingManualItems.map((item) => item.id),
+        )
+        result.orphanedManualPurchaseReferences = inspection.shoppingPurchases.filter(
+          (purchase) =>
+            purchase.manualItemId !== undefined &&
+            !backupManualIds.has(purchase.manualItemId),
+        ).length
         return
       }
 
@@ -1665,6 +1777,11 @@ export async function restoreBackup(
 
     // Checks are a legacy aggregate representation. Restores always write the
     // individual purchase actions; writing both would double-count purchases.
+    result.orphanedManualPurchaseReferences = inspection.shoppingPurchases.filter(
+      (purchase) =>
+        purchase.manualItemId !== undefined &&
+        !existingManualIds.has(purchase.manualItemId),
+    ).length
     const existingPurchaseIds = new Set(
       (await db.shoppingPurchases.toArray()).map((purchase) => purchase.id),
     )

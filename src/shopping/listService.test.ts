@@ -132,7 +132,7 @@ async function seed(
 }
 
 function standardIdFor(anchor = PERIOD): string {
-  return standardShoppingListId(shoppingPeriod(anchor).start)
+  return standardShoppingListId(shoppingPeriod(anchor, 3).start)
 }
 
 async function tomatoDistribution(anchor = PERIOD) {
@@ -186,7 +186,7 @@ describe('shopping periods and lists', () => {
     expect(thursday.periodStart).toBe(PERIOD_START)
     expect(thursday.periodEnd).toBe(PERIOD_END)
     expect(monday.id).toBe(thursday.id)
-    expect(thursday.name).toContain('Donnerstags-Einkauf')
+    expect(thursday.name).toContain('Wocheneinkauf')
 
     const next = await ensureStandardShoppingList('2026-11-12')
     expect(next.id).not.toBe(thursday.id)
@@ -196,14 +196,14 @@ describe('shopping periods and lists', () => {
 
   it('ignores the visual calendar week start for shopping periods', async () => {
     await db.settings.put({ key: 'weekStartDay', value: 1 })
-    expect(shoppingPeriod('2026-11-09').start).toBe(PERIOD_START)
+    expect(shoppingPeriod('2026-11-09', 3).start).toBe(PERIOD_START)
     const list = await ensureStandardShoppingList('2026-11-09')
     expect(list.id).toBe(standardIdFor('2026-11-09'))
     expect(list.periodStart).toBe(PERIOD_START)
   })
 
   it('crosses month and year boundaries without UTC day shifts', async () => {
-    const period = shoppingPeriod('2027-01-02')
+    const period = shoppingPeriod('2027-01-02', 3)
     expect(period.start).toBe('2026-12-31')
     expect(period.end).toBe('2027-01-06')
     expect(period.days).toHaveLength(7)
@@ -1108,7 +1108,7 @@ describe('14A.1 integrity repairs', () => {
     await db.settings.put({ key: 'weekStartDay', value: 1 })
     await seed()
     const week = shoppingWeek('2026-11-08', 1)
-    const period = shoppingPeriod('2026-11-08')
+    const period = shoppingPeriod('2026-11-08', 3)
     const entryDate = week.days.find((day) => period.days.includes(day))
     expect(entryDate).toBe('2026-11-05')
 

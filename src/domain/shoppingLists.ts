@@ -13,43 +13,120 @@
  * binary floating point rounding.
  */
 
-import type { ShoppingAllocationMode, ShoppingDemandAllocation } from '../types'
-import { addDays, formatWeekRange, startOfWeekOn } from './dates'
+import type { ShoppingAllocationMode, ShoppingDemandAllocation, ShoppingList } from '../types'
+import { addDays, dayNumber, formatWeekRange, startOfWeekOn } from './dates'
 import type { ShoppingAmountPosition } from './shopping'
+import type { ShoppingSettings } from '../settings/shopping'
 
-/**
- * Thursday is a product decision for shopping periods. It is deliberately a
- * constant and never reads the visual calendar's configured week start.
- * 0 = Monday … 6 = Sunday.
- */
-export const SHOPPING_PERIOD_START_DAY = 3
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
 export const STANDARD_SHOPPING_LIST_PREFIX = 'standard:'
 export const AMOUNT_MILLI_FACTOR = 1000
+/** Neutral product default; the user can rename it in the settings. */
+export const DEFAULT_STANDARD_SHOPPING_LIST_NAME = 'Wocheneinkauf'
 
 export interface ShoppingPeriod {
-  /** Thursday, "YYYY-MM-DD". */
+  /** First day of the period, "YYYY-MM-DD". */
   start: string
-  /** Wednesday, "YYYY-MM-DD". */
+  /** Last day of the period, "YYYY-MM-DD". */
   end: string
   days: string[]
   label: string
+  /** One-time shortened period created while the shopping weekday changes. */
+  isTransition: boolean
 }
 
-/** Thursday–Wednesday period containing [anchor], local date arithmetic only. */
-export function shoppingPeriod(anchor: string): ShoppingPeriod {
-  const start = startOfWeekOn(anchor, SHOPPING_PERIOD_START_DAY)
+/**
+ * Regular seven-day period starting at [startDay] and containing [anchor].
+ * `startDay` is 0 = Monday … 6 = Sunday and must come from the persisted
+ * shopping settings; no weekday is special-cased here.
+ */
+export function shoppingPeriod(anchor: string, startDay: number): ShoppingPeriod {
+  const start = startOfWeekOn(anchor, startDay)
   const days = Array.from({ length: 7 }, (_, index) => addDays(start, index))
+  const end = days[6] ?? start
   return {
     start,
-    end: days[6] ?? start,
+    end,
     days,
-    label: formatWeekRange(start),
+    label: formatWeekRange(start, end),
+    isTransition: false,
   }
 }
 
-export function isDateInShoppingPeriod(date: string, periodStart: string): boolean {
-  const period = shoppingPeriod(date)
-  return period.start === periodStart
+/**
+ * Build a period from its persisted boundaries. This is the only safe way to
+ * read a period that is already stored: its dates must never be recomputed
+ * from a later configuration change.
+ */
+export function shoppingPeriodFromRange(
+  start: string,
+  end: string,
+  isTransition = false,
+): ShoppingPeriod {
+  const last = dayNumber(end) >= dayNumber(start) ? end : start
+  const days: string[] = []
+  for (let index = 0; ; index += 1) {
+    const day = addDays(start, index)
+    days.push(day)
+    if (day === last || index > 3660) break
+  }
+  return {
+    start,
+    end: last,
+    days,
+    label: formatWeekRange(start, last),
+    isTransition,
+  }
+}
+
+export function shoppingPeriodFromList(list: ShoppingList): ShoppingPeriod {
+  const start = list.periodStart ?? list.periodEnd
+  if (!start) {
+    throw new Error('A standard shopping list has no persisted period.')
+  }
+  const end = list.periodEnd ?? addDays(start, 6)
+  return shoppingPeriodFromRange(start, end, list.isTransition === true)
+}
+
+export function periodContainsDate(
+  period: Pick<ShoppingPeriod, 'start' | 'end'>,
+  date: string,
+): boolean {
+  if (!DATE_RE.test(period.start) || !DATE_RE.test(period.end) || !DATE_RE.test(date)) {
+    return false
+  }
+  return dayNumber(date) >= dayNumber(period.start) && dayNumber(date) <= dayNumber(period.end)
+}
+
+/**
+ * Resolve the period that a date/start belongs to, using persisted periods
+ * first. Only when no persisted standard list covers the date is the current
+ * configuration used to build a new regular period.
+ */
+export function resolveShoppingPeriodFromData(
+  anchor: string,
+  settings: Pick<ShoppingSettings, 'periodStartDay'>,
+  lists: readonly ShoppingList[],
+): ShoppingPeriod {
+  const exact = lists.find(
+    (list) => list.kind === 'standard' && list.periodStart === anchor,
+  )
+  if (exact) return shoppingPeriodFromList(exact)
+
+  const containing = lists
+    .filter(
+      (list) =>
+        list.kind === 'standard' &&
+        list.periodStart !== null &&
+        list.periodEnd !== null &&
+        periodContainsDate({ start: list.periodStart, end: list.periodEnd }, anchor),
+    )
+    .sort((a, b) => (b.periodStart ?? '').localeCompare(a.periodStart ?? ''))
+  const hit = containing[0]
+  if (hit) return shoppingPeriodFromList(hit)
+
+  return shoppingPeriod(anchor, settings.periodStartDay)
 }
 
 /** Stable, name-independent identity of the standard list for one period. */
@@ -61,23 +138,29 @@ export function isStandardShoppingListId(id: string): boolean {
   return id.startsWith(STANDARD_SHOPPING_LIST_PREFIX)
 }
 
-export function standardShoppingListName(periodStart: string): string {
-  const period = shoppingPeriod(periodStart)
-  return `Donnerstags-Einkauf · ${period.label}`
+export function standardShoppingListName(baseName: string, period: ShoppingPeriod): string {
+  const clean =
+    baseName.replace(/\s+/g, ' ').trim() || DEFAULT_STANDARD_SHOPPING_LIST_NAME
+  return `${clean} · ${period.label}`
 }
 
-export function standardShoppingListRecord(periodStart: string, now = 0) {
-  const period = shoppingPeriod(periodStart)
+export function standardShoppingListRecord(
+  period: ShoppingPeriod,
+  baseName: string,
+  now = 0,
+) {
   return {
     id: standardShoppingListId(period.start),
     kind: 'standard' as const,
-    name: standardShoppingListName(period.start),
+    name: standardShoppingListName(baseName, period),
     periodStart: period.start,
     periodEnd: period.end,
+    ...(period.isTransition ? { isTransition: true } : {}),
     createdAt: now,
     updatedAt: now,
   }
 }
+
 
 /** Deterministic allocation identity; repeated writes cannot duplicate rows. */
 export function shoppingAllocationId(
@@ -114,6 +197,8 @@ export interface ShoppingDemandItemInput {
 
 export interface ShoppingDistributionInput {
   periodStart: string
+  /** Persisted period boundaries. When omitted, a regular seven-day period is assumed. */
+  period?: ShoppingPeriod
   standardListId?: string
   demand: readonly ShoppingDemandItemInput[]
   allocations: readonly ShoppingDemandAllocation[]
@@ -158,7 +243,7 @@ export interface ShoppingDistributionPosition {
   qualifier: string
   totalLower: number
   totalUpper: number
-  /** Amount that stays on / returns to the Thursday standard list. */
+  /** Amount that stays on / returns to the period's standard list. */
   standardLower: number
   standardUpper: number
   amounts: ShoppingDistributionAmount[]
@@ -169,7 +254,7 @@ export interface ShoppingUnquantifiedPlacement {
   itemKey: string
   name: string
   listId: string
-  /** True when this is the default Thursday placement, not a full move. */
+  /** True when this is the default standard-list placement, not a full move. */
   standard: boolean
   explicit: boolean
   unparsedAmounts: string[]
@@ -262,7 +347,7 @@ function blockedView(
  * Resolve the current automatic demand against persisted allocations.
  *
  * Conflict handling when demand shrinks:
- * 1. The automatically remaining Thursday share is reduced to zero first; it is
+ * 1. The automatically remaining standard-list share is reduced to zero first; it is
  *    calculated as `total − effective user allocations`.
  * 2. If fixed subsets still exceed the demand, they are applied in the stable
  *    order `createdAt`, `listId`, `id` until the demand is exhausted. Later
@@ -273,7 +358,9 @@ function blockedView(
 export function resolveShoppingDistribution(
   input: ShoppingDistributionInput,
 ): ShoppingDistributionResult {
-  const period = shoppingPeriod(input.periodStart)
+  const period =
+    input.period ??
+    shoppingPeriodFromRange(input.periodStart, addDays(input.periodStart, 6))
   const standardListId = input.standardListId ?? standardShoppingListId(period.start)
   const knownLists =
     input.listIds === undefined
@@ -549,7 +636,7 @@ export function resolveShoppingDistribution(
 
       if (!exact && partialAllocations.length > 0) {
         // A range must never be silently turned into one number. Keep the whole
-        // range on Thursday and report the blocked user decision.
+        // range on the period's standard list and report the blocked decision.
         conflicts.push({
           code: 'ambiguous-range',
           itemKey: item.key,

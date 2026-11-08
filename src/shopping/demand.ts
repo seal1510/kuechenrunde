@@ -20,14 +20,16 @@ import {
   type ShoppingQuantityCorrectionStatus,
 } from '../domain/shopping'
 import {
-  isDateInShoppingPeriod,
+  periodContainsDate,
   resolveShoppingDistribution,
-  shoppingPeriod,
   standardShoppingListId,
   standardShoppingListRecord,
   type ShoppingDistributionResult,
+  type ShoppingPeriod,
 } from '../domain/shoppingLists'
+import { getShoppingSettings } from '../settings/shopping'
 import type { ShoppingList, ShoppingManualItem } from '../types'
+import { resolveShoppingPeriod, requireDateKey } from './cycle'
 import { ShoppingListError } from './errors'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -36,16 +38,12 @@ function cleanText(value: string | null | undefined): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim()
 }
 
-function requirePeriod(anchor: string): ReturnType<typeof shoppingPeriod> {
+function requirePeriod(anchor: string): string {
   const clean = cleanText(anchor)
   if (!DATE_RE.test(clean)) {
     throw new ShoppingListError('invalid-period', 'Der Einkaufszeitraum ist kein gültiges Datum.')
   }
-  try {
-    return shoppingPeriod(clean)
-  } catch {
-    throw new ShoppingListError('invalid-period', 'Der Einkaufszeitraum ist kein gültiges Datum.')
-  }
+  return requireDateKey(clean, 'Der Einkaufszeitraum')
 }
 
 export interface ShoppingPeriodDemandItem {
@@ -66,7 +64,7 @@ export interface ShoppingPeriodDemandItem {
 }
 
 export interface ShoppingPeriodDemand {
-  period: ReturnType<typeof shoppingPeriod>
+  period: ShoppingPeriod
   standardListId: string
   items: ShoppingPeriodDemandItem[]
   warnings: string[]
@@ -86,17 +84,22 @@ export function manualItemKey(item: Pick<ShoppingManualItem, 'name'>): string {
 export async function loadShoppingPeriodDemand(
   anchor: string,
 ): Promise<ShoppingPeriodDemand> {
-  const period = requirePeriod(anchor)
-  const [recipes, freeDishes, cookSessions, rules, quantityCorrections] = await Promise.all([
-    db.recipes.toArray(),
-    db.freeDishes.toArray(),
-    db.cookSessions.toArray(),
-    db.shoppingItemRules.toArray(),
-    db.shoppingQuantityCorrections.toArray(),
-  ])
+  const date = requirePeriod(anchor)
+  const [period, settings, recipes, freeDishes, cookSessions, rules, quantityCorrections] =
+    await Promise.all([
+      resolveShoppingPeriod(date),
+      getShoppingSettings(),
+      db.recipes.toArray(),
+      db.freeDishes.toArray(),
+      db.cookSessions.toArray(),
+      db.shoppingItemRules.toArray(),
+      db.shoppingQuantityCorrections.toArray(),
+    ])
   const built = buildShoppingList({
     anchor: period.start,
-    weekStartDay: 3,
+    weekStartDay: settings.periodStartDay,
+    periodStart: period.start,
+    periodEnd: period.end,
     recipes,
     freeDishes,
     cookSessions,
@@ -137,15 +140,17 @@ export async function loadShoppingDistribution(
   anchor: string,
 ): Promise<ShoppingDistributionView> {
   const demand = await loadShoppingPeriodDemand(anchor)
-  const [allocations, lists] = await Promise.all([
+  const [allocations, lists, settings] = await Promise.all([
     db.shoppingDemandAllocations.where('periodStart').equals(demand.period.start).toArray(),
     db.shoppingLists.toArray(),
+    getShoppingSettings(),
   ])
   const standardList =
     lists.find((list) => list.id === demand.standardListId) ??
-    standardShoppingListRecord(demand.period.start, 0)
+    standardShoppingListRecord(demand.period, settings.standardListName, 0)
   const distribution = resolveShoppingDistribution({
     periodStart: demand.period.start,
+    period: demand.period,
     standardListId: demand.standardListId,
     demand: demand.items.map((item) => ({
       key: item.key,
@@ -192,12 +197,7 @@ export async function resolvePurchaseTargetForLegacyWrite(input: {
   if (!DATE_RE.test(date)) {
     throw new ShoppingListError('invalid-period', 'Der Einkaufstag ist kein gültiges Datum.')
   }
-  let period: ReturnType<typeof shoppingPeriod>
-  try {
-    period = shoppingPeriod(date)
-  } catch {
-    throw new ShoppingListError('invalid-period', 'Der Einkaufstag ist kein gültiges Datum.')
-  }
+  const period = await resolveShoppingPeriod(date)
 
   const distribution = await loadShoppingDistribution(period.start)
   const rules = await db.shoppingItemRules.toArray()
@@ -246,7 +246,7 @@ export async function resolvePurchaseTargetForLegacyWrite(input: {
     if (manualItemKey(item) !== key) return false
     const itemDate = item.shoppingDate || item.weekStart || ''
     if (!DATE_RE.test(itemDate)) return false
-    return isDateInShoppingPeriod(itemDate, period.start)
+    return periodContainsDate(period, itemDate)
   })
   if (matches.length === 0) {
     throw new ShoppingListError(
@@ -280,7 +280,15 @@ export async function resolvePurchaseTargetForLegacyWrite(input: {
         { itemKey: key, manualItemId: item.id, listId: item.listId },
       )
     }
-    if (list.kind === 'standard' && list.periodStart !== period.start) {
+    const itemDate = item.shoppingDate || item.weekStart || ''
+    if (
+      list.kind === 'standard' &&
+      !(
+        list.periodStart &&
+        list.periodEnd &&
+        periodContainsDate({ start: list.periodStart, end: list.periodEnd }, itemDate)
+      )
+    ) {
       throw new ShoppingListError(
         'purchase-conflict',
         'Der manuelle Artikel gehört zu einem anderen Einkaufszeitraum.',
