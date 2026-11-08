@@ -44,7 +44,6 @@ import {
   dishTitleFor,
   type CalendarDragHandlers,
 } from './plan/PlanCalendar'
-import { resolveCalendarSelection } from './plan/calendarSelection'
 import { DayNoteDialog } from './plan/DayNoteDialog'
 import { DishDialog } from './plan/DishDialog'
 import { FreeDishDialog } from './plan/FreeDishDialog'
@@ -87,7 +86,6 @@ function normalizePointerType(value: string): DragPointerType {
 export function PlanPage() {
   const today = useMemo(() => todayKey(), [])
   const [anchorDate, setAnchorDate] = useState(today)
-  const [selectedDate, setSelectedDate] = useState(today)
   const entries = useLiveQuery(() => db.mealPlans.toArray(), [])
   const recipes = useLiveQuery(() => db.recipes.toArray(), [])
   const freeDishes = useLiveQuery(() => db.freeDishes.toArray(), [])
@@ -164,23 +162,6 @@ export function PlanPage() {
     () => buildCalendarLayout(calendarWindow, entries ?? []),
     [calendarWindow, entries],
   )
-  const activeSelectedDate = resolveCalendarSelection(
-    calendarWindow.visibleDays,
-    calendarWindow.coreDays,
-    today,
-    selectedDate,
-  )
-
-  useEffect(() => {
-    setSelectedDate((current) =>
-      resolveCalendarSelection(
-        calendarWindow.visibleDays,
-        calendarWindow.coreDays,
-        today,
-        current,
-      ),
-    )
-  }, [calendarWindow, today])
   const noRecipes = recipes !== undefined && recipes.length === 0
   const hasDayNotes = (dayNotes?.length ?? 0) > 0
   const showEmptyState =
@@ -310,11 +291,8 @@ export function PlanPage() {
 
   function dropDateAt(clientX: number, clientY: number): string | null {
     const element = document.elementFromPoint(clientX, clientY)
-    const dropTarget = element?.closest<HTMLElement>('[data-calendar-drop-date]')
-    const dateTarget = element?.closest<HTMLElement>('[data-calendar-date]')
     return (
-      dropTarget?.dataset.calendarDropDate ??
-      dateTarget?.dataset.calendarDate ??
+      element?.closest<HTMLElement>('[data-calendar-date]')?.dataset.calendarDate ??
       null
     )
   }
@@ -542,16 +520,7 @@ export function PlanPage() {
     const dayElement = document.querySelector<HTMLElement>(
       `[data-calendar-date="${targetDate}"]`,
     )
-    // On mobile only the selected day card is visible; the other core days are
-    // reachable through the date strip, so fall back to its target chip.
-    const visibleDay =
-      dayElement && dayElement.getBoundingClientRect().width > 0
-        ? dayElement
-        : null
-    const dateChip = document.querySelector<HTMLElement>(
-      `[data-calendar-drop-date="${targetDate}"]`,
-    )
-    const rect = (visibleDay ?? dateChip)?.getBoundingClientRect()
+    const rect = dayElement?.getBoundingClientRect()
     // Switch to the transition-enabled phase first, then move on the next
     // frame so the settle animation is guaranteed to run.
     setDragOverlay((current) =>
@@ -795,10 +764,7 @@ export function PlanPage() {
             <button
               type="button"
               className="button quiet plan-today"
-              onClick={() => {
-                setAnchorDate(today)
-                setSelectedDate(today)
-              }}
+              onClick={() => setAnchorDate(today)}
             >
               Heute
             </button>
@@ -903,7 +869,6 @@ export function PlanPage() {
         <PlanCalendar
           layout={calendarLayout}
           today={today}
-          selectedDate={activeSelectedDate}
           noteByDate={noteByDate}
           dropDate={dropDate}
           recipeById={recipeById}
@@ -914,7 +879,6 @@ export function PlanPage() {
             dragOverlay ? dragOverlay.groupSessionId : hoveredSessionId
           }
           dragHandlers={dragHandlers}
-          onSelectDate={setSelectedDate}
           onAdd={openAdd}
           onHighlightSession={setHoveredSessionId}
         />

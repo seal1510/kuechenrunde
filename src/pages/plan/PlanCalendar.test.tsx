@@ -180,7 +180,6 @@ function cardProps(day: CalendarDay, onAdd = vi.fn()) {
   return {
     day,
     today: '2026-05-29',
-    selected: day.date === '2026-05-30',
     note: noteByDate.get(day.date),
     dropTarget: false,
     recipeById,
@@ -194,12 +193,18 @@ function cardProps(day: CalendarDay, onAdd = vi.fn()) {
   }
 }
 
-function renderCalendar(selectedDate = '2026-05-30', selectedLayout = layout) {
+function calendarDates(html: string): string[] {
+  return Array.from(
+    html.matchAll(/data-calendar-date="([^"]+)"/g),
+    (match) => match[1]!,
+  )
+}
+
+function renderCalendar(selectedLayout = layout) {
   return renderToStaticMarkup(
     <PlanCalendar
       layout={selectedLayout}
       today="2026-05-29"
-      selectedDate={selectedDate}
       noteByDate={noteByDate}
       dropDate={null}
       recipeById={recipeById}
@@ -208,7 +213,6 @@ function renderCalendar(selectedDate = '2026-05-30', selectedLayout = layout) {
       originDragKey={null}
       highlightedSessionId={null}
       dragHandlers={dragHandlers}
-      onSelectDate={vi.fn()}
       onAdd={vi.fn()}
       onHighlightSession={vi.fn()}
     />,
@@ -216,80 +220,77 @@ function renderCalendar(selectedDate = '2026-05-30', selectedLayout = layout) {
 }
 
 describe('responsive plan calendar', () => {
-  it('renders seven core days and two preview days on both sides', () => {
+  it('renders all eleven days in chronological order and groups them', () => {
     const html = renderCalendar()
 
-    expect(html.match(/data-calendar-date="/g)).toHaveLength(11)
-    expect(html.match(/data-calendar-select-date="/g)).toHaveLength(7)
-    expect(html.match(/calendar-preview-tile/g)).toHaveLength(4)
+    expect(calendarDates(html)).toEqual(window.visibleDays)
+    expect(calendarDates(html)).toHaveLength(11)
+    expect(html.match(/class="calendar-day /g)).toHaveLength(7)
+    expect(html.match(/class="calendar-preview-tile/g)).toHaveLength(4)
+    expect(html).toContain('Davor')
+    expect(html).toContain('Diese Woche')
+    expect(html).toContain('Danach')
     expect(html).toContain('calendar-preview-row--before')
     expect(html).toContain('calendar-preview-row--after')
-    expect(html).toContain('Davor')
-    expect(html).toContain('Danach')
   })
 
-  it('marks exactly one mobile date as selected and one day as today', () => {
-    const html = renderCalendar('2026-05-30', layout)
+  it('keeps every day directly visible without a day-selection control', () => {
+    const html = renderCalendar()
 
-    expect(html.match(/aria-pressed="true"/g)).toHaveLength(1)
-    expect(html).toMatch(
-      /aria-pressed="true"[^>]*data-calendar-select-date="2026-05-30"/,
-    )
-    expect(html).toMatch(
-      /class="calendar-day is-selected[^"]*" data-calendar-date="2026-05-30"/,
-    )
+    expect(html).not.toContain('calendar-day-strip')
+    expect(html).not.toContain('data-calendar-select-date')
+    expect(html).not.toContain('is-selected')
+    expect(html.match(/aria-pressed=/g)).toBeNull()
     expect(html).toContain('calendar-today">Heute</span>')
-    expect(html).toContain('calendar-day-chip is-selected has-dishes')
-    expect(html).toContain('calendar-day-chip is-today has-dishes')
+    expect(html).toContain('class="calendar-day is-today')
   })
 
-  it('shows long dish names, portions and several dishes without hiding any', () => {
+  it('shows every dish of a day, including more than two overlap dishes', () => {
+    const html = renderCalendar()
+
+    expect(html).toContain('Apfelkuchen')
+    expect(html).toContain('Frühstücksporridge')
+    expect(html).toContain('Schnelle Kräutersuppe')
+    expect(html).toContain('Nudeln mit Pesto')
+    expect(html.match(/is-preview-extra/g)).toHaveLength(1)
+    expect(html).toContain('calendar-preview-more')
+  })
+
+  it('shows a compact empty hint on every empty day', () => {
+    const html = renderCalendar()
+
+    expect(html.match(/calendar-empty-hint/g)).toHaveLength(5)
+    expect(html).toContain('aria-hidden="true">—</span>')
+  })
+
+  it('shows long dish names, portions and several dishes without truncation', () => {
     const html = renderCalendar()
 
     expect(html).toContain(LONG_TITLE)
     expect(html).toContain('4 Portionen')
     expect(html).toContain('2 Portionen')
     expect(html).toContain('1 Portion')
-    expect(html).toContain('Schnelle Kräutersuppe')
-    expect(html).toContain('Nudeln mit Pesto')
     expect(html).toContain(
       `aria-label="${LONG_TITLE} bearbeiten, Fr, 29.05."`,
     )
   })
 
-  it('shows the shared cook session and the free dish marker', () => {
+  it('shows the shared cook session and keeps comments and free dishes', () => {
     const html = renderCalendar()
 
     expect(html).toContain('calendar-entry--group group-color-')
     expect(html).toContain('calendar-entry-session')
     expect(html.match(/2 Tage/g)).toHaveLength(2)
     expect(html).toContain('calendar-entry--free')
+    expect(html).toContain('calendar-note-entry')
+    expect(html).toContain('Einkaufen und vorbereiten')
     expect(html).toContain('>frei</span>')
   })
 
-  it('keeps empty days and overlap days directly editable', () => {
+  it('gives every day its own add action', () => {
     const html = renderCalendar()
-
-    expect(html).toContain('calendar-add-day is-empty')
-    expect(html).toContain(
-      'aria-label="Eintrag am Do, 28.05. hinzufügen"',
-    )
-    expect(html).toContain(
-      'aria-label="Eintrag am Di, 26.05. hinzufügen"',
-    )
-    expect(html).toContain('Einkaufen und vorbereiten')
-    expect(html).toContain('+1 weitere')
-  })
-
-  it('does not touch planning data while the selected mobile day changes', () => {
-    const before = JSON.stringify(layout)
-    const first = renderCalendar('2026-05-28', layout)
-    const second = renderCalendar('2026-06-03', layout)
-
-    expect(JSON.stringify(layout)).toBe(before)
-    expect(first).toContain('data-calendar-select-date="2026-05-28"')
-    expect(second).toContain('data-calendar-select-date="2026-06-03"')
-    expect(dragHandlers.onClick).not.toHaveBeenCalled()
+    expect(html.match(/class="calendar-add-day /g)).toHaveLength(7)
+    expect(html.match(/class="calendar-preview-add"/g)).toHaveLength(4)
   })
 
   it('routes every core and overlap add control through the existing onAdd callback', () => {
@@ -306,45 +307,18 @@ describe('responsive plan calendar', () => {
       expect(onAdd).toHaveBeenCalledWith(day.date)
     }
 
-    const onAdd = vi.fn()
-    const previewAdd = collectButtons(
-      CalendarPreviewTile(cardProps(layout.before[0]!, onAdd)),
-    ).find((button) =>
-      String(button.props.className).includes('calendar-preview-add'),
-    )
+    for (const day of [...layout.before, ...layout.after]) {
+      const onAdd = vi.fn()
+      const previewAdd = collectButtons(
+        CalendarPreviewTile(cardProps(day, onAdd)),
+      ).find((button) =>
+        String(button.props.className).includes('calendar-preview-add'),
+      )
 
-    expect(previewAdd).toBeTruthy()
-    previewAdd!.props.onClick?.()
-    expect(onAdd).toHaveBeenCalledWith('2026-05-26')
-  })
-
-  it('routes a mobile date tap through the existing selection callback', () => {
-    const onSelectDate = vi.fn()
-    const tree = PlanCalendar({
-      layout,
-      today: '2026-05-29',
-      selectedDate: '2026-05-30',
-      noteByDate,
-      dropDate: null,
-      recipeById,
-      freeDishById,
-      groupSizeBySession: new Map([['session-1', 2]]),
-      originDragKey: null,
-      highlightedSessionId: null,
-      dragHandlers,
-      onSelectDate,
-      onAdd: vi.fn(),
-      onHighlightSession: vi.fn(),
-    })
-    const chip = collectButtons(tree).find(
-      (button) =>
-        (button.props as Record<string, unknown>)['data-calendar-select-date'] ===
-        '2026-06-01',
-    )
-
-    expect(chip).toBeTruthy()
-    ;(chip!.props as { onClick: () => void }).onClick()
-    expect(onSelectDate).toHaveBeenCalledWith('2026-06-01')
+      expect(previewAdd).toBeTruthy()
+      previewAdd!.props.onClick?.()
+      expect(onAdd).toHaveBeenCalledWith(day.date)
+    }
   })
 
   it('keeps dish clicks and drag gestures on the same callbacks', () => {
@@ -375,5 +349,29 @@ describe('responsive plan calendar', () => {
       kind: 'entry',
       entry: longEntry,
     })
+  })
+
+  it('keeps eleven days in order for every week start across a year boundary', () => {
+    for (let weekStartDay = 0; weekStartDay < 7; weekStartDay += 1) {
+      const week = buildCalendarWindow('2026-12-31', weekStartDay, 2, 2)
+      const weekLayout = buildCalendarLayout(week, entries)
+      const html = renderCalendar(weekLayout)
+
+      expect(calendarDates(html)).toEqual(week.visibleDays)
+      expect(calendarDates(html)).toHaveLength(11)
+    }
+  })
+
+  it('does not touch planning data when the visible period changes', () => {
+    const otherWindow = buildCalendarWindow('2026-06-05', 3, 2, 2)
+    const otherLayout = buildCalendarLayout(otherWindow, entries)
+    const before = JSON.stringify(layout)
+    const first = renderCalendar(layout)
+    const second = renderCalendar(otherLayout)
+
+    expect(JSON.stringify(layout)).toBe(before)
+    expect(first).toContain('data-calendar-date="2026-05-29"')
+    expect(second).toContain('data-calendar-date="2026-06-05"')
+    expect(dragHandlers.onClick).not.toHaveBeenCalled()
   })
 })

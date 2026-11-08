@@ -16,9 +16,22 @@ describe('calendar responsive stylesheet guards', () => {
     expect(css).toContain('@media (min-width: 721px) and (max-width: 900px)')
   })
 
-  it('switches to the date strip and one selected day on smartphones', () => {
+  it('keeps mobile-only helpers hidden on desktop and tablet', () => {
+    expect(css).toMatch(
+      /\.calendar-group-title,\s*\.calendar-empty-hint\s*\{\s*display:\s*none;/,
+    )
+    expect(css).toMatch(
+      /\.calendar-entry\.is-preview-extra\s*\{\s*display:\s*none;/,
+    )
+  })
+
+  it('uses one continuous eleven-day list on smartphones', () => {
     expect(css).toContain('@media (max-width: 720px)')
-    expect(css).toContain('.calendar-day-strip')
-    expect(css).toContain('.calendar-week .calendar-day.is-selected')
+    expect(css).toContain('.calendar-group-title')
+    expect(css).toContain('grid-template-columns: 58px minmax(0, 1fr) 44px;')
+    expect(css).toContain('.calendar-entry--preview.is-preview-extra')
+    expect(css).toMatch(/\.calendar-preview-more\s*\{\s*display:\s*none;/)
+    expect(css).not.toContain('.calendar-day-strip')
+    expect(css).not.toContain('.calendar-week .calendar-day.is-selected')
   })
 })

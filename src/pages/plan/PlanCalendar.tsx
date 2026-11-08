@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Presentation-only calendar surface for the meal plan. It renders the shared
- * seven-day grid, the compact overlap previews and the mobile day selector.
- * All edits, moves and drag gestures keep running through the callbacks that
- * PlanPage already owns.
+ * seven-day grid, the compact overlap previews and, on smartphones, the same
+ * eleven days as one continuous vertical list. All edits, moves and drag
+ * gestures keep running through the callbacks that PlanPage already owns.
  */
 
 import type { PointerEvent as ReactPointerEvent } from 'react'
@@ -55,6 +55,8 @@ interface CalendarCardSharedProps {
 interface CalendarEntryCardProps extends CalendarCardSharedProps {
   entry: MealPlanEntry
   compact?: boolean
+  /** Additional overlap entries stay in the DOM but only show on mobile. */
+  previewExtra?: boolean
 }
 
 /**
@@ -64,6 +66,7 @@ interface CalendarEntryCardProps extends CalendarCardSharedProps {
 export function CalendarEntryCard({
   entry,
   compact = false,
+  previewExtra = false,
   recipeById,
   freeDishById,
   groupSizeBySession,
@@ -83,6 +86,7 @@ export function CalendarEntryCard({
     'calendar-entry',
     'calendar-entry--dish',
     compact ? 'calendar-entry--preview' : '',
+    previewExtra ? 'is-preview-extra' : '',
     isFreeDish ? 'calendar-entry--free' : '',
     theme ? `calendar-entry--group group-color-${theme.colorIndex}` : '',
     isGroupHighlighted(theme, highlightedSessionId) ? 'is-group-highlighted' : '',
@@ -186,17 +190,15 @@ function CalendarNoteCard({
 export interface CalendarDayCardProps extends CalendarCardSharedProps {
   day: CalendarDay
   today: string
-  selected: boolean
   note?: DayNote
   dropTarget: boolean
   onAdd: (date: string) => void
 }
 
-/** Full day card used by the seven-day grid and the mobile selected day. */
+/** Day card shared by the desktop week grid and the mobile 11-day list. */
 export function CalendarDayCard({
   day,
   today,
-  selected,
   note,
   dropTarget,
   recipeById,
@@ -215,7 +217,6 @@ export function CalendarDayCard({
   const occupied = Boolean(note) || dayEntries.length > 0
   const className = [
     'calendar-day',
-    selected ? 'is-selected' : '',
     isToday ? 'is-today' : '',
     isPast ? 'is-past' : '',
     occupied ? 'is-occupied' : 'is-empty',
@@ -238,6 +239,12 @@ export function CalendarDayCard({
         </div>
         {isToday ? <span className="calendar-today">Heute</span> : null}
       </header>
+
+      {!occupied ? (
+        <span className="calendar-empty-hint" aria-hidden="true">
+          —
+        </span>
+      ) : null}
 
       {occupied ? (
         <ul className="calendar-entries">
@@ -316,8 +323,7 @@ export function CalendarPreviewTile({
   const { day: dayNumber, month } = parseDateKey(date)
   const isToday = date === today
   const entrySlots = note ? 1 : MAX_PREVIEW_ENTRIES
-  const visibleEntries = dayEntries.slice(0, entrySlots)
-  const hiddenEntries = dayEntries.length - visibleEntries.length
+  const hiddenEntries = Math.max(0, dayEntries.length - entrySlots)
   const className = [
     'calendar-preview-tile',
     isToday ? 'is-today' : '',
@@ -350,11 +356,18 @@ export function CalendarPreviewTile({
           />
         ) : null}
 
-        {visibleEntries.map((entry) => (
+        {!note && dayEntries.length === 0 ? (
+          <span className="calendar-empty-hint" aria-hidden="true">
+            —
+          </span>
+        ) : null}
+
+        {dayEntries.map((entry, index) => (
           <CalendarEntryCard
             key={entry.id}
             entry={entry}
             compact
+            previewExtra={index >= entrySlots}
             recipeById={recipeById}
             freeDishById={freeDishById}
             groupSizeBySession={groupSizeBySession}
@@ -443,22 +456,20 @@ function CalendarPreviewRow({
 export interface PlanCalendarProps extends CalendarCardSharedProps {
   layout: CalendarLayout
   today: string
-  selectedDate: string
   noteByDate: Map<string, DayNote>
   dropDate: string | null
-  onSelectDate: (date: string) => void
   onAdd: (date: string) => void
 }
 
 /**
  * One calendar surface for all viewports. Desktop and tablet show the seven-day
- * grid; the day strip and the selected-day rule are only activated by the
- * mobile media query. Both share the same markup and the same actions.
+ * grid with compact overlap previews. On smartphones the same eleven day
+ * elements become one continuous vertical list, grouped into before, core and
+ * after. No day is hidden behind a selection.
  */
 export function PlanCalendar({
   layout,
   today,
-  selectedDate,
   noteByDate,
   dropDate,
   recipeById,
@@ -467,7 +478,6 @@ export function PlanCalendar({
   originDragKey,
   highlightedSessionId,
   dragHandlers,
-  onSelectDate,
   onAdd,
   onHighlightSession,
 }: PlanCalendarProps) {
@@ -494,68 +504,13 @@ export function PlanCalendar({
       />
 
       <section className="calendar-core" aria-label="Planungswoche">
-        <div className="calendar-day-strip" role="group" aria-label="Tag auswählen">
-          {layout.main.map((day) => {
-            const selected = day.date === selectedDate
-            const isToday = day.date === today
-            const { day: dayNumber } = parseDateKey(day.date)
-            const dishCount = day.entries.length
-            const className = [
-              'calendar-day-chip',
-              selected ? 'is-selected' : '',
-              isToday ? 'is-today' : '',
-              dishCount > 0 ? 'has-dishes' : '',
-              dropDate === day.date ? 'is-drop-target' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')
-            const description = [
-              formatDayLabel(day.date),
-              isToday ? 'heute' : '',
-              dishCount > 0
-                ? `${dishCount} ${dishCount === 1 ? 'Gericht' : 'Gerichte'} geplant`
-                : 'keine Gerichte geplant',
-            ]
-              .filter(Boolean)
-              .join(', ')
-
-            return (
-              <button
-                key={day.date}
-                type="button"
-                className={className}
-                aria-pressed={selected}
-                aria-label={description}
-                data-calendar-select-date={day.date}
-                data-calendar-drop-date={day.date}
-                onClick={() => onSelectDate(day.date)}
-              >
-                <span className="calendar-day-chip-weekday" aria-hidden="true">
-                  {weekdayShort(day.date)}
-                </span>
-                <span className="calendar-day-chip-date" aria-hidden="true">
-                  {dayNumber}
-                </span>
-                <span className="calendar-day-chip-markers" aria-hidden="true">
-                  {isToday ? (
-                    <span className="calendar-day-chip-today" />
-                  ) : null}
-                  {dishCount > 0 ? (
-                    <span className="calendar-day-chip-planned" />
-                  ) : null}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-
+        <h2 className="calendar-group-title">Diese Woche</h2>
         <div className="calendar-week">
           {layout.main.map((day) => (
             <CalendarDayCard
               key={day.date}
               day={day}
               today={today}
-              selected={day.date === selectedDate}
               note={noteByDate.get(day.date)}
               dropTarget={dropDate === day.date}
               onAdd={onAdd}
