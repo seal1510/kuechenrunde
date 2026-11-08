@@ -107,27 +107,56 @@ export function RecipePage({ id }: { id: string }) {
   const hasImage = sortedImages.length > 0
   const hasMeta = Boolean(recipe.effort || recipe.sourceUrl)
 
+  const editHref = `#/recipe/${encodeURIComponent(recipe.id)}/edit`
+
   return (
     <div className="page detail-page">
       <div className="detail-topbar">
         <a className="back-link" href="#/">
-          ← Zur Bibliothek
+          <svg
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            aria-hidden="true"
+            focusable="false"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12.5 8h-9M7 3.5 2.5 8 7 12.5" />
+          </svg>
+          Zur Bibliothek
         </a>
         <div className="detail-topbar-actions">
           <a
-            className="button primary detail-cook"
-            href={cookHash(recipe.id)}
+            className="button quiet detail-edit"
+            href={editHref}
+            aria-label="Rezept bearbeiten"
           >
-            Kochen
-          </a>
-          <a className="button detail-edit" href={`#/recipe/${encodeURIComponent(recipe.id)}/edit`}>
-            Bearbeiten
+            <svg
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              aria-hidden="true"
+              focusable="false"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="m10.8 2.9 2.3 2.3-7.2 7.2-3.1.8.8-3.1 7.2-7.2Z" />
+            </svg>
+            <span>Bearbeiten</span>
           </a>
         </div>
       </div>
 
       <header className={`recipe-header${hasImage ? '' : ' no-image'}`}>
         <div className="recipe-heading">
+          {labels.length > 0 ? <p className="recipe-kicker">{labels.join(' · ')}</p> : null}
           <h1>{recipe.title}</h1>
           {facts.length > 0 ? (
             <dl className="recipe-facts">
@@ -139,12 +168,26 @@ export function RecipePage({ id }: { id: string }) {
               ))}
             </dl>
           ) : null}
+          <div className="recipe-actions">
+            <a className="button warm detail-cook" href={cookHash(recipe.id)}>
+              <svg
+                viewBox="0 0 16 16"
+                width="13"
+                height="13"
+                aria-hidden="true"
+                focusable="false"
+                fill="currentColor"
+              >
+                <path d="M4.4 2.9a.6.6 0 0 1 .9-.5l7 5.1a.6.6 0 0 1 0 1l-7 5.1a.6.6 0 0 1-.9-.5V2.9Z" />
+              </svg>
+              Kochen
+            </a>
+          </div>
           {recipe.description ? (
             <div className="recipe-description">
               <Markdown text={recipe.description} />
             </div>
           ) : null}
-          {labels.length > 0 ? <p className="recipe-labels">{labels.join(' · ')}</p> : null}
           {recipe.favorite || recipe.wantToCook || recipe.tags.length > 0 ? (
             <div className="badges recipe-badges">
               {recipe.favorite ? <span className="badge">★ Favorit</span> : null}
@@ -197,6 +240,22 @@ export function RecipePage({ id }: { id: string }) {
       </header>
 
       <RecipeBody recipe={recipe} />
+
+      <nav className="detail-mobile-actions" aria-label="Rezeptaktionen">
+        <a className="button warm" href={cookHash(recipe.id)}>
+          <svg
+            viewBox="0 0 16 16"
+            width="13"
+            height="13"
+            aria-hidden="true"
+            focusable="false"
+            fill="currentColor"
+          >
+            <path d="M4.4 2.9a.6.6 0 0 1 .9-.5l7 5.1a.6.6 0 0 1 0 1l-7 5.1a.6.6 0 0 1-.9-.5V2.9Z" />
+          </svg>
+          Kochen
+        </a>
+      </nav>
     </div>
   )
 }

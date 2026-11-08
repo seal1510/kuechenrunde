@@ -25,7 +25,23 @@ export function RecipeCard({
         <div className="recipe-card-inner">
           <div className="recipe-card-text">
             <h2>{recipe.title}</h2>
-            {duration ? <p className="recipe-card-facts">{duration}</p> : null}
+            {duration ? (
+              <p className="recipe-card-facts">
+                <svg
+                  viewBox="0 0 16 16"
+                  aria-hidden="true"
+                  focusable="false"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                >
+                  <circle cx="8" cy="8" r="5.75" />
+                  <path d="M8 4.6V8l2.35 1.45" />
+                </svg>
+                <span>{duration}</span>
+              </p>
+            ) : null}
             {labels.length > 0 ? (
               <div className="recipe-card-tags">
                 {labels.map((label) => (
@@ -48,6 +64,11 @@ export function RecipeCard({
             </div>
           ) : null}
         </div>
+        {coverUrl ? null : (
+          <span className="recipe-card-monogram" aria-hidden="true">
+            {recipe.title.trim().charAt(0).toLocaleUpperCase('de')}
+          </span>
+        )}
       </a>
     </article>
   )

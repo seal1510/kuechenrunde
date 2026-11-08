@@ -97,7 +97,7 @@ export function LibraryPage() {
       <header className="page-head library-head">
         <div>
           <h1>Rezeptbibliothek</h1>
-          <p className="muted">
+          <p className="library-count">
             {recipes === undefined
               ? 'Lade Rezepte …'
               : `${recipes.length} ${recipes.length === 1 ? 'Rezept' : 'Rezepte'} in deiner Sammlung`}
@@ -105,6 +105,17 @@ export function LibraryPage() {
         </div>
         <div className="page-head-actions">
           <a className="button primary" href="#/recipe/new">
+            <svg
+              viewBox="0 0 16 16"
+              aria-hidden="true"
+              focusable="false"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+            >
+              <path d="M8 3.2v9.6M3.2 8h9.6" />
+            </svg>
             Neues Rezept
           </a>
           <a className="button quiet" href="#/import">
@@ -141,6 +152,19 @@ export function LibraryPage() {
           </label>
           <label className="sort-field">
             <span className="visually-hidden">Sortierung</span>
+            <span className="sort-icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 16 16"
+                width="15"
+                height="15"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              >
+                <path d="M5 3v10M5 13l-2.2-2.2M5 13l2.2-2.2M11 13V3M11 3 8.8 5.2M11 3l2.2 2.2" />
+              </svg>
+            </span>
             <select
               value={sort}
               onChange={(event) => setSort(event.target.value as LibrarySort)}
@@ -168,7 +192,7 @@ export function LibraryPage() {
           <FilterSelect label="Tag" value={tag} options={tags} onChange={setTag} />
         </div>
 
-        <div className="filter-summary">
+        <div className="filter-summary" role="status" aria-live="polite">
           <span>
             {filtered.length} von {recipes?.length ?? 0} Rezepten
           </span>

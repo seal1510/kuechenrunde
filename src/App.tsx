@@ -43,19 +43,39 @@ export default function App() {
             </span>
           </a>
           <nav className="main-nav" aria-label="Hauptnavigation">
-            <a className={isLibraryArea(route) ? 'active' : ''} href="#/">
+            <a
+              className={isLibraryArea(route) ? 'active' : ''}
+              href="#/"
+              aria-current={isLibraryArea(route) ? 'page' : undefined}
+            >
               Bibliothek
             </a>
-            <a className={route.name === 'plan' ? 'active' : ''} href="#/plan">
+            <a
+              className={route.name === 'plan' ? 'active' : ''}
+              href="#/plan"
+              aria-current={route.name === 'plan' ? 'page' : undefined}
+            >
               Woche
             </a>
-            <a className={route.name === 'shopping' ? 'active' : ''} href="#/shopping">
+            <a
+              className={route.name === 'shopping' ? 'active' : ''}
+              href="#/shopping"
+              aria-current={route.name === 'shopping' ? 'page' : undefined}
+            >
               Einkaufsliste
             </a>
-            <a className={route.name === 'import' || route.name === 'import-url' ? 'active' : ''} href="#/import">
+            <a
+              className={route.name === 'import' || route.name === 'import-url' ? 'active' : ''}
+              href="#/import"
+              aria-current={route.name === 'import' || route.name === 'import-url' ? 'page' : undefined}
+            >
               Import
             </a>
-            <a className={route.name === 'backup' ? 'active' : ''} href="#/backup">
+            <a
+              className={route.name === 'backup' ? 'active' : ''}
+              href="#/backup"
+              aria-current={route.name === 'backup' ? 'page' : undefined}
+            >
               Backup
             </a>
           </nav>
