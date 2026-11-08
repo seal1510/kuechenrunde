@@ -420,6 +420,12 @@ export interface ShoppingManualItem {
    * the standard list of the Thursday–Wednesday period containing the date.
    */
   listId?: string
+  /**
+   * Historical week grouping could not be reconstructed unambiguously. The row
+   * is preserved verbatim and is surfaced as a review conflict, never silently
+   * re-assigned to another shopping period.
+   */
+  legacyWeekAmbiguous?: boolean
   name: string
   quantityText: string | null
   unit: string | null
@@ -479,6 +485,8 @@ export interface ShoppingPurchase {
    * is never counted again as automatic recipe demand.
    */
   manualItemId?: string
+  /** See `ShoppingManualItem.legacyWeekAmbiguous`. */
+  legacyWeekAmbiguous?: boolean
   amounts: ShoppingPurchasedAmount[]
   /** Cumulative purchased totals for this week after this action. */
   confirmedTotal?: ShoppingPurchasedAmount[]

@@ -34,13 +34,13 @@ import {
   type ShoppingCategoryId,
   type ShoppingListItem,
 } from '../domain/shopping'
+import { shoppingPeriod } from '../domain/shoppingLists'
 import {
   addManualItem,
   addShoppingPurchase,
   categoryOrderFromRows,
   clearLegacyQuantity,
   mergeShoppingProducts,
-  removeManualItem,
   removeQuantityCorrection,
   removeShoppingPurchase,
   resolveAmbiguousRule,
@@ -52,6 +52,7 @@ import {
   updateManualItem,
   type ItemRuleInput,
 } from '../shopping/service'
+import { removeManualListItem } from '../shopping/listService'
 import type {
   ShoppingItemRule,
   ShoppingManualItem,
@@ -167,6 +168,13 @@ export function ShoppingPage() {
     () => shoppingWeek(anchorDate, calendarSettings.weekStartDay),
     [anchorDate, calendarSettings.weekStartDay],
   )
+  const shoppingPeriodForAnchor = useMemo(() => shoppingPeriod(anchorDate), [anchorDate])
+  // Writes from the legacy page must be visible both in the configured
+  // calendar week and in the fixed Thursday–Wednesday shopping period.
+  const entryDate = useMemo(() => {
+    const overlap = week.days.find((day) => shoppingPeriodForAnchor.days.includes(day))
+    return overlap ?? shoppingPeriodForAnchor.start
+  }, [week, shoppingPeriodForAnchor])
   const list = useMemo(
     () =>
       buildShoppingList({
@@ -254,7 +262,7 @@ export function ShoppingPage() {
     try {
       setError(null)
       await addManualItem({
-        shoppingDate: week.start,
+        shoppingDate: entryDate,
         name: input.name,
         quantityText: input.quantityText,
         unit: input.unit,
@@ -298,7 +306,7 @@ export function ShoppingPage() {
         upper: position.upper,
       }))
       await addShoppingPurchase({
-        shoppingDate: week.start,
+        shoppingDate: entryDate,
         itemKey: item.key,
         amounts,
         snapshot: item.requiredPositions,
@@ -331,7 +339,7 @@ export function ShoppingPage() {
     )
     await run(async () => {
       await addShoppingPurchase({
-        shoppingDate: week.start,
+        shoppingDate: entryDate,
         itemKey: item.key,
         amounts: confirmed,
         snapshot: item.requiredPositions,
@@ -344,7 +352,7 @@ export function ShoppingPage() {
 
   async function removeManual(item: ShoppingManualItem) {
     await run(async () => {
-      await removeManualItem(item.id)
+      await removeManualListItem(item.id)
       setUndoItem(item)
     })
   }

@@ -332,25 +332,25 @@ export function resolveShoppingDistribution(
       .filter((allocation) => allocation.dimension === '*')
       .sort(compareAllocations)
 
-    if (fullItemAllocations.length > 0) {
-      const validFull: ShoppingDemandAllocation[] = []
-      for (const allocation of fullItemAllocations) {
-        if (allocation.mode !== 'full') {
-          conflicts.push({
-            code: 'invalid-allocation',
-            itemKey: item.key,
-            dimension: allocation.dimension,
-            listId: allocation.listId,
-          })
-          usedAllocationIds.add(allocation.id)
-          continue
-        }
-        if (unknownList(allocation)) {
-          usedAllocationIds.add(allocation.id)
-          continue
-        }
-        validFull.push(allocation)
+    const validFull: ShoppingDemandAllocation[] = []
+    for (const allocation of fullItemAllocations) {
+      if (allocation.mode !== 'full') {
+        conflicts.push({
+          code: 'invalid-allocation',
+          itemKey: item.key,
+          dimension: allocation.dimension,
+          listId: allocation.listId,
+        })
+        usedAllocationIds.add(allocation.id)
+        continue
       }
+      if (unknownList(allocation)) {
+        usedAllocationIds.add(allocation.id)
+        continue
+      }
+      validFull.push(allocation)
+    }
+    if (validFull.length > 0) {
       if (validFull.length > 1) {
         conflicts.push({
           code: 'multiple-full-allocations',

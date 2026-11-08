@@ -12,15 +12,11 @@
 import { db } from '../db'
 import { todayKey } from '../domain/dates'
 import {
-  buildShoppingList,
   parseShoppingQuantityPosition,
   resolveCanonicalKey,
   SHOPPING_CATEGORIES,
-  shoppingItemKey,
-  splitIngredientName,
   type ShoppingAmountPosition,
   type ShoppingCategoryId,
-  type ShoppingQuantityCorrectionStatus,
 } from '../domain/shopping'
 import {
   fromAmountMilli,
@@ -34,7 +30,6 @@ import {
   standardShoppingListRecord,
   toAmountMilli,
   type ShoppingDistributionConflict,
-  type ShoppingDistributionResult,
   type ShoppingOpenPosition,
   type ShoppingPeriod,
   type ShoppingPurchaseContribution,
@@ -42,10 +37,18 @@ import {
 } from '../domain/shoppingLists'
 import { randomId } from '../lib/id'
 import {
+  loadShoppingDistribution,
+  loadShoppingPeriodDemand,
+  manualItemKey,
+  type ShoppingDistributionView,
+  type ShoppingPeriodDemand,
+  type ShoppingPeriodDemandItem,
+} from './demand'
+import { ShoppingListError } from './errors'
+import {
   addManualItem,
-  addShoppingPurchase,
+  addShoppingPurchaseRecord,
   removeManualItem,
-  updateManualItem,
 } from './service'
 import type {
   ShoppingDemandAllocation,
@@ -61,38 +64,8 @@ import type {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const CATEGORY_SET = new Set<string>(SHOPPING_CATEGORIES.map((category) => category.id))
 
-export type ShoppingListErrorCode =
-  | 'invalid-period'
-  | 'invalid-list-name'
-  | 'list-not-found'
-  | 'standard-list-protected'
-  | 'invalid-target-list'
-  | 'position-not-found'
-  | 'invalid-quantity'
-  | 'incompatible-unit'
-  | 'ambiguous-quantity'
-  | 'over-allocation'
-  | 'allocation-not-found'
-  | 'full-allocation-conflict'
-  | 'confirmation-required'
-  | 'purchase-conflict'
-  | 'orphaned-allocation'
-
-export class ShoppingListError extends Error {
-  readonly code: ShoppingListErrorCode
-  readonly details: Record<string, unknown>
-
-  constructor(
-    code: ShoppingListErrorCode,
-    message: string,
-    details: Record<string, unknown> = {},
-  ) {
-    super(message)
-    this.name = 'ShoppingListError'
-    this.code = code
-    this.details = details
-  }
-}
+export { ShoppingListError } from './errors'
+export type { ShoppingListErrorCode } from './errors'
 
 function cleanText(value: string | null | undefined): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim()
@@ -387,31 +360,6 @@ export async function deleteFreeShoppingList(
 /* Automatic demand                                                    */
 /* ------------------------------------------------------------------ */
 
-export interface ShoppingPeriodDemandItem {
-  key: string
-  name: string
-  categoryId: ShoppingCategoryId
-  positions: ShoppingAmountPosition[]
-  unparsedAmounts: string[]
-  missingQuantity: boolean
-  quantityCorrections: Array<{
-    id: string
-    dimension: string
-    status: ShoppingQuantityCorrectionStatus
-    quantityText: string
-    unit: string | null
-  }>
-  warnings: string[]
-}
-
-export interface ShoppingPeriodDemand {
-  period: ShoppingPeriod
-  standardListId: string
-  items: ShoppingPeriodDemandItem[]
-  warnings: string[]
-  requiresReview: boolean
-}
-
 /**
  * The complete automatic demand for one Thursday–Wednesday period, derived by
  * the existing aggregation exactly once. No purchase or manual article is
@@ -420,94 +368,13 @@ export interface ShoppingPeriodDemand {
 export async function getShoppingPeriodDemand(
   anchor: string,
 ): Promise<ShoppingPeriodDemand> {
-  const period = requirePeriod(anchor)
-  const [recipes, freeDishes, cookSessions, rules, quantityCorrections] = await Promise.all([
-    db.recipes.toArray(),
-    db.freeDishes.toArray(),
-    db.cookSessions.toArray(),
-    db.shoppingItemRules.toArray(),
-    db.shoppingQuantityCorrections.toArray(),
-  ])
-  const built = buildShoppingList({
-    anchor: period.start,
-    weekStartDay: 3,
-    recipes,
-    freeDishes,
-    cookSessions,
-    manualItems: [],
-    checks: [],
-    purchases: [],
-    rules,
-    quantityCorrections,
-  })
-  const items = built.items.map<ShoppingPeriodDemandItem>((item) => ({
-    key: item.key,
-    name: item.name,
-    categoryId: item.categoryId,
-    positions: item.requiredPositions.map((position) => ({ ...position })),
-    unparsedAmounts: [...item.unparsedAmounts],
-    missingQuantity: item.missingQuantity,
-    quantityCorrections: item.quantityCorrections.map((correction) => ({
-      id: correction.id,
-      dimension: correction.dimension,
-      status: correction.status,
-      quantityText: correction.quantityText,
-      unit: correction.unit,
-    })),
-    warnings: [...item.warnings],
-  }))
-  return {
-    period,
-    standardListId: standardShoppingListId(period.start),
-    items,
-    warnings: built.warnings,
-    requiresReview: items.some((item) =>
-      item.quantityCorrections.some((correction) => correction.status === 'stale'),
-    ),
-  }
+  return loadShoppingPeriodDemand(anchor)
 }
 
-export interface ShoppingDistributionView extends ShoppingDistributionResult {
-  lists: ShoppingList[]
-  standardList: ShoppingList
-  demand: ShoppingPeriodDemand
-}
-
-/** Read-only resolution of the current distribution for one period. */
 export async function getShoppingDistribution(
   anchor: string,
 ): Promise<ShoppingDistributionView> {
-  const demand = await getShoppingPeriodDemand(anchor)
-  const [allocations, lists] = await Promise.all([
-    db.shoppingDemandAllocations.where('periodStart').equals(demand.period.start).toArray(),
-    db.shoppingLists.toArray(),
-  ])
-  const standardList =
-    lists.find((list) => list.id === demand.standardListId) ?? virtualStandard(demand.period)
-  const distribution = resolveShoppingDistribution({
-    periodStart: demand.period.start,
-    standardListId: demand.standardListId,
-    demand: demand.items.map((item) => ({
-      key: item.key,
-      name: item.name,
-      positions: item.positions,
-      unparsedAmounts: item.unparsedAmounts,
-      missingQuantity: item.missingQuantity,
-    })),
-    allocations,
-    listIds: lists
-      .filter(
-        (list) =>
-          list.kind === 'free' || list.periodStart === demand.period.start,
-      )
-      .map((list) => list.id),
-  })
-  return {
-    ...distribution,
-    lists: sortLists(lists),
-    standardList,
-    demand,
-  }
+  return loadShoppingDistribution(anchor)
 }
 
 async function requireTargetList(
@@ -604,6 +471,7 @@ export async function moveShoppingItem(
         await db.shoppingPurchases.put({
           ...purchase,
           listId: target.id,
+          legacyWeekAmbiguous: undefined,
           updatedAt: now,
         })
         movedPurchases += 1
@@ -658,6 +526,35 @@ export async function moveShoppingPosition(
     'rw',
     [db.shoppingDemandAllocations, db.shoppingPurchases, db.shoppingItemRules],
     async () => {
+      const rules = await db.shoppingItemRules.toArray()
+      const purchases = await db.shoppingPurchases.toArray()
+      const affectedPurchases = purchases.filter((purchase) => {
+        if (purchase.manualItemId) return false
+        if (!DATE_RE.test(purchase.shoppingDate)) return false
+        if (!isDateInShoppingPeriod(purchase.shoppingDate, demand.period.start)) return false
+        return resolveCanonicalKey(purchase.itemKey, rules) === item.key
+      })
+      // Validate every affected purchase before the first write. A row with
+      // several dimensions cannot be split by guesswork; the whole operation
+      // must fail without leaving a half-moved allocation behind.
+      for (const purchase of affectedPurchases) {
+        const onlyDimension =
+          purchase.amounts.length > 0 &&
+          purchase.amounts.every((amount) => amount.dimension === dimension)
+        if (!onlyDimension) {
+          throw new ShoppingListError(
+            'purchase-conflict',
+            'Ein vorhandener Kauf enthält mehrere Mengendimensionen und kann nicht eindeutig verschoben werden.',
+            {
+              purchaseId: purchase.id,
+              itemKey: item.key,
+              dimension,
+              dimensions: purchase.amounts.map((amount) => amount.dimension),
+            },
+          )
+        }
+      }
+
       const allocations = await db.shoppingDemandAllocations
         .where('[periodStart+itemKey]')
         .equals([demand.period.start, item.key])
@@ -690,34 +587,19 @@ export async function moveShoppingPosition(
         })
       }
 
-      const rules = await db.shoppingItemRules.toArray()
-      const untouchedPurchaseIds: string[] = []
-      let movedPurchases = 0
-      const purchases = await db.shoppingPurchases.toArray()
-      for (const purchase of purchases) {
-        if (purchase.manualItemId) continue
-        if (!DATE_RE.test(purchase.shoppingDate)) continue
-        if (!isDateInShoppingPeriod(purchase.shoppingDate, demand.period.start)) continue
-        if (resolveCanonicalKey(purchase.itemKey, rules) !== item.key) continue
-        const onlyDimension =
-          purchase.amounts.length > 0 &&
-          purchase.amounts.every((amount) => amount.dimension === dimension)
-        if (!onlyDimension) {
-          untouchedPurchaseIds.push(purchase.id)
-          continue
-        }
+      for (const purchase of affectedPurchases) {
         await db.shoppingPurchases.put({
           ...purchase,
           listId: target.id,
+          legacyWeekAmbiguous: undefined,
           updatedAt: now,
         })
-        movedPurchases += 1
       }
       return {
         mode: targetIsStandard ? 'reset' : 'full',
         targetListId: target.id,
-        movedPurchases,
-        untouchedPurchaseIds,
+        movedPurchases: affectedPurchases.length,
+        untouchedPurchaseIds: [],
       }
     },
   )
@@ -903,6 +785,13 @@ export async function resetShoppingAllocations(
           .where('periodStart')
           .equals(period.start)
           .toArray()
+    if (dimension && rows.some((allocation) => allocation.dimension === '*')) {
+      throw new ShoppingListError(
+        'full-allocation-conflict',
+        'Die ganze Position ist vollständig verschoben. Ein dimensionsbezogener Reset ist nicht eindeutig.',
+        { itemKey, dimension },
+      )
+    }
     let removed = 0
     for (const allocation of rows) {
       if (dimension && allocation.dimension !== dimension) continue
@@ -923,6 +812,8 @@ export type ShoppingListServiceConflictCode =
   | 'manual-purchase-ambiguous'
   | 'orphaned-manual-list'
   | 'unmatched-purchase'
+  | 'legacy-week-ambiguous'
+  | 'manual-list-period-mismatch'
 
 export interface ShoppingListServiceConflict {
   code: ShoppingListServiceConflictCode
@@ -968,10 +859,6 @@ export interface ShoppingOpenDemandResult {
   conflicts: ShoppingDistributionConflict[]
   serviceConflicts: ShoppingListServiceConflict[]
   requiresReview: boolean
-}
-
-function manualItemKey(item: ShoppingManualItem): string {
-  return shoppingItemKey(splitIngredientName(item.name).identityName)
 }
 
 function sumPurchased(
@@ -1042,6 +929,15 @@ export async function getOpenDemandByList(
   const manualPurchases = new Map<string, ShoppingPurchase[]>()
   for (const purchase of allPurchases) {
     if (!DATE_RE.test(purchase.shoppingDate)) continue
+    if (purchase.legacyWeekAmbiguous) {
+      serviceConflicts.push({
+        code: 'legacy-week-ambiguous',
+        itemKey: purchase.itemKey,
+        listId: purchase.listId ?? null,
+        purchaseId: purchase.id,
+      })
+      continue
+    }
     if (purchase.manualItemId) {
       // Manual articles on a free list are independent from a calendar period;
       // their purchases travel with the article, not with a week.
@@ -1097,6 +993,14 @@ export async function getOpenDemandByList(
   for (const item of allManualItems) {
     const date = item.shoppingDate || item.weekStart || ''
     if (!date || !DATE_RE.test(date)) continue
+    if (item.legacyWeekAmbiguous) {
+      serviceConflicts.push({
+        code: 'legacy-week-ambiguous',
+        listId: item.listId ?? null,
+        manualItemId: item.id,
+      })
+      continue
+    }
     let listId = standardId
     let listIsFree = false
     if (item.listId) {
@@ -1113,6 +1017,17 @@ export async function getOpenDemandByList(
       listIsFree = list.kind === 'free'
     }
     if (!listIsFree && !isDateInShoppingPeriod(date, period.start)) continue
+    if (listIsFree === false && item.listId) {
+      const list = listById.get(item.listId)
+      if (list?.kind === 'standard' && list.periodStart !== shoppingPeriod(date).start) {
+        serviceConflicts.push({
+          code: 'manual-list-period-mismatch',
+          listId: list.id,
+          manualItemId: item.id,
+        })
+        continue
+      }
+    }
 
     const parsed = parseShoppingQuantityPosition(item.quantityText ?? '', item.unit)
     const explicitPurchases = (manualPurchases.get(item.id) ?? []).filter(
@@ -1284,8 +1199,13 @@ export async function createManualListItem(
   const shoppingDate = input.shoppingDate
     ? cleanText(input.shoppingDate)
     : (list.periodStart ?? todayKey())
-  if (!DATE_RE.test(shoppingDate)) {
-    throw new ShoppingListError('invalid-period', 'Der Einkaufstag ist kein gültiges Datum.')
+  const datePeriod = requirePeriod(shoppingDate)
+  if (list.kind === 'standard' && list.periodStart !== datePeriod.start) {
+    throw new ShoppingListError(
+      'list-period-mismatch',
+      'Der Einkaufstag gehört nicht zum Zeitraum des Standardzettels.',
+      { listId: list.id, periodStart: list.periodStart, shoppingDate },
+    )
   }
   return addManualItem({
     listId: list.id,
@@ -1312,23 +1232,95 @@ export async function updateManualListItem(
   id: string,
   patch: UpdateManualListItemPatch,
 ): Promise<ShoppingManualItem> {
-  const { listId, ...fields } = patch
-  const existing = await db.shoppingManualItems.get(id)
-  if (!existing) {
-    throw new ShoppingListError('list-not-found', 'Der manuelle Artikel wurde nicht gefunden.')
-  }
-  if (listId !== undefined) {
-    const list = await db.shoppingLists.get(cleanText(listId))
-    if (!list) {
-      throw new ShoppingListError('list-not-found', 'Die Ziel-Einkaufsliste wurde nicht gefunden.')
-    }
-  }
-  const updated =
-    Object.keys(fields).length > 0 ? await updateManualItem(id, fields) : existing
-  if (listId !== undefined && cleanText(listId) !== (existing.listId ?? '')) {
-    return moveManualItem(id, listId)
-  }
-  return updated
+  return db.transaction(
+    'rw',
+    [db.shoppingLists, db.shoppingManualItems, db.shoppingPurchases],
+    async () => {
+      const existing = await db.shoppingManualItems.get(id)
+      if (!existing) {
+        throw new ShoppingListError('list-not-found', 'Der manuelle Artikel wurde nicht gefunden.')
+      }
+      const target =
+        patch.listId === undefined
+          ? existing.listId
+            ? await db.shoppingLists.get(existing.listId)
+            : undefined
+          : await db.shoppingLists.get(cleanText(patch.listId))
+      if (patch.listId !== undefined && !target) {
+        throw new ShoppingListError('list-not-found', 'Die Ziel-Einkaufsliste wurde nicht gefunden.')
+      }
+      if (existing.listId && !target && patch.listId === undefined) {
+        throw new ShoppingListError(
+          'list-not-found',
+          'Die bisherige Einkaufsliste des Artikels wurde nicht gefunden.',
+        )
+      }
+
+      let shoppingDate =
+        patch.shoppingDate === undefined
+          ? (existing.shoppingDate || existing.weekStart || target?.periodStart || todayKey())
+          : cleanText(patch.shoppingDate)
+      const datePeriod = requirePeriod(shoppingDate)
+      if (target?.kind === 'standard') {
+        if (target.periodStart !== datePeriod.start) {
+          // Moving to a standard list of another period implies moving the
+          // article into that period. This is only allowed atomically; an
+          // explicitly supplied conflicting date is rejected.
+          if (patch.listId !== undefined && patch.shoppingDate === undefined) {
+            shoppingDate = target.periodStart ?? shoppingDate
+          } else {
+            throw new ShoppingListError(
+              'list-period-mismatch',
+              'Der Einkaufstag gehört nicht zum Zeitraum des Standardzettels.',
+              { listId: target.id, periodStart: target.periodStart, shoppingDate },
+            )
+          }
+        }
+      }
+
+      const name = patch.name === undefined ? existing.name : cleanText(patch.name)
+      if (!name) throw new ShoppingListError('invalid-list-name', 'Bitte einen Artikelnamen angeben.')
+      const previousDate = existing.shoppingDate || existing.weekStart || ''
+      const dateChanged = shoppingDate !== previousDate
+      const listChanged = target?.id !== existing.listId
+      const next: ShoppingManualItem = {
+        ...existing,
+        shoppingDate,
+        weekStart: dateChanged ? shoppingDate : (existing.weekStart ?? shoppingDate),
+        listId: target?.id,
+        legacyWeekAmbiguous:
+          dateChanged || listChanged ? undefined : existing.legacyWeekAmbiguous,
+        name,
+        quantityText:
+          patch.quantityText === undefined
+            ? existing.quantityText
+            : optionalText(patch.quantityText) ?? null,
+        unit: patch.unit === undefined ? existing.unit : optionalText(patch.unit) ?? null,
+        purchaseNote:
+          patch.purchaseNote === undefined
+            ? existing.purchaseNote
+            : cleanText(patch.purchaseNote),
+        categoryId:
+          patch.categoryId === undefined
+            ? existing.categoryId
+            : categoryOrNull(patch.categoryId),
+        updatedAt: Date.now(),
+      }
+      await db.shoppingManualItems.put(next)
+      const linked = await db.shoppingPurchases.where('manualItemId').equals(id).toArray()
+      for (const purchase of linked) {
+        await db.shoppingPurchases.put({
+          ...purchase,
+          listId: target?.id ?? purchase.listId,
+          shoppingDate: dateChanged ? shoppingDate : purchase.shoppingDate,
+          legacyWeekAmbiguous:
+            dateChanged || listChanged ? undefined : purchase.legacyWeekAmbiguous,
+          updatedAt: next.updatedAt,
+        })
+      }
+      return next
+    },
+  )
 }
 
 /** Move a manual article and its explicitly linked purchases together. */
@@ -1336,22 +1328,33 @@ export async function moveManualItem(
   id: string,
   targetListId: string,
 ): Promise<ShoppingManualItem> {
-  const target = await db.shoppingLists.get(cleanText(targetListId))
-  if (!target) {
-    throw new ShoppingListError('list-not-found', 'Die Ziel-Einkaufsliste wurde nicht gefunden.')
-  }
   return db.transaction(
     'rw',
-    [db.shoppingManualItems, db.shoppingPurchases],
+    [db.shoppingLists, db.shoppingManualItems, db.shoppingPurchases],
     async () => {
       const existing = await db.shoppingManualItems.get(id)
       if (!existing) {
         throw new ShoppingListError('list-not-found', 'Der manuelle Artikel wurde nicht gefunden.')
       }
+      const target = await db.shoppingLists.get(cleanText(targetListId))
+      if (!target) {
+        throw new ShoppingListError('list-not-found', 'Die Ziel-Einkaufsliste wurde nicht gefunden.')
+      }
+      const currentDate = existing.shoppingDate || existing.weekStart || todayKey()
+      let shoppingDate = currentDate
+      if (target.kind === 'standard') {
+        const datePeriod = requirePeriod(currentDate)
+        if (datePeriod.start !== target.periodStart) {
+          shoppingDate = target.periodStart ?? currentDate
+        }
+      }
       const now = Date.now()
       const next: ShoppingManualItem = {
         ...existing,
+        shoppingDate,
+        weekStart: shoppingDate,
         listId: target.id,
+        legacyWeekAmbiguous: undefined,
         updatedAt: now,
       }
       await db.shoppingManualItems.put(next)
@@ -1360,6 +1363,8 @@ export async function moveManualItem(
         await db.shoppingPurchases.put({
           ...purchase,
           listId: target.id,
+          shoppingDate,
+          legacyWeekAmbiguous: undefined,
           updatedAt: now,
         })
       }
@@ -1369,6 +1374,10 @@ export async function moveManualItem(
 }
 
 export async function removeManualListItem(id: string): Promise<void> {
+  const existing = await db.shoppingManualItems.get(id)
+  if (!existing) {
+    throw new ShoppingListError('list-not-found', 'Der manuelle Artikel wurde nicht gefunden.')
+  }
   await removeManualItem(id)
 }
 
@@ -1380,52 +1389,123 @@ export async function setManualItemPurchased(
   id: string,
   purchased: boolean,
 ): Promise<{ item: ShoppingManualItem; purchases: ShoppingPurchase[] }> {
-  const item = await db.shoppingManualItems.get(id)
-  if (!item) {
+  const initial = await db.shoppingManualItems.get(id)
+  if (!initial) {
     throw new ShoppingListError('list-not-found', 'Der manuelle Artikel wurde nicht gefunden.')
   }
-  const purchaseDate = item.shoppingDate || item.weekStart || todayKey()
-  let fallbackListId = standardShoppingListId(shoppingPeriod(todayKey()).start)
-  try {
-    fallbackListId = standardShoppingListId(shoppingPeriod(purchaseDate).start)
-  } catch {
-    // Keep the safest deterministic fallback for an invalid legacy date.
+  const date = initial.shoppingDate || initial.weekStart || todayKey()
+  const period = requirePeriod(date)
+  const key = manualItemKey(initial)
+  const [demand, rules, allManualItems, allPurchases] = await Promise.all([
+    loadShoppingPeriodDemand(period.start),
+    db.shoppingItemRules.toArray(),
+    db.shoppingManualItems.toArray(),
+    db.shoppingPurchases.toArray(),
+  ])
+  const sameKey = allManualItems.filter((other) => manualItemKey(other) === key)
+  const hasAutomaticDemand = demand.items.some((entry) => entry.key === key)
+  const legacyPurchases = allPurchases.filter(
+    (purchase) =>
+      !purchase.manualItemId &&
+      resolveCanonicalKey(purchase.itemKey, rules) === key,
+  )
+  const deletableLegacy = legacyPurchases.filter(
+    (purchase) =>
+      !purchase.listId &&
+      DATE_RE.test(purchase.shoppingDate) &&
+      isDateInShoppingPeriod(purchase.shoppingDate, period.start),
+  )
+  const ambiguous =
+    hasAutomaticDemand ||
+    sameKey.length !== 1 ||
+    deletableLegacy.length !== legacyPurchases.length
+  if (ambiguous && legacyPurchases.length > 0) {
+    throw new ShoppingListError(
+      'purchase-conflict',
+      'Vorhandene Käufe ohne Artikelzuordnung sind nicht eindeutig diesem manuellen Artikel zuzuordnen.',
+      {
+        manualItemId: id,
+        itemKey: key,
+        purchaseIds: legacyPurchases.map((purchase) => purchase.id),
+      },
+    )
   }
-  const listId = item.listId ?? fallbackListId
-  if (purchased) {
-    const existing = await db.shoppingPurchases.where('manualItemId').equals(id).toArray()
-    if (existing.length > 0) {
-      return { item, purchases: existing }
-    }
-    const parsed = parseShoppingQuantityPosition(item.quantityText ?? '', item.unit)
-    const amounts: ShoppingPurchasedAmount[] =
-      parsed && (parsed.lower > 0 || parsed.upper > 0)
-        ? [
-            {
-              dimension: parsed.dimension,
-              lower: Math.max(0, parsed.lower),
-              upper: Math.max(0, parsed.upper),
-            },
-          ]
-        : []
-    const purchase = await addShoppingPurchase({
-      shoppingDate: purchaseDate,
-      itemKey: manualItemKey(item),
-      listId,
-      manualItemId: item.id,
-      amounts,
-      snapshot: parsed ? [parsed] : [],
-      qualitative: amounts.length === 0,
-    })
-    return { item, purchases: [purchase] }
-  }
-  return db.transaction('rw', db.shoppingPurchases, async () => {
-    const linked = await db.shoppingPurchases.where('manualItemId').equals(id).toArray()
-    if (linked.length > 0) {
-      await db.shoppingPurchases.bulkDelete(linked.map((purchase) => purchase.id))
-    }
-    return { item, purchases: [] }
-  })
+  const adoptableLegacy = !ambiguous && deletableLegacy.length === 1
+    ? deletableLegacy[0]
+    : undefined
+
+  return db.transaction(
+    'rw',
+    [db.shoppingLists, db.shoppingManualItems, db.shoppingPurchases],
+    async () => {
+      const item = await db.shoppingManualItems.get(id)
+      if (!item) {
+        throw new ShoppingListError('list-not-found', 'Der manuelle Artikel wurde nicht gefunden.')
+      }
+      const purchaseDate = item.shoppingDate || item.weekStart || todayKey()
+      let fallbackListId = standardShoppingListId(shoppingPeriod(todayKey()).start)
+      try {
+        fallbackListId = standardShoppingListId(shoppingPeriod(purchaseDate).start)
+      } catch {
+        // Keep the safest deterministic fallback for an invalid legacy date.
+      }
+      const listId = item.listId ?? fallbackListId
+      if (!item.listId) {
+        const existingList = await db.shoppingLists.get(listId)
+        if (!existingList) {
+          await db.shoppingLists.put(
+            standardShoppingListRecord(fallbackListId.slice('standard:'.length), Date.now()),
+          )
+        }
+      }
+      if (purchased) {
+        const existing = await db.shoppingPurchases.where('manualItemId').equals(id).toArray()
+        if (existing.length > 0) {
+          return { item, purchases: existing }
+        }
+        if (adoptableLegacy) {
+          const adopted: ShoppingPurchase = {
+            ...adoptableLegacy,
+            listId,
+            manualItemId: item.id,
+            legacyWeekAmbiguous: undefined,
+            updatedAt: Date.now(),
+          }
+          await db.shoppingPurchases.put(adopted)
+          return { item, purchases: [adopted] }
+        }
+        const parsed = parseShoppingQuantityPosition(item.quantityText ?? '', item.unit)
+        const amounts: ShoppingPurchasedAmount[] =
+          parsed && (parsed.lower > 0 || parsed.upper > 0)
+            ? [
+                {
+                  dimension: parsed.dimension,
+                  lower: Math.max(0, parsed.lower),
+                  upper: Math.max(0, parsed.upper),
+                },
+              ]
+            : []
+        const purchase = await addShoppingPurchaseRecord({
+          id: `manual-purchase:${id}`,
+          shoppingDate: purchaseDate,
+          itemKey: manualItemKey(item),
+          listId,
+          manualItemId: item.id,
+          amounts,
+          snapshot: parsed ? [parsed] : [],
+          qualitative: amounts.length === 0,
+        })
+        return { item, purchases: [purchase] }
+      }
+      const linked = await db.shoppingPurchases.where('manualItemId').equals(id).toArray()
+      const ids = new Set(linked.map((purchase) => purchase.id))
+      if (adoptableLegacy) ids.add(adoptableLegacy.id)
+      if (ids.size > 0) {
+        await db.shoppingPurchases.bulkDelete(Array.from(ids))
+      }
+      return { item, purchases: [] }
+    },
+  )
 }
 
 /* ------------------------------------------------------------------ */

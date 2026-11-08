@@ -22,6 +22,13 @@ import {
   type ShoppingAmountPosition,
   type ShoppingCategoryId,
 } from '../domain/shopping'
+import { loadShoppingPeriodDemand, manualItemKey, resolvePurchaseTargetForLegacyWrite } from './demand'
+import { ShoppingListError } from './errors'
+import {
+  isDateInShoppingPeriod,
+  shoppingAllocationId,
+  shoppingPeriod,
+} from '../domain/shoppingLists'
 import { randomId } from '../lib/id'
 import type {
   SettingRecord,
@@ -169,14 +176,53 @@ export async function updateManualItem(
 }
 
 export async function removeManualItem(id: string): Promise<void> {
-  await db.transaction('rw', db.shoppingManualItems, db.shoppingPurchases, async () => {
-    await db.shoppingManualItems.delete(id)
-    // Explicitly linked purchases belong to this article alone. Purchases
-    // without a manualItemId are never guessed to belong to it.
+  const item = await db.shoppingManualItems.get(id)
+  if (!item) return
+  const date = item.shoppingDate || item.weekStart || ''
+  if (!DATE_RE.test(date)) {
+    throw new ShoppingListError('invalid-period', 'Der Einkaufstag des Artikels ist ungültig.')
+  }
+  const period = shoppingPeriod(date)
+  const key = manualItemKey(item)
+  const [demand, rules, allManualItems, allPurchases] = await Promise.all([
+    loadShoppingPeriodDemand(period.start),
+    db.shoppingItemRules.toArray(),
+    db.shoppingManualItems.toArray(),
+    db.shoppingPurchases.toArray(),
+  ])
+  const sameKey = allManualItems.filter((other) => manualItemKey(other) === key)
+  const hasAutomaticDemand = demand.items.some((entry) => entry.key === key)
+  const legacyPurchases = allPurchases.filter(
+    (purchase) =>
+      !purchase.manualItemId &&
+      resolveCanonicalKey(purchase.itemKey, rules) === key,
+  )
+  const deletableLegacy = legacyPurchases.filter(
+    (purchase) =>
+      !purchase.listId &&
+      DATE_RE.test(purchase.shoppingDate) &&
+      isDateInShoppingPeriod(purchase.shoppingDate, period.start),
+  )
+  const ambiguous =
+    hasAutomaticDemand ||
+    sameKey.length !== 1 ||
+    deletableLegacy.length !== legacyPurchases.length
+  if (ambiguous && legacyPurchases.length > 0) {
+    throw new ShoppingListError(
+      'purchase-conflict',
+      'Vorhandene Käufe ohne Artikelzuordnung sind nicht eindeutig diesem manuellen Artikel zuzuordnen.',
+      {
+        manualItemId: item.id,
+        itemKey: key,
+        purchaseIds: legacyPurchases.map((purchase) => purchase.id),
+      },
+    )
+  }
+  await db.transaction('rw', [db.shoppingManualItems, db.shoppingPurchases], async () => {
     const linked = await db.shoppingPurchases.where('manualItemId').equals(id).toArray()
-    if (linked.length > 0) {
-      await db.shoppingPurchases.bulkDelete(linked.map((purchase) => purchase.id))
-    }
+    for (const purchase of linked) await db.shoppingPurchases.delete(purchase.id)
+    for (const purchase of deletableLegacy) await db.shoppingPurchases.delete(purchase.id)
+    await db.shoppingManualItems.delete(id)
   })
 }
 
@@ -319,10 +365,56 @@ export async function mergeShoppingProducts(
       db.shoppingPurchases,
       db.shoppingChecks,
       db.shoppingQuantityCorrections,
+      db.shoppingDemandAllocations,
     ],
     async () => {
       const finalTarget = await transactionMergeRules(source, target)
       const now = Date.now()
+
+      // Product identity changes must not orphan existing list decisions.
+      // A collision is ambiguous and aborts the whole transaction; quantities
+      // are never silently added or a full assignment silently preferred.
+      const sourceAllocations = await db.shoppingDemandAllocations
+        .where('itemKey')
+        .equals(source)
+        .toArray()
+      const remappedAllocations = sourceAllocations.map((allocation) => ({
+        source: allocation,
+        targetId: shoppingAllocationId(
+          allocation.periodStart,
+          finalTarget,
+          allocation.dimension,
+          allocation.listId,
+        ),
+      }))
+      for (const entry of remappedAllocations) {
+        const conflict = await db.shoppingDemandAllocations.get(entry.targetId)
+        if (conflict) {
+          throw new ShoppingListError(
+            'allocation-merge-conflict',
+            'Zwei Einkaufsverteilungen lassen sich nach der Produktzusammenführung nicht eindeutig vereinigen.',
+            {
+              sourceKey: source,
+              targetKey: finalTarget,
+              periodStart: entry.source.periodStart,
+              dimension: entry.source.dimension,
+              listId: entry.source.listId,
+              sourceAllocationId: entry.source.id,
+              targetAllocationId: conflict.id,
+            },
+          )
+        }
+      }
+      for (const entry of remappedAllocations) {
+        await db.shoppingDemandAllocations.delete(entry.source.id)
+        await db.shoppingDemandAllocations.put({
+          ...entry.source,
+          id: entry.targetId,
+          itemKey: finalTarget,
+          updatedAt: now,
+        })
+      }
+
       await db.shoppingPurchases
         .where('itemKey')
         .equals(source)
@@ -413,9 +505,23 @@ async function refreshConfirmedTotals(itemKey: string): Promise<void> {
 export async function splitShoppingProduct(aliasKey: string): Promise<void> {
   const key = cleanText(aliasKey)
   if (!key) return
-  await db.transaction('rw', db.shoppingItemRules, async () => {
+  await db.transaction('rw', db.shoppingItemRules, db.shoppingDemandAllocations, async () => {
     const existing = await db.shoppingItemRules.get(key)
     if (!existing) return
+    const canonical = cleanText(existing.canonicalKey ?? key)
+    if (canonical && canonical !== key) {
+      const allocationCount = await db.shoppingDemandAllocations
+        .where('itemKey')
+        .equals(canonical)
+        .count()
+      if (allocationCount > 0) {
+        throw new ShoppingListError(
+          'allocation-merge-conflict',
+          'Die Produktzusammenführung kann nicht getrennt werden, solange Einkaufsverteilungen bestehen.',
+          { aliasKey: key, canonicalKey: canonical, allocationCount },
+        )
+      }
+    }
     const next: ShoppingItemRule = { ...existing, canonicalKey: key, updatedAt: Date.now() }
     if (
       !next.displayName &&
@@ -572,6 +678,8 @@ function confirmedTotals(
 export interface PurchaseInput {
   shoppingDate: string
   itemKey: string
+  /** Optional deterministic id for idempotent writes. */
+  id?: string
   /** Owning shopping list; omitted for legacy callers. */
   listId?: string
   /** Set only when this purchase belongs to one explicit manual article. */
@@ -585,44 +693,69 @@ export interface PurchaseInput {
   qualitative?: boolean
 }
 
+/**
+ * Write one purchase row. Callers that already own a Dexie transaction may use
+ * this helper directly; it never opens a nested transaction itself.
+ */
+export async function addShoppingPurchaseRecord(
+  input: PurchaseInput,
+): Promise<ShoppingPurchase> {
+  const shoppingDate = requireDate(cleanText(input.shoppingDate), 'Der Einkaufstag')
+  const itemKey = cleanText(input.itemKey)
+  if (!itemKey) throw new ShoppingError('Der Artikel konnte nicht zugeordnet werden.')
+  const previous = await db.shoppingPurchases.where('itemKey').equals(itemKey).toArray()
+  const latest = previous.reduce((max, entry) => Math.max(max, entry.createdAt), 0)
+  // Monotonic timestamps make "last purchase" unambiguous even inside the
+  // same millisecond.
+  const now = Math.max(Date.now(), latest + 1)
+  const purchase: ShoppingPurchase = {
+    id: optionalText(input.id) ?? randomId(),
+    shoppingDate,
+    itemKey,
+    listId: optionalText(input.listId) ?? undefined,
+    manualItemId: optionalText(input.manualItemId) ?? undefined,
+    confirmedTotal: input.confirmedTotal
+      ? confirmedTotals([], '', input.confirmedTotal)
+      : confirmedTotals(previous, shoppingDate, input.amounts),
+    amounts: toPurchasedAmounts(
+      input.amounts.map((entry) => ({
+        dimension: entry.dimension,
+        unit: null,
+        lower: entry.lower,
+        upper: entry.upper,
+        qualifier: '',
+      })),
+    ),
+    snapshot: toPurchasedAmounts(input.snapshot),
+    qualitative: input.qualitative === true || input.amounts.length === 0,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await db.shoppingPurchases.put(purchase)
+  return purchase
+}
+
 export async function addShoppingPurchase(input: PurchaseInput): Promise<ShoppingPurchase> {
   const shoppingDate = requireDate(cleanText(input.shoppingDate), 'Der Einkaufstag')
   const itemKey = cleanText(input.itemKey)
   if (!itemKey) throw new ShoppingError('Der Artikel konnte nicht zugeordnet werden.')
+  let listId: string | undefined = optionalText(input.listId) ?? undefined
+  let manualItemId: string | undefined = optionalText(input.manualItemId) ?? undefined
+  if (!listId && !manualItemId) {
+    // The legacy page has no list concept. A new purchase is only accepted
+    // when the current distribution has exactly one target list.
+    const target = await resolvePurchaseTargetForLegacyWrite({ shoppingDate, itemKey })
+    listId = target.listId
+    manualItemId = target.manualItemId
+  }
   return db.transaction('rw', db.shoppingPurchases, async () => {
-    const previous = await db.shoppingPurchases.where('itemKey').equals(itemKey).toArray()
-    const latest = previous.reduce(
-      (max, entry) => Math.max(max, entry.createdAt),
-      0,
-    )
-    // Monotonic timestamps make "last purchase" unambiguous even inside the
-    // same millisecond.
-    const now = Math.max(Date.now(), latest + 1)
-    const purchase: ShoppingPurchase = {
-      id: randomId(),
+    return addShoppingPurchaseRecord({
+      ...input,
       shoppingDate,
       itemKey,
-      listId: optionalText(input.listId) ?? undefined,
-      manualItemId: optionalText(input.manualItemId) ?? undefined,
-      confirmedTotal: input.confirmedTotal
-        ? confirmedTotals([], '', input.confirmedTotal)
-        : confirmedTotals(previous, shoppingDate, input.amounts),
-      amounts: toPurchasedAmounts(
-        input.amounts.map((entry) => ({
-          dimension: entry.dimension,
-          unit: null,
-          lower: entry.lower,
-          upper: entry.upper,
-          qualifier: '',
-        })),
-      ),
-      snapshot: toPurchasedAmounts(input.snapshot),
-      qualitative: input.qualitative === true || input.amounts.length === 0,
-      createdAt: now,
-      updatedAt: now,
-    }
-    await db.shoppingPurchases.put(purchase)
-    return purchase
+      listId,
+      manualItemId,
+    })
   })
 }
 

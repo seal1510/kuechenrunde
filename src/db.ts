@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 import { parseIngredientLine, plainIngredientText } from './import/ingredients'
 import { shoppingIdentityMappings } from './domain/shopping'
+import { normalizeWeekday, startOfWeekOn } from './domain/dates'
 import {
   shoppingPeriod,
   standardShoppingListId,
@@ -38,7 +39,8 @@ import type {
  * free day notes as their own table; v9 adds plan-only free dishes with their
  * own ingredient snapshot; v14 adds explicit instruction ingredient references
  * and the local cook-mode progress table; v15 adds independent shopping lists
- * and explicit partial demand allocations.
+ * and explicit partial demand allocations; v16 marks historical rows with an
+ * unreconstructable calendar-week grouping for review.
  * Upgrades only add tables/indexes or backfill/reinterpret new fields; existing
  * recipes, images and plans are not deleted.
  */
@@ -654,6 +656,80 @@ export class OpenCookDatabase extends Dexie {
           .filter((periodStart) => !existingIds.has(standardShoppingListId(periodStart)))
           .map((periodStart) => standardShoppingListRecord(periodStart, now))
         if (newLists.length > 0) await listTable.bulkPut(newLists)
+        if (manualUpdates.length > 0) await manualTable.bulkPut(manualUpdates)
+        if (purchaseUpdates.length > 0) await purchaseTable.bulkPut(purchaseUpdates)
+      })
+    // v16 marks historical rows whose legacy calendar week cannot be
+    // reconstructed as the fixed Thursday–Wednesday period. The rows keep all
+    // original dates and list references; readers surface them as review
+    // conflicts instead of silently re-booking them. No row is deleted.
+    this.version(16)
+      .stores({
+        recipes:
+          'id, &importId, title, updatedAt, *categories, *cuisine, *dishType, effort, *tags, favorite, wantToCook, importUrl',
+        images: 'id, recipeId, [recipeId+position]',
+        mealPlans:
+          'id, date, [date+slot], recipeId, freeDishId, pinned, cooked, cookSessionId, status',
+        mealDays: 'date',
+        settings: 'key',
+        cookSessions: 'id, recipeId, freeDishId, date, status, [recipeId+date]',
+        dayNotes: 'date, updatedAt',
+        freeDishes: 'id, updatedAt',
+        shoppingManualItems: 'id, shoppingDate, weekStart, listId',
+        shoppingChecks: 'id, weekStart, [weekStart+itemKey], itemKey',
+        shoppingPurchases:
+          'id, shoppingDate, itemKey, createdAt, [itemKey+shoppingDate], listId, manualItemId',
+        shoppingItemRules: 'key, updatedAt',
+        shoppingQuantityCorrections:
+          'id, shoppingDate, itemKey, [itemKey+shoppingDate]',
+        shoppingLists: 'id, kind, periodStart, createdAt',
+        shoppingDemandAllocations:
+          'id, periodStart, itemKey, listId, [periodStart+itemKey]',
+        pantryItems: null,
+        cookProgress: 'cookSessionId, updatedAt',
+      })
+      .upgrade(async (transaction) => {
+        const settingsTable = transaction.table<SettingRecord, string>('settings')
+        const setting = await settingsTable.get('weekStartDay')
+        const weekStartDay =
+          typeof setting?.value === 'number' && Number.isFinite(setting.value)
+            ? normalizeWeekday(Math.round(setting.value))
+            : 3
+
+        const manualTable = transaction.table<ShoppingManualItem, string>(
+          'shoppingManualItems',
+        )
+        const purchaseTable = transaction.table<ShoppingPurchase, string>(
+          'shoppingPurchases',
+        )
+        const manualUpdates: ShoppingManualItem[] = []
+        for (const item of await manualTable.toArray()) {
+          const date = item.shoppingDate || item.weekStart || ''
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+          try {
+            const periodStart = shoppingPeriod(date).start
+            const oldWeekStart =
+              item.weekStart || startOfWeekOn(date, weekStartDay)
+            if (oldWeekStart !== periodStart) {
+              manualUpdates.push({ ...item, legacyWeekAmbiguous: true })
+            }
+          } catch {
+            // Keep an invalid historical row untouched; readers skip it.
+          }
+        }
+        const purchaseUpdates: ShoppingPurchase[] = []
+        for (const purchase of await purchaseTable.toArray()) {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(purchase.shoppingDate)) continue
+          try {
+            const periodStart = shoppingPeriod(purchase.shoppingDate).start
+            const oldWeekStart = startOfWeekOn(purchase.shoppingDate, weekStartDay)
+            if (oldWeekStart !== periodStart) {
+              purchaseUpdates.push({ ...purchase, legacyWeekAmbiguous: true })
+            }
+          } catch {
+            // Keep an invalid historical row untouched; readers skip it.
+          }
+        }
         if (manualUpdates.length > 0) await manualTable.bulkPut(manualUpdates)
         if (purchaseUpdates.length > 0) await purchaseTable.bulkPut(purchaseUpdates)
       })

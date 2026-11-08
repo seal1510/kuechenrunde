@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { db } from '../db'
-import { buildShoppingList, shoppingItemKey } from '../domain/shopping'
+import { buildShoppingList, shoppingItemKey, shoppingWeek } from '../domain/shopping'
 import {
   shoppingPeriod,
   standardShoppingListId,
 } from '../domain/shoppingLists'
 import type { CookSession, Ingredient, Recipe } from '../types'
-import { addShoppingPurchase, removeManualItem } from './service'
+import {
+  addShoppingPurchase,
+  mergeShoppingProducts,
+  removeManualItem,
+  splitShoppingProduct,
+} from './service'
 import {
   assignShoppingSubquantity,
   createFreeShoppingList,
@@ -19,6 +24,8 @@ import {
   listShoppingLists,
   moveManualItem,
   moveShoppingItem,
+  moveShoppingPosition,
+  removeManualListItem,
   renameShoppingList,
   resetShoppingAllocations,
   setManualItemPurchased,
@@ -1017,4 +1024,495 @@ describe('backwards compatibility and read-only access', () => {
     const open = await getOpenDemandByList(PERIOD)
     expect(open.manualItems.some((entry) => entry.manualItem.id === 'legacy-manual')).toBe(true)
   })
+
+
+describe('14A.1 integrity repairs', () => {
+  it('books a legacy purchase on the single free list that carries the item', async () => {
+    await seed()
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const key = tomatoKey()
+    await moveShoppingItem({ periodStart: PERIOD, itemKey: key, targetListId: market.id })
+
+    const purchase = await addShoppingPurchase({
+      shoppingDate: PERIOD,
+      itemKey: key,
+      amounts: [{ dimension: 'count', lower: 8, upper: 8 }],
+      snapshot: [{ dimension: 'count', unit: 'Stück', lower: 8, upper: 8, qualifier: '' }],
+    })
+    expect(purchase.listId).toBe(market.id)
+    const open = await getOpenDemandByList(PERIOD)
+    expect(
+      open.positions.find((position) => position.listId === market.id && position.itemKey === key),
+    ).toMatchObject({ assignedLower: 8, purchasedLower: 8, openLower: 0 })
+    expect(open.positions.some((position) => position.listId === standardIdFor())).toBe(false)
+  })
+
+  it('rejects a legacy purchase when the item is split across several lists', async () => {
+    await seed()
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const key = tomatoKey()
+    await assignShoppingSubquantity({
+      periodStart: PERIOD,
+      itemKey: key,
+      dimension: 'count',
+      targetListId: market.id,
+      quantity: 5,
+    })
+    await expect(
+      addShoppingPurchase({
+        shoppingDate: PERIOD,
+        itemKey: key,
+        amounts: [{ dimension: 'count', lower: 8, upper: 8 }],
+        snapshot: [{ dimension: 'count', unit: 'Stück', lower: 8, upper: 8, qualifier: '' }],
+      }),
+    ).rejects.toMatchObject({ code: 'purchase-conflict' })
+    expect(await db.shoppingPurchases.count()).toBe(0)
+    const distribution = await tomatoDistribution()
+    expect(amountOn(distribution, key, market.id)).toBe(5)
+    expect(amountOn(distribution, key, standardIdFor())).toBe(3)
+  })
+
+  it('keeps an existing unassigned legacy purchase stable instead of re-targeting it', async () => {
+    await seed()
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const key = tomatoKey()
+    await db.shoppingPurchases.put({
+      id: 'legacy-purchase',
+      shoppingDate: PERIOD,
+      itemKey: key,
+      amounts: [{ dimension: 'count', lower: 2, upper: 2 }],
+      snapshot: [],
+      qualitative: false,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await assignShoppingSubquantity({
+      periodStart: PERIOD,
+      itemKey: key,
+      dimension: 'count',
+      targetListId: market.id,
+      quantity: 5,
+    })
+    const open = await getOpenDemandByList(PERIOD)
+    expect(
+      open.positions.find((position) => position.listId === standardIdFor() && position.itemKey === key),
+    ).toMatchObject({ assignedLower: 3, purchasedLower: 2, openLower: 1 })
+    expect(
+      open.positions.find((position) => position.listId === market.id && position.itemKey === key),
+    ).toMatchObject({ assignedLower: 5, purchasedLower: 0, openLower: 5 })
+    expect((await db.shoppingPurchases.get('legacy-purchase'))?.listId).toBeUndefined()
+  })
+
+  it('writes a new Monday-anchored purchase into the Thursday period visible in both views', async () => {
+    await db.settings.put({ key: 'weekStartDay', value: 1 })
+    await seed()
+    const week = shoppingWeek('2026-11-08', 1)
+    const period = shoppingPeriod('2026-11-08')
+    const entryDate = week.days.find((day) => period.days.includes(day))
+    expect(entryDate).toBe('2026-11-05')
+
+    const purchase = await addShoppingPurchase({
+      shoppingDate: entryDate ?? PERIOD,
+      itemKey: tomatoKey(),
+      amounts: [{ dimension: 'count', lower: 8, upper: 8 }],
+      snapshot: [{ dimension: 'count', unit: 'Stück', lower: 8, upper: 8, qualifier: '' }],
+    })
+    expect(purchase.listId).toBe(standardIdFor(PERIOD))
+    expect(
+      (await getOpenDemandByList(PERIOD)).positions.find(
+        (position) => position.itemKey === tomatoKey(),
+      )?.openLower,
+    ).toBe(0)
+
+    const oldView = buildShoppingList({
+      anchor: '2026-11-08',
+      weekStartDay: 1,
+      recipes: await db.recipes.toArray(),
+      freeDishes: await db.freeDishes.toArray(),
+      cookSessions: await db.cookSessions.toArray(),
+      manualItems: [],
+      purchases: [purchase],
+      rules: await db.shoppingItemRules.toArray(),
+      quantityCorrections: await db.shoppingQuantityCorrections.toArray(),
+    })
+    expect(oldView.items.find((item) => item.key === tomatoKey())?.status).toBe('done')
+  })
+
+  it('marks ambiguous historical rows as review conflicts instead of counting them', async () => {
+    await db.shoppingLists.put({
+      id: standardIdFor(PERIOD),
+      kind: 'standard',
+      name: 'Standard',
+      periodStart: PERIOD_START,
+      periodEnd: PERIOD_END,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await db.shoppingManualItems.put({
+      id: 'manual-legacy',
+      shoppingDate: '2026-11-09',
+      weekStart: '2026-11-02',
+      listId: standardIdFor(PERIOD),
+      legacyWeekAmbiguous: true,
+      name: 'Milch',
+      quantityText: '1',
+      unit: 'l',
+      purchaseNote: '',
+      categoryId: 'dairy',
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await db.shoppingPurchases.put({
+      id: 'purchase-legacy',
+      shoppingDate: '2026-11-08',
+      itemKey: tomatoKey(),
+      listId: standardIdFor(PERIOD),
+      legacyWeekAmbiguous: true,
+      amounts: [{ dimension: 'count', lower: 8, upper: 8 }],
+      snapshot: [],
+      qualitative: false,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await seed()
+    const open = await getOpenDemandByList(PERIOD)
+    expect(open.manualItems.some((entry) => entry.manualItem.id === 'manual-legacy')).toBe(false)
+    expect(open.serviceConflicts.some((conflict) => conflict.code === 'legacy-week-ambiguous')).toBe(
+      true,
+    )
+    expect(
+      open.positions.find((position) => position.listId === standardIdFor())?.purchasedLower,
+    ).toBe(0)
+  })
+
+  it('remaps allocations, purchases and corrections on a product merge', async () => {
+    await seed()
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const source = tomatoKey()
+    const target = 'tomaten'
+    await assignShoppingSubquantity({
+      periodStart: PERIOD,
+      itemKey: source,
+      dimension: 'count',
+      targetListId: market.id,
+      quantity: 5,
+    })
+    await addShoppingPurchase({
+      shoppingDate: PERIOD,
+      itemKey: source,
+      listId: market.id,
+      amounts: [{ dimension: 'count', lower: 2, upper: 2 }],
+      snapshot: [{ dimension: 'count', unit: 'Stück', lower: 5, upper: 5, qualifier: '' }],
+    })
+    await db.shoppingQuantityCorrections.put({
+      id: `${source}::${PERIOD}::count`,
+      shoppingDate: PERIOD,
+      itemKey: source,
+      dimension: 'count',
+      quantityText: '8',
+      unit: 'Stück',
+      sourceSignature: 'count|8|8|',
+      createdAt: 1,
+      updatedAt: 1,
+    })
+
+    const merged = await mergeShoppingProducts(source, target)
+    expect(merged).toBe(target)
+    const allocationRows = await db.shoppingDemandAllocations.toArray()
+    expect(allocationRows).toHaveLength(1)
+    expect(allocationRows[0]?.itemKey).toBe(target)
+    expect(allocationRows[0]?.quantityMilli).toBe(5000)
+    expect((await db.shoppingPurchases.get((await db.shoppingPurchases.toArray())[0]!.id))?.itemKey).toBe(
+      target,
+    )
+    expect((await db.shoppingQuantityCorrections.toArray())[0]?.itemKey).toBe(target)
+    const distribution = await getShoppingDistribution(PERIOD)
+    const position = distribution.positions.find(
+      (entry) => entry.itemKey === target && entry.dimension === 'count',
+    )
+    expect(position?.amounts.find((amount) => amount.listId === market.id)?.lower).toBe(5)
+    expect(position?.amounts.find((amount) => amount.listId === standardIdFor())?.lower).toBe(3)
+  })
+
+  it('rolls back a product merge completely when two allocations collide', async () => {
+    await seed()
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const source = tomatoKey()
+    const target = 'tomaten'
+    await assignShoppingSubquantity({
+      periodStart: PERIOD,
+      itemKey: source,
+      dimension: 'count',
+      targetListId: market.id,
+      quantity: 5,
+    })
+    await db.shoppingDemandAllocations.put({
+      id: `${PERIOD_START}|${target}|count|${market.id}`,
+      periodStart: PERIOD_START,
+      itemKey: target,
+      dimension: 'count',
+      listId: market.id,
+      mode: 'partial',
+      quantityMilli: 3000,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const before = await db.shoppingDemandAllocations.toArray()
+    await expect(mergeShoppingProducts(source, target)).rejects.toMatchObject({
+      code: 'allocation-merge-conflict',
+    })
+    expect(await db.shoppingDemandAllocations.toArray()).toEqual(before)
+    expect(await db.shoppingItemRules.get(source)).toBeUndefined()
+  })
+
+  it('refuses a product split while merged allocations still exist', async () => {
+    await seed()
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const source = tomatoKey()
+    const target = 'tomaten'
+    await assignShoppingSubquantity({
+      periodStart: PERIOD,
+      itemKey: source,
+      dimension: 'count',
+      targetListId: market.id,
+      quantity: 5,
+    })
+    await mergeShoppingProducts(source, target)
+    const before = await db.shoppingDemandAllocations.toArray()
+    await expect(splitShoppingProduct(source)).rejects.toMatchObject({
+      code: 'allocation-merge-conflict',
+    })
+    expect(await db.shoppingDemandAllocations.toArray()).toEqual(before)
+  })
+
+  it('rolls back a dimension move when a purchase has several dimensions', async () => {
+    await seed(
+      recipe({
+        ingredients: [
+          ingredient({ id: 'i1', name: 'Tomaten', quantity: 8, quantityText: '8', unit: 'Stück' }),
+          ingredient({ id: 'i2', name: 'Tomaten', quantity: 500, quantityText: '500', unit: 'g' }),
+        ],
+      }),
+    )
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const key = tomatoKey()
+    const purchase = await addShoppingPurchase({
+      shoppingDate: PERIOD,
+      itemKey: key,
+      listId: standardIdFor(),
+      amounts: [
+        { dimension: 'count', lower: 2, upper: 2 },
+        { dimension: 'mass', lower: 250, upper: 250 },
+      ],
+      snapshot: [],
+    })
+    await expect(
+      moveShoppingPosition({
+        periodStart: PERIOD,
+        itemKey: key,
+        dimension: 'count',
+        targetListId: market.id,
+      }),
+    ).rejects.toMatchObject({ code: 'purchase-conflict' })
+    expect(await db.shoppingDemandAllocations.count()).toBe(0)
+    expect((await db.shoppingPurchases.get(purchase.id))?.listId).toBe(standardIdFor())
+  })
+
+  it('moves a multi-dimensional purchase with a complete item move', async () => {
+    await seed(
+      recipe({
+        ingredients: [
+          ingredient({ id: 'i1', name: 'Tomaten', quantity: 8, quantityText: '8', unit: 'Stück' }),
+          ingredient({ id: 'i2', name: 'Tomaten', quantity: 500, quantityText: '500', unit: 'g' }),
+        ],
+      }),
+    )
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const key = tomatoKey()
+    const purchase = await addShoppingPurchase({
+      shoppingDate: PERIOD,
+      itemKey: key,
+      listId: standardIdFor(),
+      amounts: [
+        { dimension: 'count', lower: 2, upper: 2 },
+        { dimension: 'mass', lower: 250, upper: 250 },
+      ],
+      snapshot: [],
+    })
+    await moveShoppingItem({ periodStart: PERIOD, itemKey: key, targetListId: market.id })
+    expect((await db.shoppingPurchases.get(purchase.id))?.listId).toBe(market.id)
+    const distribution = await getShoppingDistribution(PERIOD)
+    expect(
+      distribution.positions.find((entry) => entry.itemKey === key && entry.dimension === 'count')
+        ?.amounts.find((amount) => amount.listId === market.id)?.lower,
+    ).toBe(8)
+  })
+
+  it('moves a manual article and its status atomically to another standard period', async () => {
+    await ensureStandardShoppingList('2026-11-12')
+    const sourceList = await ensureStandardShoppingList(PERIOD)
+    const targetList = await ensureStandardShoppingList('2026-11-12')
+    const item = await createManualListItem({
+      listId: sourceList.id,
+      name: 'Blumen',
+      quantityText: '1',
+      unit: 'Bund',
+      shoppingDate: PERIOD,
+    })
+    await setManualItemPurchased(item.id, true)
+    const moved = await moveManualItem(item.id, targetList.id)
+    expect(moved.listId).toBe(targetList.id)
+    expect(moved.shoppingDate).toBe('2026-11-12')
+    const purchases = await db.shoppingPurchases.where('manualItemId').equals(item.id).toArray()
+    expect(purchases[0]?.listId).toBe(targetList.id)
+    expect(purchases[0]?.shoppingDate).toBe('2026-11-12')
+    expect(
+      (await getOpenDemandByList('2026-11-12')).manualItems.find(
+        (entry) => entry.manualItem.id === item.id,
+      )?.done,
+    ).toBe(true)
+  })
+
+  it('adopts an unambiguous legacy purchase instead of creating a duplicate', async () => {
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const item = await createManualListItem({
+      listId: market.id,
+      name: 'Kaffee',
+      quantityText: '1',
+      unit: 'Packung',
+      shoppingDate: PERIOD,
+    })
+    await db.shoppingPurchases.put({
+      id: 'legacy-adoptable',
+      shoppingDate: PERIOD,
+      itemKey: shoppingItemKey('Kaffee'),
+      amounts: [{ dimension: 'unit:packung', lower: 1, upper: 1 }],
+      snapshot: [],
+      qualitative: false,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const result = await setManualItemPurchased(item.id, true)
+    expect(result.purchases).toHaveLength(1)
+    expect(result.purchases[0]).toMatchObject({
+      id: 'legacy-adoptable',
+      manualItemId: item.id,
+      listId: market.id,
+    })
+    expect(await db.shoppingPurchases.count()).toBe(1)
+  })
+
+  it('creates only one purchase for concurrent manual purchase calls', async () => {
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const item = await createManualListItem({
+      listId: market.id,
+      name: 'Kaffee',
+      quantityText: '1',
+      unit: 'Packung',
+      shoppingDate: PERIOD,
+    })
+    await Promise.all([
+      setManualItemPurchased(item.id, true),
+      setManualItemPurchased(item.id, true),
+    ])
+    expect(await db.shoppingPurchases.where('manualItemId').equals(item.id).count()).toBe(1)
+  })
+
+  it('removes an unambiguous legacy purchase together with a manual article', async () => {
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const item = await createManualListItem({
+      listId: market.id,
+      name: 'Blumen',
+      quantityText: '1',
+      unit: 'Bund',
+      shoppingDate: PERIOD,
+    })
+    await db.shoppingPurchases.put({
+      id: 'legacy-manual-purchase',
+      shoppingDate: PERIOD,
+      itemKey: shoppingItemKey('Blumen'),
+      amounts: [{ dimension: 'unit:bund', lower: 1, upper: 1 }],
+      snapshot: [],
+      qualitative: false,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await removeManualListItem(item.id)
+    expect(await db.shoppingManualItems.get(item.id)).toBeUndefined()
+    expect(await db.shoppingPurchases.get('legacy-manual-purchase')).toBeUndefined()
+  })
+
+  it('refuses to delete a manual article when legacy purchases are ambiguous', async () => {
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const first = await createManualListItem({
+      listId: market.id,
+      name: 'Blumen',
+      quantityText: '1',
+      unit: 'Bund',
+      shoppingDate: PERIOD,
+    })
+    await createManualListItem({
+      listId: market.id,
+      name: 'Blumen',
+      quantityText: '2',
+      unit: 'Bund',
+      shoppingDate: PERIOD,
+    })
+    await db.shoppingPurchases.put({
+      id: 'legacy-ambiguous-purchase',
+      shoppingDate: PERIOD,
+      itemKey: shoppingItemKey('Blumen'),
+      amounts: [{ dimension: 'unit:bund', lower: 1, upper: 1 }],
+      snapshot: [],
+      qualitative: false,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await expect(removeManualListItem(first.id)).rejects.toMatchObject({
+      code: 'purchase-conflict',
+    })
+    expect(await db.shoppingManualItems.get(first.id)).toBeTruthy()
+    expect(await db.shoppingPurchases.get('legacy-ambiguous-purchase')).toBeTruthy()
+  })
+
+  it('refuses a dimension reset while a wildcard full allocation exists', async () => {
+    await seed()
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const key = tomatoKey()
+    await moveShoppingItem({ periodStart: PERIOD, itemKey: key, targetListId: market.id })
+    await expect(
+      resetShoppingAllocations({ periodStart: PERIOD, itemKey: key, dimension: 'count' }),
+    ).rejects.toMatchObject({ code: 'full-allocation-conflict' })
+    expect(await db.shoppingDemandAllocations.count()).toBe(1)
+    await resetShoppingAllocations({ periodStart: PERIOD, itemKey: key })
+    expect(await db.shoppingDemandAllocations.count()).toBe(0)
+  })
+
+  it('does not let an invalid wildcard allocation shadow a valid subset distribution', async () => {
+    await seed()
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const key = tomatoKey()
+    await assignShoppingSubquantity({
+      periodStart: PERIOD,
+      itemKey: key,
+      dimension: 'count',
+      targetListId: market.id,
+      quantity: 5,
+    })
+    await db.shoppingDemandAllocations.put({
+      id: `${PERIOD_START}|${key}|*|missing-list`,
+      periodStart: PERIOD_START,
+      itemKey: key,
+      dimension: '*',
+      listId: 'missing-list',
+      mode: 'full',
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const distribution = await getShoppingDistribution(PERIOD)
+    expect(amountOn(distribution, key, market.id)).toBe(5)
+    expect(amountOn(distribution, key, standardIdFor())).toBe(3)
+    expect(distribution.conflicts.some((conflict) => conflict.code === 'unknown-list')).toBe(true)
+  })
+})
 })
