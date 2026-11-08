@@ -14,8 +14,9 @@
  * numbers and every other unlinked number stay untouched.
  *
  * Cook mode may also highlight ingredient mentions without an explicit amount.
- * The recipe total is only exposed in the compact step list when exactly one
- * safe mention exists and no explicit or qualitative amount context is present.
+ * The compact step list shows the scaled recipe amount for every reliably
+ * identified ingredient whose list quantity is safely scalable. That value is
+ * a reference to the ingredient list, not a claim about the current step.
  */
 
 import {
@@ -53,10 +54,6 @@ export interface IngredientMention {
   end: number
   /** True when an explicit numeric/spelled amount is already present. */
   hasAmount: boolean
-  /** True when a qualitative context such as "nach Geschmack" is present. */
-  hasUnsafeContext: boolean
-  /** Safe whole-recipe amount for the compact step ingredient list. */
-  amountText: string | null
   /** True for the one occurrence that should receive inline highlighting. */
   highlight: boolean
 }
@@ -67,7 +64,7 @@ export interface StepIngredientInfo {
   displayName: string
   /** True when the step text itself already contains an amount. */
   hasAmountInText: boolean
-  /** Safe recipe total for the compact step list, or null. */
+  /** Scaled recipe amount from the ingredient list, or null if unreliable. */
   amountText: string | null
   /** Manual reference issue, if any. Display stays calm; details are hidden. */
   issue: ReferenceIssue | null
@@ -1275,9 +1272,6 @@ function hasQuantityInClause(value: string): boolean {
   return AUTO_QUANTITY_RE.test(value) || SPELLED_QUANTITY_RE.test(value)
 }
 
-const QUALITATIVE_CONTEXT_RE =
-  /(?:^|[^\p{L}])(?:nach\s+geschmack|nach\s+belieben|nach\s+bedarf|nach\s+gefühl|nach\s+gefuehl|nach\s+augenmaß|nach\s+augenmass|abschmecken|zum\s+abschmecken|optional|garnieren|zum\s+garnieren|bestreichen|zum\s+bestreichen|bestreuen|zum\s+bestreuen|dekorieren|zum\s+dekorieren|servieren|zum\s+servieren|etwas|ein\s+paar|einige|wenig(?:e|er|es|en)?)(?![\p{L}])/iu
-
 function clauseAroundMention(searchText: string, start: number, end: number): string {
   const beforeWindow = searchText.slice(Math.max(0, start - 64), start)
   const lastBoundary = Math.max(
@@ -1296,8 +1290,8 @@ function clauseAroundMention(searchText: string, start: number, end: number): st
 }
 
 /**
- * Explicit and qualitative amount contexts are deliberately over-approximated.
- * Suppressing a total amount is safe; inventing a step amount is not.
+ * Describes whether the step text already contains an explicit amount.
+ * It never suppresses the recipe reference shown in the step list.
  */
 function hasExplicitAmountNearMention(
   searchText: string,
@@ -1307,14 +1301,6 @@ function hasExplicitAmountNearMention(
   const beforeMention = searchText.slice(Math.max(0, start - 24), start)
   if (INDEFINITE_QUANTITY_BEFORE_RE.test(beforeMention)) return true
   return hasQuantityInClause(clauseAroundMention(searchText, start, end))
-}
-
-function hasQualitativeContextNearMention(
-  searchText: string,
-  start: number,
-  end: number,
-): boolean {
-  return QUALITATIVE_CONTEXT_RE.test(clauseAroundMention(searchText, start, end))
 }
 
 function detectMentions(
@@ -1419,6 +1405,7 @@ function markMentionHighlights(
 function buildStepIngredients(
   references: readonly RenderedReference[],
   mentions: readonly IngredientMention[],
+  factor: number | null,
 ): StepIngredientInfo[] {
   const manualById = new Map<string, RenderedReference[]>()
   for (const reference of references) {
@@ -1452,10 +1439,7 @@ function buildStepIngredients(
     )
     const hasAmountInText =
       hasManualAmount || ingredientMentions.some((mention) => mention.hasAmount)
-    const amountText =
-      manualRefs.length === 0
-        ? ingredientMentions.find((mention) => mention.amountText)?.amountText ?? null
-        : null
+    const amountText = scaledTotalAmountText(ingredient, factor)
 
     result.push({
       ingredient,
@@ -1548,8 +1532,6 @@ export function renderRecipeInstructions(
     options.autoScale && factor !== null && factor !== 1
       ? buildAutoMatchers(ingredients, mentionPhrases)
       : []
-  const manuallyReferencedIngredientIds = new Set<string>()
-  const automaticallyScaledIngredientIds = new Set<string>()
 
   const base = instructions.map((instruction, instructionIndex) => {
     const text = instruction.text
@@ -1565,7 +1547,6 @@ export function renderRecipeInstructions(
       const ingredient = ingredientById.get(reference.ingredientId) ?? null
       if (!ingredient) issues.push('missing-ingredient')
       manualIngredientIds.add(reference.ingredientId)
-      manuallyReferencedIngredientIds.add(reference.ingredientId)
 
       const usage = usageByIngredient.get(reference.ingredientId) ?? newUsage()
       if (!usageByIngredient.has(reference.ingredientId)) {
@@ -1644,9 +1625,6 @@ export function renderRecipeInstructions(
         manualIngredientIds,
         manualRanges,
       )
-      for (const replacement of automatic) {
-        automaticallyScaledIngredientIds.add(replacement.ingredientId)
-      }
       replacements.push(...automatic)
     }
 
@@ -1684,12 +1662,6 @@ export function renderRecipeInstructions(
         candidate.start,
         candidate.end,
       ),
-      hasUnsafeContext: hasQualitativeContextNearMention(
-        searchText,
-        candidate.start,
-        candidate.end,
-      ),
-      amountText: null,
       highlight: false,
     }))
     return {
@@ -1701,43 +1673,14 @@ export function renderRecipeInstructions(
     }
   })
 
-  const mentionCounts = new Map<string, number>()
-  const ingredientsWithAmount = new Set<string>([
-    ...manuallyReferencedIngredientIds,
-    ...automaticallyScaledIngredientIds,
-  ])
-  const ingredientsWithUnsafeContext = new Set<string>()
-  for (const entry of withMentions) {
-    for (const mention of entry.mentions) {
-      mentionCounts.set(
-        mention.ingredient.id,
-        (mentionCounts.get(mention.ingredient.id) ?? 0) + 1,
-      )
-      if (mention.hasAmount) ingredientsWithAmount.add(mention.ingredient.id)
-      if (mention.hasUnsafeContext) ingredientsWithUnsafeContext.add(mention.ingredient.id)
-    }
-  }
-
-  return withMentions.map((entry) => {
-    const mentions = entry.mentions.map<IngredientMention>((mention) => {
-      const canShowTotal =
-        mentionCounts.get(mention.ingredient.id) === 1 &&
-        !ingredientsWithAmount.has(mention.ingredient.id) &&
-        !ingredientsWithUnsafeContext.has(mention.ingredient.id)
-      return {
-        ...mention,
-        amountText: canShowTotal ? scaledTotalAmountText(mention.ingredient, factor) : null,
-      }
-    })
-    return {
-      instruction: entry.instruction,
-      text: entry.text,
-      annotatedText: annotateInstructionText(entry.text, mentions),
-      references: entry.references,
-      mentions,
-      stepIngredients: buildStepIngredients(entry.references, mentions),
-    }
-  })
+  return withMentions.map((entry) => ({
+    instruction: entry.instruction,
+    text: entry.text,
+    annotatedText: annotateInstructionText(entry.text, entry.mentions),
+    references: entry.references,
+    mentions: entry.mentions,
+    stepIngredients: buildStepIngredients(entry.references, entry.mentions, factor),
+  }))
 }
 
 /**

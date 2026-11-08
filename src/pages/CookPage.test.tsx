@@ -288,7 +288,9 @@ describe('cook mode entry and display', () => {
     expect(html).toContain('Die 3 Zwiebeln fein würfeln.')
     expect(html).toContain('cook-step-ingredient-chip')
     expect(html).toContain('cook-step-ingredient-name">Zwiebeln')
-    expect(html).not.toContain('cook-step-ingredient-amount')
+    expect(html).toContain('Mengen laut Rezept')
+    expect(html).toContain('cook-step-ingredient-amount" aria-label="Rezeptmenge: 3">3</span>')
+    expect(html).not.toContain('3 gesamt')
     expect(html).toContain('6 Portionen')
   })
 
@@ -417,10 +419,11 @@ describe('cook mode views', () => {
     expect(html).toContain('Die 3 Zwiebeln fein würfeln.')
     expect(html).not.toContain('Die 2 Zwiebeln fein würfeln.')
     expect(html).toContain('Zutaten anzeigen')
-    // The amount is already in the sentence, so the compact step list only
-    // names the ingredient and never repeats the value.
+    // The text keeps the explicit step amount; the chip independently shows
+    // the scaled recipe amount.
+    expect(html).toContain('Mengen laut Rezept')
     expect(html).toContain('cook-step-ingredient-name">Zwiebeln')
-    expect(html).not.toContain('cook-step-ingredient-amount')
+    expect(html).toContain('cook-step-ingredient-amount" aria-label="Rezeptmenge: 3">3</span>')
     expect(html).not.toContain('In diesem Schritt')
   })
 
@@ -504,20 +507,26 @@ describe('cook mode views', () => {
       <CookPage recipeId="r-mentions" cookSessionId={null} />,
     )
     expect(stepHtml).toContain('cook-ingredient-mention')
+    expect(stepHtml).toContain('Mengen laut Rezept')
     expect(stepHtml).toContain('cook-step-ingredient-amount')
     expect(stepHtml).toContain('Paprika')
-    expect(stepHtml).toContain('2 gesamt')
+    expect(stepHtml).toContain('aria-label="Rezeptmenge: 2">2</span>')
+    expect(stepHtml).not.toContain('gesamt')
 
     const overviewHtml = overviewMarkup(withMentions, 4, 0)
     expect(overviewHtml).toContain('cook-ingredient-mention')
+    expect(overviewHtml).toContain('Mengen laut Rezept')
     expect(overviewHtml).toContain('cook-step-ingredient-amount')
     expect(overviewHtml).toContain('Paprika')
-    expect(overviewHtml).toContain('500 ml gesamt')
+    expect(overviewHtml).toContain('aria-label="Rezeptmenge: 500 ml">500 ml</span>')
+    expect(overviewHtml).not.toContain('gesamt')
 
-    expect(overviewMarkup(withMentions, 8, 0)).toContain('1000 ml gesamt')
+    expect(overviewMarkup(withMentions, 8, 0)).toContain(
+      'aria-label="Rezeptmenge: 1000 ml">1000 ml</span>',
+    )
   })
 
-  it('does not repeat a total for repeated or heading mentions in the step list', () => {
+  it('keeps the recipe amount for repeated or heading mentions', () => {
     const repeated: Recipe = {
       ...mentionRecipe(),
       id: 'r-repeat',
@@ -544,7 +553,9 @@ describe('cook mode views', () => {
 
     const html = stepMarkup(repeated)
     expect(html).toContain('cook-step-ingredient-name">Zwiebeln')
-    expect(html).not.toContain('cook-step-ingredient-amount')
+    expect(html).toContain('Mengen laut Rezept')
+    expect(html).toContain('cook-step-ingredient-amount" aria-label="Rezeptmenge: 3">3</span>')
+    expect(html).not.toContain('gesamt')
     expect(html.match(/cook-ingredient-mention/g)).toHaveLength(1)
     expect(html).toContain('**Zwiebeln vorbereiten**')
   })
@@ -578,7 +589,53 @@ describe('cook mode views', () => {
     const html = stepMarkup(unsafeUnit)
     expect(html).not.toContain('<script>')
     expect(html).toContain('&lt;script&gt;')
-    expect(html).toContain('3 *&lt;script&gt;* gesamt')
+    expect(html).toContain(
+      'aria-label="Rezeptmenge: 3 *&lt;script&gt;*">3 *&lt;script&gt;*</span>',
+    )
+    expect(html).not.toContain('gesamt')
+  })
+
+  it('keeps explicit step amounts in the text and recipe totals in the chips', () => {
+    const brothRecipe: Recipe = {
+      ...mentionRecipe(),
+      id: 'r-broth',
+      ingredients: [
+        ingredient({
+          id: 'bruehe',
+          position: 0,
+          raw: '500 ml Hühnerbrühe',
+          name: 'Hühnerbrühe',
+          quantity: 500,
+          quantityText: '500',
+          unit: 'ml',
+        }),
+      ],
+      instructions: [
+        {
+          id: 'broth-1',
+          position: 0,
+          raw: '200 ml Brühe hinzufügen.',
+          text: '200 ml Brühe hinzufügen.',
+          references: [],
+        },
+        {
+          id: 'broth-2',
+          position: 1,
+          raw: 'Die restliche Brühe hinzufügen.',
+          text: 'Die restliche Brühe hinzufügen.',
+          references: [],
+        },
+      ],
+    }
+
+    const stepHtml = stepMarkup(brothRecipe, 0)
+    expect(stepHtml).toContain('300 ml Brühe hinzufügen.')
+    expect(stepHtml).toContain('aria-label="Rezeptmenge: 750 ml">750 ml</span>')
+
+    const overviewHtml = overviewMarkup(brothRecipe, 6, 0)
+    expect(overviewHtml).toContain('300 ml Brühe hinzufügen.')
+    expect(overviewHtml).toContain('Die restliche Brühe hinzufügen.')
+    expect(overviewHtml).toContain('aria-label="Rezeptmenge: 750 ml">750 ml</span>')
   })
 
   it('does not mutate the recipe while rendering both views', () => {

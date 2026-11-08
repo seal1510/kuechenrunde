@@ -13,7 +13,7 @@
  * cooking event as cooked.
  */
 
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useReducer, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
 import { formatPortionCount } from '../lib/format'
@@ -133,11 +133,15 @@ function stepIngredientNote(issue: ReferenceIssue | null): string | null {
 
 /** One calm chip row per step, shared by step view and overview. */
 export function StepIngredientChips({ entry }: { entry: RenderedInstruction }) {
+  const titleId = useId()
   const ingredients = entry.stepIngredients
   if (ingredients.length === 0) return null
 
   return (
-    <section className="cook-step-ingredients" aria-label="Zutaten dieses Schritts">
+    <section className="cook-step-ingredients" aria-labelledby={titleId}>
+      <p id={titleId} className="cook-step-ingredients-title">
+        Mengen laut Rezept
+      </p>
       <ul className="cook-step-ingredient-chips">
         {ingredients.map((info) => {
           const note = stepIngredientNote(info.issue)
@@ -149,12 +153,17 @@ export function StepIngredientChips({ entry }: { entry: RenderedInstruction }) {
             >
               <span className="cook-step-ingredient-name">{info.displayName}</span>
               {info.amountText ? (
-                <span
-                  className="cook-step-ingredient-amount"
-                  aria-label={`Rezeptgesamtmenge: ${info.amountText}`}
-                >
-                  {info.amountText} gesamt
-                </span>
+                <>
+                  <span className="cook-step-ingredient-separator" aria-hidden="true">
+                    ·
+                  </span>
+                  <span
+                    className="cook-step-ingredient-amount"
+                    aria-label={`Rezeptmenge: ${info.amountText}`}
+                  >
+                    {info.amountText}
+                  </span>
+                </>
               ) : null}
               {note ? <span className="visually-hidden"> {note}</span> : null}
             </li>

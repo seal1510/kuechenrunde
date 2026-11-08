@@ -712,7 +712,7 @@ describe('automatic ingredient amount scaling', () => {
 })
 
 describe('automatic ingredient mentions', () => {
-  it('highlights several exact ingredients and keeps safe totals in the step result', () => {
+  it('highlights several exact ingredients and keeps recipe totals in the step result', () => {
     const ingredients = [
       ingredient({ id: 'paprika', name: 'Paprika', quantity: 2, quantityText: '2' }),
       ingredient({ id: 'zwiebel', name: 'Zwiebel', quantity: 1, quantityText: '1' }),
@@ -729,7 +729,6 @@ describe('automatic ingredient mentions', () => {
       'Paprika',
       'Zwiebel',
     ])
-    expect(mentions.map((mention) => mention.amountText)).toEqual(['4', '2'])
     expect(mentions.every((mention) => !mention.hasAmount)).toBe(true)
     expect(mentions.every((mention) => mention.highlight)).toBe(true)
     expect(rendered[0]?.annotatedText).toContain(
@@ -753,7 +752,6 @@ describe('automatic ingredient mentions', () => {
 
     expect(rendered[0]?.mentions).toHaveLength(1)
     expect(rendered[0]?.mentions[0]?.ingredient.name).toBe('Zwiebel')
-    expect(rendered[0]?.mentions[0]?.amountText).toBe('4')
     expect(rendered[0]?.annotatedText).toContain(
       '<span class="cook-ingredient-mention">Zwiebeln</span>',
     )
@@ -789,7 +787,6 @@ describe('automatic ingredient mentions', () => {
       'Hähnchenbrustfilet',
       'Hühnerbrühe',
     ])
-    expect(mentions.map((mention) => mention.amountText)).toEqual(['1000 g', '1000 ml'])
     expect(rendered[0]?.annotatedText).toContain(
       '<span class="cook-ingredient-mention">Fleisch',
     )
@@ -817,7 +814,7 @@ describe('automatic ingredient mentions', () => {
 
     expect(rendered[0]?.mentions).toHaveLength(1)
     expect(rendered[0]?.mentions[0]?.ingredient.name).toBe('Hähnchenbrustfilet')
-    expect(rendered[0]?.mentions[0]?.amountText).toBe('1000 g')
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBe('1000 g')
     expect(rendered[0]?.annotatedText).toContain(
       '<span class="cook-ingredient-mention">Hähnchen',
     )
@@ -843,7 +840,7 @@ describe('automatic ingredient mentions', () => {
     expect(saltRendered[0]?.annotatedText).toBe('Salz hinzufügen.')
   })
 
-  it('highlights multiple uses without showing the total amount in every step', () => {
+  it('keeps the recipe amount for repeated uses without inventing a step amount', () => {
     const ingredients = [
       ingredient({
         id: 'bruehe',
@@ -865,17 +862,64 @@ describe('automatic ingredient mentions', () => {
 
     expect(rendered[0]?.text).toBe('400 ml Brühe hinzufügen.')
     expect(rendered[0]?.mentions[0]?.hasAmount).toBe(true)
-    expect(rendered[0]?.mentions[0]?.amountText).toBeNull()
     expect(rendered[1]?.text).toBe('Die restliche Brühe dazugeben.')
     expect(rendered[1]?.mentions[0]?.hasAmount).toBe(false)
-    expect(rendered[1]?.mentions[0]?.amountText).toBeNull()
     expect(rendered[0]?.annotatedText).not.toContain('gesamt')
     expect(rendered[1]?.annotatedText).not.toContain('gesamt')
-    expect(rendered[0]?.stepIngredients[0]?.amountText).toBeNull()
-    expect(rendered[1]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBe('1000 ml')
+    expect(rendered[1]?.stepIngredients[0]?.amountText).toBe('1000 ml')
+    expect(rendered[0]?.stepIngredients[0]?.hasAmountInText).toBe(true)
+    expect(rendered[1]?.stepIngredients[0]?.hasAmountInText).toBe(false)
   })
 
-  it('does not add a total beside an already present amount', () => {
+  it('uses the scaled recipe amount in every step of a repeated ingredient', () => {
+    const ingredients = [
+      ingredient({
+        id: 'speck',
+        name: 'Speck',
+        quantity: 150,
+        quantityText: '150',
+        unit: 'g',
+      }),
+      ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
+      ingredient({ id: 'moehren', name: 'Möhren', quantity: 3, quantityText: '3' }),
+      ingredient({
+        id: 'olivenoel',
+        name: 'Olivenöl',
+        quantity: null,
+        quantityText: null,
+        unit: null,
+        parseStatus: 'plain',
+      }),
+    ]
+    const steps = [
+      'Speck würfeln.',
+      'Den Speck in Olivenöl anbraten.',
+      'Zwiebeln und Möhren hinzufügen.',
+      'Den Speck wieder hinzugeben.',
+    ].map((text) => instruction(text))
+
+    const doubled = render(steps, ingredients, 4, 8)
+    const amountOf = (stepIndex: number, ingredientId: string) =>
+      doubled[stepIndex]?.stepIngredients.find(
+        (info) => info.ingredient.id === ingredientId,
+      )?.amountText
+
+    expect(amountOf(0, 'speck')).toBe('300 g')
+    expect(amountOf(1, 'speck')).toBe('300 g')
+    expect(amountOf(1, 'olivenoel')).toBeNull()
+    expect(amountOf(2, 'zwiebeln')).toBe('4')
+    expect(amountOf(2, 'moehren')).toBe('6')
+    expect(amountOf(3, 'speck')).toBe('300 g')
+
+    const original = render(steps, ingredients, 4, 4)
+    expect(
+      original[0]?.stepIngredients.find((info) => info.ingredient.id === 'speck')
+        ?.amountText,
+    ).toBe('150 g')
+  })
+
+  it('keeps the recipe amount available beside an already present amount', () => {
     const ingredients = [
       ingredient({
         id: 'huhn',
@@ -889,12 +933,11 @@ describe('automatic ingredient mentions', () => {
 
     expect(rendered[0]?.text).toBe('1000 g Hähnchen anbraten.')
     expect(rendered[0]?.mentions[0]?.hasAmount).toBe(true)
-    expect(rendered[0]?.mentions[0]?.amountText).toBeNull()
     expect(rendered[0]?.annotatedText).toContain(
       '<span class="cook-ingredient-mention">Hähnchen</span>',
     )
     expect(rendered[0]?.annotatedText).not.toContain('gesamt')
-    expect(rendered[0]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBe('1000 g')
 
     const amountAfterName = render(
       [instruction('Das Hähnchen (500 g) anbraten.')],
@@ -904,12 +947,11 @@ describe('automatic ingredient mentions', () => {
     )
     expect(amountAfterName[0]?.text).toBe('Das Hähnchen (500 g) anbraten.')
     expect(amountAfterName[0]?.mentions[0]?.hasAmount).toBe(true)
-    expect(amountAfterName[0]?.mentions[0]?.amountText).toBeNull()
     expect(amountAfterName[0]?.annotatedText).not.toContain('gesamt')
-    expect(amountAfterName[0]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(amountAfterName[0]?.stepIngredients[0]?.amountText).toBe('1000 g')
   })
 
-  it('does not add a total beside a spelled-out amount', () => {
+  it('keeps the recipe amount available beside a spelled-out amount', () => {
     const ingredients = [
       ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
     ]
@@ -917,9 +959,8 @@ describe('automatic ingredient mentions', () => {
 
     expect(rendered[0]?.text).toBe('Zwei Zwiebeln schneiden.')
     expect(rendered[0]?.mentions[0]?.hasAmount).toBe(true)
-    expect(rendered[0]?.mentions[0]?.amountText).toBeNull()
     expect(rendered[0]?.annotatedText).not.toContain('gesamt')
-    expect(rendered[0]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBe('4')
 
     const articleRendered = render(
       [instruction('Eine Zwiebel schneiden.')],
@@ -929,12 +970,11 @@ describe('automatic ingredient mentions', () => {
     )
     expect(articleRendered[0]?.text).toBe('Eine Zwiebel schneiden.')
     expect(articleRendered[0]?.mentions[0]?.hasAmount).toBe(true)
-    expect(articleRendered[0]?.mentions[0]?.amountText).toBeNull()
     expect(articleRendered[0]?.annotatedText).not.toContain('gesamt')
-    expect(articleRendered[0]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(articleRendered[0]?.stepIngredients[0]?.amountText).toBe('4')
   })
 
-  it('does not add a total amount in a qualitative context', () => {
+  it('keeps the recipe amount in a qualitative context', () => {
     const salt = ingredient({
       id: 'salz',
       name: 'Salz',
@@ -949,9 +989,7 @@ describe('automatic ingredient mentions', () => {
       4,
     )
     expect(saltRendered[0]?.mentions[0]?.hasAmount).toBe(false)
-    expect(saltRendered[0]?.mentions[0]?.hasUnsafeContext).toBe(true)
-    expect(saltRendered[0]?.mentions[0]?.amountText).toBeNull()
-    expect(saltRendered[0]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(saltRendered[0]?.stepIngredients[0]?.amountText).toBe('2 TL')
     expect(saltRendered[0]?.annotatedText).not.toContain('gesamt')
 
     const onions = [
@@ -964,9 +1002,7 @@ describe('automatic ingredient mentions', () => {
       4,
     )
     expect(onionRendered[0]?.mentions[0]?.hasAmount).toBe(false)
-    expect(onionRendered[0]?.mentions[0]?.hasUnsafeContext).toBe(true)
-    expect(onionRendered[0]?.mentions[0]?.amountText).toBeNull()
-    expect(onionRendered[0]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(onionRendered[0]?.stepIngredients[0]?.amountText).toBe('4')
     expect(onionRendered[0]?.annotatedText).not.toContain('gesamt')
   })
 
@@ -1058,7 +1094,7 @@ describe('automatic ingredient mentions', () => {
     )
   })
 
-  it('highlights only the first non-heading occurrence and keeps factual repeats', () => {
+  it('highlights one occurrence but keeps the recipe amount for factual repeats', () => {
     const ingredients = [
       ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
     ]
@@ -1069,9 +1105,8 @@ describe('automatic ingredient mentions', () => {
 
     expect(mentions).toHaveLength(2)
     expect(mentions.map((mention) => mention.highlight)).toEqual([false, true])
-    expect(mentions.every((mention) => mention.amountText === null)).toBe(true)
     expect(rendered[0]?.stepIngredients).toHaveLength(1)
-    expect(rendered[0]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBe('4')
     expect(annotated).toContain('**Zwiebeln vorbereiten**')
     expect(annotated).toContain(
       '<span class="cook-ingredient-mention">Zwiebeln</span> würfeln.',
@@ -1100,7 +1135,7 @@ describe('automatic ingredient mentions', () => {
     )
   })
 
-  it('lets a manual reference suppress a later total amount for the same ingredient', () => {
+  it('keeps the recipe amount available with manual references', () => {
     const ingredients = [
       ingredient({
         id: 'butter',
@@ -1130,11 +1165,10 @@ describe('automatic ingredient mentions', () => {
 
     expect(rendered[0]?.text).toBe('200 g Butter erhitzen.')
     expect(rendered[0]?.stepIngredients[0]?.hasAmountInText).toBe(true)
-    expect(rendered[0]?.stepIngredients[0]?.amountText).toBeNull()
-    expect(rendered[1]?.mentions[0]?.amountText).toBeNull()
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBe('1000 g')
     expect(rendered[1]?.annotatedText).not.toContain('gesamt')
     expect(rendered[1]?.stepIngredients[0]?.hasAmountInText).toBe(false)
-    expect(rendered[1]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(rendered[1]?.stepIngredients[0]?.amountText).toBe('1000 g')
   })
 
   it('keeps Markdown intact and never links code or link destinations', () => {
@@ -1210,7 +1244,6 @@ describe('automatic ingredient mentions', () => {
     const rendered = render([instruction('Salz hinzufügen.')], ingredients, 2, 4)
 
     expect(rendered[0]?.mentions).toHaveLength(1)
-    expect(rendered[0]?.mentions[0]?.amountText).toBeNull()
     expect(rendered[0]?.annotatedText).toContain(
       '<span class="cook-ingredient-mention">Salz</span>',
     )
@@ -1232,9 +1265,19 @@ describe('automatic ingredient mentions', () => {
       2,
       4,
     )
-    expect(ambiguousRendered[0]?.mentions[0]?.amountText).toBeNull()
     expect(ambiguousRendered[0]?.annotatedText).not.toContain('gesamt')
     expect(ambiguousRendered[0]?.stepIngredients[0]?.amountText).toBeNull()
+
+    const noOriginalServings = [
+      ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
+    ]
+    const unscalable = render(
+      [instruction('Zwiebeln schneiden.')],
+      noOriginalServings,
+      null,
+      4,
+    )
+    expect(unscalable[0]?.stepIngredients[0]?.amountText).toBeNull()
   })
 
   it('keeps display amounts out of the inline Markdown', () => {
@@ -1249,7 +1292,6 @@ describe('automatic ingredient mentions', () => {
     ]
     const rendered = render([instruction('Das Öl hinzufügen.')], ingredients, 2, 4)
 
-    expect(rendered[0]?.mentions[0]?.amountText).toBe('4 *<script>*')
     expect(rendered[0]?.annotatedText).not.toContain('<script>')
     expect(rendered[0]?.annotatedText).not.toContain('4')
     expect(rendered[0]?.stepIngredients[0]?.amountText).toBe('4 *<script>*')
