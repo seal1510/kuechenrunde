@@ -91,13 +91,23 @@ describe('recipe editor form', () => {
 
     expect(html).toContain('id="recipe-editor"')
     expect(html).toContain('class="editor-layout"')
-    expect(html).toContain('class="editor-main-column"')
-    expect(html).toContain('class="editor-side-column"')
+    expect(html).toContain('class="editor-top-grid"')
+    expect(html).toContain('class="editor-bottom-grid"')
+    expect(html).toContain('editor-panel editor-panel-ingredients')
+    expect(html).toContain('editor-panel editor-panel-steps')
+    expect(html).not.toContain('editor-main-column')
+    expect(html).not.toContain('editor-side-column')
     expect(html).toContain('value="Synthetisches Curry"')
     expect(html).toContain('value="4 Portionen"')
     expect(html).toContain('value="30 min"')
+    expect(html).toContain('Ein rein synthetisches Testrezept.')
+    expect(html).toContain('Nur für Tests.')
 
     expect(html).toContain('Zutat hinzufügen')
+    expect(html.match(/class="ingredient-head"/g)).toHaveLength(1)
+    expect(html.match(/class="ingredient-row"/g)).toHaveLength(2)
+    expect(html).toContain('class="ingredient-editor-list" role="list"')
+    expect(html).toContain('class="ingredient-head" aria-hidden="true"')
     expect(html).toContain('value="Curry"')
     expect(html).toContain('value="1 1/2"')
     expect(html).toContain('value="TL"')
@@ -128,6 +138,41 @@ describe('recipe editor form', () => {
     expect(html).toContain('Mela-Kategorie')
     expect(html).toContain('Hauptbild')
     expect(html).toContain('Bilder hinzufügen')
+  })
+
+  it('keeps many compact rows readable, including long ingredient names and steps', () => {
+    const many = draft()
+    many.ingredients = Array.from({ length: 14 }, (_, index) => ({
+      key: `ingredient-${index}`,
+      id: `ingredient-${index}`,
+      group: index < 2 ? 'Curry' : '',
+      quantity: String(index + 1),
+      unit: index % 2 === 0 ? 'EL' : 'g',
+      name:
+        index === 0
+          ? 'Sehr lange synthetische Zutatenbezeichnung mit Zusatzangabe'
+          : `Synthetische Zutat ${index + 1}`,
+      purchaseNote: index === 0 ? 'Bio' : '',
+      preparationNote: index === 0 ? 'fein geschnitten' : '',
+    }))
+    many.steps = [
+      {
+        key: 'long-step',
+        id: 'long-step',
+        text:
+          'Dieser synthetische Zubereitungsschritt ist absichtlich deutlich länger, damit ' +
+          'das Textfeld seinen Inhalt vollständig und ohne internes Scrollen anzeigen kann. ' +
+          'Markdown bleibt dabei unverändert verfügbar.',
+        references: [],
+      },
+    ]
+
+    const html = renderForm({ draft: many })
+    expect(html.match(/class="ingredient-row"/g)).toHaveLength(14)
+    expect(html.match(/class="ingredient-head"/g)).toHaveLength(1)
+    expect(html).toContain('Sehr lange synthetische Zutatenbezeichnung mit Zusatzangabe')
+    expect(html).toContain('Dieser synthetische Zubereitungsschritt ist absichtlich deutlich länger')
+    expect(html).toContain('class="step-textarea"')
   })
 
   it('keeps the shared form id used by the URL import', () => {

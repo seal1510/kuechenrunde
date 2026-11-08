@@ -151,14 +151,6 @@ export function RecipeEditorPage({ id }: { id?: string }) {
         </div>
       </header>
 
-      <EditorActionBar
-        formId="recipe-editor"
-        saving={saving}
-        dirty={dirty}
-        isNew={!id}
-        onCancel={handleCancel}
-      />
-
       <RecipeForm
         formId="recipe-editor"
         draft={draft}
@@ -204,6 +196,14 @@ export function RecipeEditorPage({ id }: { id?: string }) {
           </section>
         ) : null}
       </RecipeForm>
+
+      <EditorActionBar
+        formId="recipe-editor"
+        saving={saving}
+        dirty={dirty}
+        isNew={!id}
+        onCancel={handleCancel}
+      />
     </div>
   )
 }

@@ -9,7 +9,7 @@
  * background and no reference is guessed from ingredient names.
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { randomId } from '../lib/id'
 import {
   computeRemainingQuantity,
@@ -80,6 +80,19 @@ export function IngredientReferenceEditor({
   const [kind, setKind] = useState<QuantityKind>('full')
   const [partialText, setPartialText] = useState('')
   const [message, setMessage] = useState('')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const resize = () => {
+      textarea.style.height = 'auto'
+      textarea.style.height = `${textarea.scrollHeight}px`
+    }
+    resize()
+    window.addEventListener('resize', resize)
+    return () => window.removeEventListener('resize', resize)
+  }, [step.text])
 
   const selectedIngredient =
     ingredients.find((ingredient) => ingredient.id === ingredientId) ?? null
@@ -294,6 +307,7 @@ export function IngredientReferenceEditor({
     <div className="step-reference-editor">
       <div className="step-textarea-wrap">
         <textarea
+          ref={textareaRef}
           className="step-textarea"
           rows={5}
           value={step.text}

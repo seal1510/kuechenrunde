@@ -221,7 +221,7 @@ export function RecipeForm({
       ) : null}
 
       <div className="editor-layout">
-        <div className="editor-main-column">
+        <div className="editor-top-grid">
           <section className="panel editor-panel editor-basics">
             <div className="editor-panel-head">
               <h2>Grunddaten</h2>
@@ -305,152 +305,7 @@ export function RecipeForm({
             </div>
           </section>
 
-          <section className="panel editor-panel">
-            <div className="editor-panel-head">
-              <h2>Zutaten</h2>
-              <span className="editor-count">
-                {ingredientCount} {ingredientCount === 1 ? 'Zutat' : 'Zutaten'}
-              </span>
-            </div>
-            <IngredientEditor
-              ingredients={draft.ingredients}
-              onChange={(ingredients) => update('ingredients', ingredients)}
-            />
-          </section>
-
-          <section className="panel editor-panel">
-            <div className="editor-panel-head">
-              <h2>Zubereitung</h2>
-              <span className="editor-count">
-                {stepCount} {stepCount === 1 ? 'Schritt' : 'Schritte'}
-              </span>
-            </div>
-
-            <div className="step-editor" role="list" aria-label="Zubereitungsschritte">
-              {draft.steps.map((step, index) => (
-                <article className="step-card" key={step.key} role="listitem">
-                  <header className="step-card-head">
-                    <span className="step-number">{index + 1}</span>
-                    <span className="step-card-title">Schritt {index + 1}</span>
-                    <div
-                      className="step-actions"
-                      role="group"
-                      aria-label={`Aktionen für Schritt ${index + 1}`}
-                    >
-                      <button
-                        type="button"
-                        className="button quiet"
-                        onClick={() => moveStep(index, -1)}
-                        disabled={index === 0}
-                        aria-label={`Schritt ${index + 1} nach oben`}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        className="button quiet"
-                        onClick={() => moveStep(index, 1)}
-                        disabled={index === stepCount - 1}
-                        aria-label={`Schritt ${index + 1} nach unten`}
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        className="button danger-quiet"
-                        onClick={() =>
-                          update(
-                            'steps',
-                            draft.steps.filter((entry) => entry.key !== step.key),
-                          )
-                        }
-                        aria-label={`Schritt ${index + 1} entfernen`}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </header>
-                  <IngredientReferenceEditor
-                    step={step}
-                    stepIndex={index}
-                    ingredients={previewIngredients}
-                    instructions={referenceInstructions}
-                    onChange={(next) => updateStep(step.key, next)}
-                  />
-                </article>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              className="button editor-add-button"
-              onClick={() =>
-                update('steps', [
-                  ...draft.steps,
-                  { key: randomId(), text: '', references: [] },
-                ])
-              }
-            >
-              <span aria-hidden="true">+</span> Schritt hinzufügen
-            </button>
-
-            <details className="editor-preview">
-              <summary>
-                <span>Vorschau der Zubereitung</span>
-                <span className="editor-preview-meta">
-                  {previewInstructions.length}{' '}
-                  {previewInstructions.length === 1 ? 'Schritt' : 'Schritte'}
-                </span>
-              </summary>
-              <div className="editor-preview-body">
-                <div className="reference-preview-head">
-                  <p className="muted small">
-                    Markdown wird in der Vorschau und in der Kochansicht dargestellt.
-                  </p>
-                  <label className="reference-preview-servings">
-                    <span className="muted small">Portionen</span>
-                    <input
-                      type="number"
-                      min={0.5}
-                      step={0.5}
-                      value={previewServings}
-                      onChange={(event) => {
-                        const value = Number.parseFloat(event.target.value.replace(',', '.'))
-                        if (Number.isFinite(value) && value > 0) {
-                          setPreviewServings(Math.round(value * 10) / 10)
-                        }
-                      }}
-                      aria-label="Portionen für die Vorschau"
-                    />
-                  </label>
-                </div>
-                {previewOriginalServings === null ? (
-                  <p className="notice">
-                    Die Originalportionen des Rezepts sind unklar. Verknüpfte Mengen bleiben in der
-                    Vorschau unverändert, bis eine eindeutige Portionszahl angegeben ist.
-                  </p>
-                ) : null}
-                {previewInstructions.length === 0 ? (
-                  <p className="muted small">Noch keine Zubereitungsschritte.</p>
-                ) : (
-                  <ol className="reference-preview-steps">
-                    {preview.map((entry, index) => (
-                      <li key={entry.instruction.id}>
-                        <span className="reference-preview-number">{index + 1}</span>
-                        <div className="reference-preview-text">
-                          <Markdown text={entry.text} />
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </div>
-            </details>
-          </section>
-        </div>
-
-        <aside className="editor-side-column" aria-label="Rezeptdetails">
-          <section className="panel editor-panel">
+          <section className="panel editor-panel editor-panel-categories">
             <div className="editor-panel-head">
               <h2>Kategorien &amp; Tags</h2>
             </div>
@@ -489,8 +344,153 @@ export function RecipeForm({
               </label>
             </div>
           </section>
+        </div>
 
-          <section className="panel editor-panel">
+        <section className="panel editor-panel editor-panel-ingredients">
+          <div className="editor-panel-head">
+            <h2>Zutaten</h2>
+            <span className="editor-count">
+              {ingredientCount} {ingredientCount === 1 ? 'Zutat' : 'Zutaten'}
+            </span>
+          </div>
+          <IngredientEditor
+            ingredients={draft.ingredients}
+            onChange={(ingredients) => update('ingredients', ingredients)}
+          />
+        </section>
+
+        <section className="panel editor-panel editor-panel-steps">
+          <div className="editor-panel-head">
+            <h2>Zubereitung</h2>
+            <span className="editor-count">
+              {stepCount} {stepCount === 1 ? 'Schritt' : 'Schritte'}
+            </span>
+          </div>
+
+          <div className="step-editor" role="list" aria-label="Zubereitungsschritte">
+            {draft.steps.map((step, index) => (
+              <article className="step-card" key={step.key} role="listitem">
+                <header className="step-card-head">
+                  <span className="step-number">{index + 1}</span>
+                  <span className="step-card-title">Schritt {index + 1}</span>
+                  <div
+                    className="step-actions"
+                    role="group"
+                    aria-label={`Aktionen für Schritt ${index + 1}`}
+                  >
+                    <button
+                      type="button"
+                      className="button quiet"
+                      onClick={() => moveStep(index, -1)}
+                      disabled={index === 0}
+                      aria-label={`Schritt ${index + 1} nach oben`}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      className="button quiet"
+                      onClick={() => moveStep(index, 1)}
+                      disabled={index === stepCount - 1}
+                      aria-label={`Schritt ${index + 1} nach unten`}
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      className="button danger-quiet"
+                      onClick={() =>
+                        update(
+                          'steps',
+                          draft.steps.filter((entry) => entry.key !== step.key),
+                        )
+                      }
+                      aria-label={`Schritt ${index + 1} entfernen`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                </header>
+                <IngredientReferenceEditor
+                  step={step}
+                  stepIndex={index}
+                  ingredients={previewIngredients}
+                  instructions={referenceInstructions}
+                  onChange={(next) => updateStep(step.key, next)}
+                />
+              </article>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            className="button editor-add-button"
+            onClick={() =>
+              update('steps', [
+                ...draft.steps,
+                { key: randomId(), text: '', references: [] },
+              ])
+            }
+          >
+            <span aria-hidden="true">+</span> Schritt hinzufügen
+          </button>
+
+          <details className="editor-preview">
+            <summary>
+              <span>Vorschau der Zubereitung</span>
+              <span className="editor-preview-meta">
+                {previewInstructions.length}{' '}
+                {previewInstructions.length === 1 ? 'Schritt' : 'Schritte'}
+              </span>
+            </summary>
+            <div className="editor-preview-body">
+              <div className="reference-preview-head">
+                <p className="muted small">
+                  Markdown wird in der Vorschau und in der Kochansicht dargestellt.
+                </p>
+                <label className="reference-preview-servings">
+                  <span className="muted small">Portionen</span>
+                  <input
+                    type="number"
+                    min={0.5}
+                    step={0.5}
+                    value={previewServings}
+                    onChange={(event) => {
+                      const value = Number.parseFloat(event.target.value.replace(',', '.'))
+                      if (Number.isFinite(value) && value > 0) {
+                        setPreviewServings(Math.round(value * 10) / 10)
+                      }
+                    }}
+                    aria-label="Portionen für die Vorschau"
+                  />
+                </label>
+              </div>
+              {previewOriginalServings === null ? (
+                <p className="notice">
+                  Die Originalportionen des Rezepts sind unklar. Verknüpfte Mengen bleiben in der
+                  Vorschau unverändert, bis eine eindeutige Portionszahl angegeben ist.
+                </p>
+              ) : null}
+              {previewInstructions.length === 0 ? (
+                <p className="muted small">Noch keine Zubereitungsschritte.</p>
+              ) : (
+                <ol className="reference-preview-steps">
+                  {preview.map((entry, index) => (
+                    <li key={entry.instruction.id}>
+                      <span className="reference-preview-number">{index + 1}</span>
+                      <div className="reference-preview-text">
+                        <Markdown text={entry.text} />
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </details>
+        </section>
+
+        <div className="editor-bottom-grid">
+          <section className="panel editor-panel editor-panel-images">
             <div className="editor-panel-head">
               <h2>Bilder</h2>
               <span className="editor-count">
@@ -593,9 +593,9 @@ export function RecipeForm({
               </div>
             </details>
           </section>
+        </div>
 
-          {children}
-        </aside>
+        {children}
       </div>
     </form>
   )
