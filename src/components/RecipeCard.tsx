@@ -78,12 +78,20 @@ function meaningfulGroupTitle(title: string): boolean {
   return normalized.length > 0 && normalized !== 'zutaten' && normalized !== 'ingredients'
 }
 
-function IngredientItems({ items }: { items: Recipe['ingredients'] }) {
+type IngredientAmountFor = (ingredient: Recipe['ingredients'][number]) => string
+
+function IngredientItems({
+  items,
+  amountFor,
+}: {
+  items: Recipe['ingredients']
+  amountFor?: IngredientAmountFor
+}) {
   const ordered = orderIngredientsForDisplay(items)
   return (
     <ul className="ingredient-list">
       {ordered.map((ingredient) => {
-        const amount = formatIngredientAmount(ingredient)
+        const amount = amountFor ? amountFor(ingredient) : formatIngredientAmount(ingredient)
         const display = ingredient.parseStatus === 'plain' ? ingredient.raw : ingredient.name
         const purchaseNote = ingredient.purchaseNote?.trim() ?? ''
         const preparationNote = ingredient.preparationNote?.trim() ?? ''
@@ -108,7 +116,13 @@ function IngredientItems({ items }: { items: Recipe['ingredients'] }) {
   )
 }
 
-export function IngredientList({ recipe }: { recipe: Recipe }) {
+export function IngredientList({
+  recipe,
+  amountFor,
+}: {
+  recipe: Recipe
+  amountFor?: IngredientAmountFor
+}) {
   const groups = [...recipe.ingredientGroups].sort((a, b) => a.position - b.position)
   const namedGroups = groups.filter((group) => meaningfulGroupTitle(group.title))
   const namedGroupIds = new Set(namedGroups.map((group) => group.id))
@@ -124,7 +138,7 @@ export function IngredientList({ recipe }: { recipe: Recipe }) {
     <div className="ingredient-sections">
       {ungrouped.length > 0 ? (
         <div className="ingredient-group">
-          <IngredientItems items={ungrouped} />
+          <IngredientItems items={ungrouped} amountFor={amountFor} />
         </div>
       ) : null}
       {namedGroups.map((group) => {
@@ -133,7 +147,7 @@ export function IngredientList({ recipe }: { recipe: Recipe }) {
         return (
           <div className="ingredient-group" key={group.id}>
             <h3>{group.title}</h3>
-            <IngredientItems items={items} />
+            <IngredientItems items={items} amountFor={amountFor} />
           </div>
         )
       })}

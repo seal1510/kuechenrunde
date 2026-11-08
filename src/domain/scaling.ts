@@ -246,12 +246,18 @@ export function scaleRecipeIngredients(
   }
 }
 
+/** Scaled amount including unit, without the ingredient name. */
+export function scaledIngredientAmount(item: ScaledIngredient): string {
+  const amount = item.quantityText?.trim() ?? ''
+  if (!amount) return ''
+  const unit = item.ingredient.unit?.trim() ?? ''
+  return [amount, unit].filter(Boolean).join(' ')
+}
+
 /** Full line for the planning dialog, e.g. "ca. 300 g Hackfleisch". */
 export function scaledIngredientLine(item: ScaledIngredient): string {
-  const amount = item.quantityText?.trim() ?? ''
-  const unit = item.ingredient.unit?.trim() ?? ''
   const name = item.ingredient.name.trim()
-  return [amount, unit, name].filter(Boolean).join(' ')
+  return [scaledIngredientAmount(item), name].filter(Boolean).join(' ')
 }
 
 /**

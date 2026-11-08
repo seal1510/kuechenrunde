@@ -1,7 +1,21 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Ingredient, Recipe } from '../types'
-import { CookPage } from './CookPage'
+import {
+  resolveOriginalServings,
+  scaleRecipeIngredients,
+  scaledIngredientAmount,
+} from '../domain/scaling'
+import { renderRecipeInstructions } from '../recipe/references'
+import {
+  CookOverview,
+  CookPage,
+  CookStepView,
+  cookServingsAfterDelta,
+  cookUiReducer,
+  initialCookUiState,
+  MIN_COOK_SERVINGS,
+} from './CookPage'
 
 const live = vi.hoisted(() => {
   let value: unknown
@@ -126,19 +140,71 @@ function cookData(sessionServings: number | null, sessionMissing = false) {
   }
 }
 
+function sortedSteps(value: Recipe) {
+  return [...value.instructions].sort((a, b) => a.position - b.position)
+}
+
+function overviewMarkup(value: Recipe = recipe, targetServings = 6, currentIndex = 1) {
+  const steps = sortedSteps(value)
+  const originalServings = resolveOriginalServings(value)
+  const rendered = renderRecipeInstructions(steps, value.ingredients, {
+    originalServings,
+    targetServings,
+  })
+  const scaled = scaleRecipeIngredients(value.ingredients, originalServings, targetServings)
+  const amounts = new Map(
+    scaled.items.map((item) => [item.ingredient.id, scaledIngredientAmount(item)]),
+  )
+  const amountFor = (entry: Ingredient) => amounts.get(entry.id) ?? ''
+
+  return renderToStaticMarkup(
+    <CookOverview
+      recipe={value}
+      steps={steps}
+      rendered={rendered}
+      currentIndex={currentIndex}
+      originalServings={originalServings}
+      targetServings={targetServings}
+      amountFor={amountFor}
+      onSelectStep={() => undefined}
+    />,
+  )
+}
+
+function stepMarkup(value: Recipe = recipe, currentIndex = 0) {
+  const steps = sortedSteps(value)
+  const originalServings = resolveOriginalServings(value)
+  const rendered = renderRecipeInstructions(steps, value.ingredients, {
+    originalServings,
+    targetServings: 6,
+  })
+  return renderToStaticMarkup(
+    <CookStepView
+      steps={steps}
+      rendered={rendered}
+      currentIndex={currentIndex}
+      onPrevious={() => undefined}
+      onNext={() => undefined}
+      onSelectStep={() => undefined}
+    />,
+  )
+}
+
 beforeEach(() => {
   live.reset(cookData(null))
 })
 
 describe('cook mode entry and display', () => {
-  it('starts from the library with the original portions', () => {
+  it('starts from the library with the original portions and one clear exit', () => {
     const html = renderToStaticMarkup(<CookPage recipeId="r1" cookSessionId={null} />)
     expect(html).toContain('Bolognese')
     expect(html).toContain('Schritt 1 von 2')
     expect(html).toContain('Die 2 Zwiebeln fein würfeln.')
     expect(html).toContain('Original 4 Portionen')
-    expect(html).toContain('Kochmodus verlassen')
-    expect(html).toContain('value="4"')
+    expect(html).toContain('4 Portionen')
+    expect(html).toContain('Zum Rezept')
+    expect(html.match(/Zum Rezept/g)).toHaveLength(1)
+    expect(html).not.toContain('Kochmodus verlassen')
   })
 
   it('uses the planned cooking event total portions and scales the step text', () => {
@@ -148,14 +214,26 @@ describe('cook mode entry and display', () => {
     expect(html).toContain('Die 3 Zwiebeln fein würfeln.')
     expect(html).toContain('In diesem Schritt')
     expect(html).toContain('3 Zwiebeln')
-    expect(html).toContain('value="6"')
+    expect(html).toContain('6 Portionen')
   })
 
   it('uses the multi-day total, not the portions of one single day', () => {
     live.reset(cookData(10))
     const html = renderToStaticMarkup(<CookPage recipeId="r1" cookSessionId="cook-1" />)
-    expect(html).toContain('value="10"')
+    expect(html).toContain('10 Portionen')
     expect(html).toContain('Die 5 Zwiebeln fein würfeln.')
+  })
+
+  it('makes the complete ingredient list available without references', () => {
+    const withoutReferences: Recipe = {
+      ...recipe,
+      instructions: recipe.instructions.map((step) => ({ ...step, references: [] })),
+    }
+    live.reset({ ...cookData(null), recipe: withoutReferences })
+    const html = renderToStaticMarkup(<CookPage recipeId="r1" cookSessionId={null} />)
+    expect(html).not.toContain('In diesem Schritt')
+    expect(html).toContain('Zutaten anzeigen')
+    expect(html).toContain('Die 2 Zwiebeln fein würfeln.')
   })
 
   it('renders a recipe without instructions without crashing', () => {
@@ -217,5 +295,79 @@ describe('cook mode entry and display', () => {
     expect(html).toContain('Schritt 1 von 1')
     expect(html).toContain('Die 2 Zwiebeln fein würfeln.')
     expect(html).not.toContain('In diesem Schritt')
+  })
+})
+
+describe('cook mode views', () => {
+  it('renders every step in order, marks the current step and scales the full ingredient list', () => {
+    const html = overviewMarkup()
+    const firstStep = html.indexOf('Die 3 Zwiebeln fein würfeln.')
+    const secondStep = html.indexOf('600 g Hackfleisch kräftig anbraten.')
+
+    expect(html).toContain('Zubereitung')
+    expect(html).toContain('Schritt 1')
+    expect(html).toContain('Schritt 2')
+    expect(html).toContain('Aktuell')
+    expect(html).toContain('cook-overview-step is-current')
+    expect(html).toContain('Zutaten für 6 Portionen')
+    expect(html).toContain('600 g')
+    expect(html).toContain('750 ml')
+    expect(firstStep).toBeGreaterThan(-1)
+    expect(secondStep).toBeGreaterThan(firstStep)
+  })
+
+  it('shows the complete ingredient list even when no step has a reference', () => {
+    const withoutReferences: Recipe = {
+      ...recipe,
+      instructions: recipe.instructions.map((step) => ({ ...step, references: [] })),
+    }
+    const html = overviewMarkup(withoutReferences)
+
+    expect(html).toContain('Zutaten für 6 Portionen')
+    expect(html).toContain('600 g')
+    expect(html).toContain('750 ml')
+    expect(html).toContain('400 g Hackfleisch kräftig anbraten.')
+    expect(html).not.toContain('600 g Hackfleisch kräftig anbraten.')
+  })
+
+  it('keeps step position and servings when switching views', () => {
+    const state = { ...initialCookUiState, stepIndex: 1, servings: 6 }
+    const overview = cookUiReducer(state, { type: 'changeView', view: 'overview' })
+    expect(overview).toEqual({ view: 'overview', stepIndex: 1, servings: 6 })
+
+    const step = cookUiReducer(overview, { type: 'changeView', view: 'step' })
+    expect(step).toEqual({ view: 'step', stepIndex: 1, servings: 6 })
+  })
+
+  it('opens the selected overview step in the step view without resetting portions', () => {
+    const state = { ...initialCookUiState, view: 'overview' as const, stepIndex: 0, servings: 6 }
+    const next = cookUiReducer(state, { type: 'openStep', index: 1, stepCount: 2 })
+    expect(next).toEqual({ view: 'step', stepIndex: 1, servings: 6 })
+  })
+
+  it('clamps steps and never drops below half a portion', () => {
+    const state = { ...initialCookUiState, stepIndex: 8 }
+    expect(cookUiReducer(state, { type: 'goToStep', index: 99, stepCount: 3 }).stepIndex).toBe(2)
+    expect(cookUiReducer(state, { type: 'clampStep', stepCount: 2 }).stepIndex).toBe(1)
+    expect(cookServingsAfterDelta(4, 0.5)).toBe(4.5)
+    expect(cookServingsAfterDelta(1, -5)).toBe(MIN_COOK_SERVINGS)
+  })
+
+  it('uses meaningful navigation states on the first and last step', () => {
+    const first = stepMarkup(recipe, 0)
+    expect(first).toMatch(/<button[^>]*disabled[^>]*>← Zurück<\/button>/)
+    expect(first).not.toMatch(/<button[^>]*disabled[^>]*>Weiter →<\/button>/)
+
+    const last = stepMarkup(recipe, recipe.instructions.length - 1)
+    expect(last).toContain('Letzter Schritt')
+    expect(last).not.toMatch(/<button[^>]*disabled[^>]*>← Zurück<\/button>/)
+    expect(last).toMatch(/<button[^>]*disabled[^>]*>Weiter →<\/button>/)
+  })
+
+  it('does not mutate the recipe while rendering both views', () => {
+    const before = recipe.ingredients.map((entry) => entry.quantityText)
+    renderToStaticMarkup(<CookPage recipeId="r1" cookSessionId={null} />)
+    overviewMarkup()
+    expect(recipe.ingredients.map((entry) => entry.quantityText)).toEqual(before)
   })
 })

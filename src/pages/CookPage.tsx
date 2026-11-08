@@ -3,27 +3,34 @@
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Focused cook mode. Only the current step is in focus; the recipe is never
- * modified and reaching the last step never marks a cooking event as cooked.
+ * Cook mode with two views that share one recipe, one temporary portion count
+ * and one current step:
+ *   - step view: one preparation step in focus
+ *   - overview: all preparation steps plus the complete ingredient list
+ *
+ * Recipe and planning data stay read-only. Only the local progress of a
+ * planned cooking event is stored, and reaching the last step never marks a
+ * cooking event as cooked.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
 import { formatPortionCount } from '../lib/format'
 import {
   resolveOriginalServings,
   scaleRecipeIngredients,
-  scaledIngredientLine,
+  scaledIngredientAmount,
 } from '../domain/scaling'
-import { renderRecipeInstructions } from '../recipe/references'
+import { renderRecipeInstructions, type RenderedInstruction } from '../recipe/references'
 import {
   loadCookProgress,
   pruneOrphanedCookProgress,
   saveCookProgress,
 } from '../mealplan/cookProgress'
 import { Markdown } from '../components/Markdown'
-import type { Recipe } from '../types'
+import { IngredientList } from '../components/RecipeCard'
+import type { Ingredient, Instruction, Recipe } from '../types'
 
 interface CookData {
   recipe: Recipe | null
@@ -34,20 +41,300 @@ interface CookData {
   loadError: string | null
 }
 
-function normalizeServings(value: string): number | null {
-  const parsed = Number.parseFloat(value.replace(',', '.'))
-  if (!Number.isFinite(parsed) || parsed <= 0) return null
-  return Math.round(parsed * 10) / 10
+export type CookView = 'step' | 'overview'
+
+export interface CookUiState {
+  view: CookView
+  stepIndex: number
+  servings: number | null
 }
 
-function referenceLine(
-  reference: ReturnType<typeof renderRecipeInstructions>[number]['references'][number],
-): string {
+export type CookUiAction =
+  | { type: 'changeView'; view: CookView }
+  | { type: 'goToStep'; index: number; stepCount: number }
+  | { type: 'openStep'; index: number; stepCount: number }
+  | { type: 'clampStep'; stepCount: number }
+  | { type: 'setServings'; value: number }
+
+export const COOK_SERVINGS_STEP = 0.5
+export const MIN_COOK_SERVINGS = 0.5
+
+export const initialCookUiState: CookUiState = {
+  view: 'step',
+  stepIndex: 0,
+  servings: null,
+}
+
+export function clampCookStepIndex(index: number, stepCount: number): number {
+  if (!Number.isFinite(index) || stepCount < 1) return 0
+  return Math.max(0, Math.min(Math.trunc(index), Math.trunc(stepCount) - 1))
+}
+
+function normalizeCookServings(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return MIN_COOK_SERVINGS
+  return Math.max(MIN_COOK_SERVINGS, Math.round(value * 100) / 100)
+}
+
+/** One plus/minus action; the temporary value never leaves cook mode. */
+export function cookServingsAfterDelta(current: number, delta: number): number {
+  const base = Number.isFinite(current) && current > 0 ? current : MIN_COOK_SERVINGS
+  return normalizeCookServings(base + delta)
+}
+
+export function cookUiReducer(state: CookUiState, action: CookUiAction): CookUiState {
+  switch (action.type) {
+    case 'changeView':
+      return state.view === action.view ? state : { ...state, view: action.view }
+    case 'goToStep': {
+      const stepIndex = clampCookStepIndex(action.index, action.stepCount)
+      return stepIndex === state.stepIndex ? state : { ...state, stepIndex }
+    }
+    case 'openStep': {
+      const stepIndex = clampCookStepIndex(action.index, action.stepCount)
+      return stepIndex === state.stepIndex && state.view === 'step'
+        ? state
+        : { ...state, stepIndex, view: 'step' }
+    }
+    case 'clampStep': {
+      const stepIndex = clampCookStepIndex(state.stepIndex, action.stepCount)
+      return stepIndex === state.stepIndex ? state : { ...state, stepIndex }
+    }
+    case 'setServings': {
+      const servings = normalizeCookServings(action.value)
+      return servings === state.servings ? state : { ...state, servings }
+    }
+  }
+}
+
+function referenceLine(reference: RenderedInstruction['references'][number]): string {
   const ingredient = reference.ingredient
   if (!ingredient) return ''
   const amount = reference.amountText?.trim() ?? ''
   const unit = ingredient.unit?.trim() ?? ''
   return [amount, unit, ingredient.name].filter(Boolean).join(' ')
+}
+
+interface CookIngredientsPanelProps {
+  id: string
+  recipe: Recipe
+  originalServings: number | null
+  targetServings: number
+  amountFor: (ingredient: Ingredient) => string
+}
+
+function CookIngredientsPanel({
+  id,
+  recipe,
+  originalServings,
+  targetServings,
+  amountFor,
+}: CookIngredientsPanelProps) {
+  return (
+    <section id={id} className="panel cook-ingredients" aria-labelledby={`${id}-title`}>
+      <div className="cook-section-head">
+        <h2 id={`${id}-title`}>
+          {originalServings !== null
+            ? `Zutaten für ${formatPortionCount(targetServings)}`
+            : 'Zutaten'}
+        </h2>
+      </div>
+      <IngredientList recipe={recipe} amountFor={amountFor} />
+    </section>
+  )
+}
+
+interface CookStepViewProps {
+  steps: readonly Instruction[]
+  rendered: readonly RenderedInstruction[]
+  currentIndex: number
+  onPrevious: () => void
+  onNext: () => void
+  onSelectStep: (index: number) => void
+}
+
+export function CookStepView({
+  steps,
+  rendered,
+  currentIndex: rawCurrentIndex,
+  onPrevious,
+  onNext,
+  onSelectStep,
+}: CookStepViewProps) {
+  if (steps.length === 0) {
+    return (
+      <div className="empty-state">
+        <p>Für dieses Rezept sind keine Zubereitungsschritte hinterlegt.</p>
+      </div>
+    )
+  }
+
+  const currentIndex = clampCookStepIndex(rawCurrentIndex, steps.length)
+  const current = rendered[currentIndex]
+  const stepText = current?.text ?? steps[currentIndex]?.text ?? ''
+  const relevantIngredients = (current?.references ?? []).filter(
+    (reference) => reference.ingredient !== null,
+  )
+  const isFirst = currentIndex === 0
+  const isLast = currentIndex === steps.length - 1
+
+  return (
+    <>
+      <section
+        id="cook-current-step"
+        className="cook-step"
+        tabIndex={-1}
+        aria-label={`Schritt ${currentIndex + 1} von ${steps.length}`}
+      >
+        <div className="cook-step-head">
+          <h2 className="cook-step-kicker">Schritt {currentIndex + 1}</h2>
+          {isLast ? <span className="badge subtle">Letzter Schritt</span> : null}
+        </div>
+
+        <div className="cook-step-text" aria-live="polite" aria-atomic="true">
+          <Markdown text={stepText} />
+        </div>
+
+        {relevantIngredients.length > 0 ? (
+          <div className="cook-step-ingredients">
+            <h3>In diesem Schritt</h3>
+            <ul>
+              {relevantIngredients.map((reference) => (
+                <li key={reference.reference.id}>
+                  <span>{referenceLine(reference)}</span>
+                  {reference.issue === 'unsafe-remainder' ? (
+                    <span className="muted small"> Restmenge nicht sicher berechenbar</span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        <div className="cook-nav">
+          <button type="button" className="button" onClick={onPrevious} disabled={isFirst}>
+            ← Zurück
+          </button>
+          <button
+            type="button"
+            className="button primary"
+            onClick={onNext}
+            disabled={isLast}
+          >
+            Weiter →
+          </button>
+        </div>
+      </section>
+
+      {steps.length > 1 ? (
+        <nav className="cook-step-nav" aria-label="Zu einem Schritt springen">
+          {steps.map((step, index) => (
+            <button
+              type="button"
+              key={step.id}
+              className={[
+                'cook-step-dot',
+                index === currentIndex ? 'is-current' : '',
+                index < currentIndex ? 'is-done' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              onClick={() => onSelectStep(index)}
+              aria-current={index === currentIndex ? 'step' : undefined}
+              aria-label={`Schritt ${index + 1} von ${steps.length}`}
+            >
+              {index + 1}
+            </button>
+          ))}
+        </nav>
+      ) : null}
+    </>
+  )
+}
+
+interface CookOverviewProps {
+  recipe: Recipe
+  steps: readonly Instruction[]
+  rendered: readonly RenderedInstruction[]
+  currentIndex: number
+  originalServings: number | null
+  targetServings: number
+  amountFor: (ingredient: Ingredient) => string
+  onSelectStep: (index: number) => void
+}
+
+export function CookOverview({
+  recipe,
+  steps,
+  rendered,
+  currentIndex: rawCurrentIndex,
+  originalServings,
+  targetServings,
+  amountFor,
+  onSelectStep,
+}: CookOverviewProps) {
+  const currentIndex = clampCookStepIndex(rawCurrentIndex, steps.length)
+
+  return (
+    <div className="cook-overview">
+      <section className="cook-overview-steps" aria-labelledby="cook-overview-steps-title">
+        <div className="cook-section-head">
+          <h2 id="cook-overview-steps-title">Zubereitung</h2>
+        </div>
+
+        {steps.length === 0 ? (
+          <div className="empty-state">
+            <p>Für dieses Rezept sind keine Zubereitungsschritte hinterlegt.</p>
+          </div>
+        ) : (
+          <ol className="cook-overview-list">
+            {steps.map((step, index) => {
+              const isCurrent = index === currentIndex
+              return (
+                <li
+                  key={step.id}
+                  className={`cook-overview-step${isCurrent ? ' is-current' : ''}`}
+                  aria-current={isCurrent ? 'step' : undefined}
+                >
+                  <span className="cook-overview-step-marker" aria-hidden="true">
+                    {index + 1}
+                  </span>
+                  <div className="cook-overview-step-body">
+                    <div className="cook-overview-step-head">
+                      <span className="cook-overview-step-kicker">Schritt {index + 1}</span>
+                      {isCurrent ? <span className="cook-current-badge">Aktuell</span> : null}
+                    </div>
+                    <div className="cook-overview-step-text">
+                      <Markdown text={rendered[index]?.text ?? step.text} />
+                    </div>
+                    <div className="cook-overview-step-action">
+                      <button
+                        type="button"
+                        className="button quiet"
+                        onClick={() => onSelectStep(index)}
+                        aria-label={`Schritt ${index + 1} in der Schrittansicht öffnen`}
+                      >
+                        Schritt anzeigen →
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
+        )}
+      </section>
+
+      <aside className="cook-overview-ingredients">
+        <CookIngredientsPanel
+          id="cook-overview-ingredients"
+          recipe={recipe}
+          originalServings={originalServings}
+          targetServings={targetServings}
+          amountFor={amountFor}
+        />
+      </aside>
+    </div>
+  )
 }
 
 export function CookPage({
@@ -85,13 +372,14 @@ export function CookPage({
     }
   }, [recipeId, cookSessionId])
 
-  const [servings, setServings] = useState<number | null>(null)
-  const [servingsInput, setServingsInput] = useState('')
-  const [servingsReady, setServingsReady] = useState(false)
-  const [stepIndex, setStepIndex] = useState(0)
+  const [ui, dispatch] = useReducer(cookUiReducer, initialCookUiState)
   const [progressReady, setProgressReady] = useState(false)
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
-  const [showAllIngredients, setShowAllIngredients] = useState(false)
+  const [ingredientsOpen, setIngredientsOpen] = useState(false)
+  // Selecting a step in the overview removes that button from the DOM. Move
+  // focus to the step it opened so keyboard users do not fall back to <body>.
+  const shouldFocusStep = useRef(false)
+  const lastView = useRef<CookView | null>(null)
 
   const recipe = data?.recipe ?? null
   const steps = useMemo(
@@ -99,12 +387,13 @@ export function CookPage({
     [recipe],
   )
   const originalServings = recipe ? resolveOriginalServings(recipe) : null
-  const currentIndex = steps.length === 0 ? 0 : Math.min(stepIndex, steps.length - 1)
-  const initialTarget = data?.sessionServings ?? originalServings ?? 1
-  const targetServings = servings ?? initialTarget
-  const servingsFieldValue = servingsReady ? servingsInput : String(initialTarget)
-  const factor =
-    originalServings !== null && targetServings > 0 ? targetServings / originalServings : null
+  const currentIndex = clampCookStepIndex(ui.stepIndex, steps.length)
+  const sessionServings =
+    typeof data?.sessionServings === 'number' && data.sessionServings > 0
+      ? data.sessionServings
+      : null
+  const initialTarget = sessionServings ?? originalServings ?? 1
+  const targetServings = ui.servings ?? initialTarget
 
   const rendered = useMemo(
     () =>
@@ -118,16 +407,18 @@ export function CookPage({
   )
   const scaledIngredients = useMemo(
     () =>
-      recipe
-        ? scaleRecipeIngredients(recipe.ingredients, originalServings, targetServings)
-        : null,
+      scaleRecipeIngredients(recipe?.ingredients ?? [], originalServings, targetServings),
     [recipe, originalServings, targetServings],
   )
-
-  const current = rendered[currentIndex]
-  const relevantIngredients = (current?.references ?? []).filter(
-    (reference) => reference.ingredient !== null,
-  )
+  const scaledAmountById = useMemo(() => {
+    const amounts = new Map<string, string>()
+    for (const item of scaledIngredients.items) {
+      amounts.set(item.ingredient.id, scaledIngredientAmount(item))
+    }
+    return amounts
+  }, [scaledIngredients])
+  const amountFor = (ingredient: Ingredient) =>
+    scaledAmountById.get(ingredient.id) ?? ''
 
   useEffect(() => {
     // Entry links can be clicked from far down the plan or recipe page. Start
@@ -137,12 +428,13 @@ export function CookPage({
   }, [])
 
   useEffect(() => {
-    if (servingsReady || !data?.recipe) return
-    const initial = data.sessionServings ?? resolveOriginalServings(data.recipe) ?? 1
-    setServings(initial)
-    setServingsInput(String(initial))
-    setServingsReady(true)
-  }, [data, servingsReady])
+    if (!data?.recipe || ui.servings !== null) return
+    const initial =
+      data.sessionServings && data.sessionServings > 0
+        ? data.sessionServings
+        : resolveOriginalServings(data.recipe) ?? 1
+    dispatch({ type: 'setServings', value: initial })
+  }, [data, ui.servings])
 
   useEffect(() => {
     let cancelled = false
@@ -150,7 +442,7 @@ export function CookPage({
     setLoadedSessionId(null)
     const sessionId = data?.sessionId ?? null
     if (!sessionId) {
-      setStepIndex(0)
+      dispatch({ type: 'goToStep', index: 0, stepCount: steps.length })
       setProgressReady(true)
       return () => {
         cancelled = true
@@ -158,18 +450,19 @@ export function CookPage({
     }
     void loadCookProgress(sessionId).then((stored) => {
       if (cancelled) return
-      setStepIndex(stored ?? 0)
+      dispatch({ type: 'goToStep', index: stored ?? 0, stepCount: steps.length })
       setLoadedSessionId(sessionId)
       setProgressReady(true)
     })
     return () => {
       cancelled = true
     }
+  // `steps.length` is intentionally not a dependency: this effect restores the
+  // saved step once per session and must not reset it when recipe data updates.
   }, [data?.sessionId])
 
   useEffect(() => {
-    if (steps.length === 0) return
-    setStepIndex((current) => Math.min(current, steps.length - 1))
+    dispatch({ type: 'clampStep', stepCount: steps.length })
   }, [steps.length])
 
   useEffect(() => {
@@ -182,44 +475,70 @@ export function CookPage({
   }, [progressReady, loadedSessionId, data?.sessionId, currentIndex])
 
   useEffect(() => {
+    if (lastView.current === null) {
+      lastView.current = ui.view
+      return
+    }
+    if (lastView.current === ui.view) return
+    lastView.current = ui.view
+    if (ui.view !== 'step') return
+
+    const step = document.getElementById('cook-current-step')
+    const focusStep = shouldFocusStep.current
+    shouldFocusStep.current = false
+    if (focusStep) step?.focus({ preventScroll: true })
+    step?.scrollIntoView({ block: 'start' })
+  }, [ui.view])
+
+  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (ui.view !== 'step') return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
       const target = event.target as HTMLElement | null
       const tag = target?.tagName?.toLowerCase()
       if (tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable) {
         return
       }
       if (steps.length === 0) return
+
+      let nextIndex: number | null = null
       if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
-        event.preventDefault()
-        setStepIndex((current) => Math.max(0, current - 1))
+        nextIndex = currentIndex - 1
       } else if (event.key === 'ArrowRight' || event.key === 'PageDown') {
-        event.preventDefault()
-        setStepIndex((current) => Math.min(steps.length - 1, current + 1))
+        nextIndex = currentIndex + 1
       } else if (event.key === 'Home') {
-        event.preventDefault()
-        setStepIndex(0)
+        nextIndex = 0
       } else if (event.key === 'End') {
-        event.preventDefault()
-        setStepIndex(steps.length - 1)
+        nextIndex = steps.length - 1
       }
+      if (nextIndex === null) return
+
+      event.preventDefault()
+      dispatch({ type: 'goToStep', index: nextIndex, stepCount: steps.length })
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [steps.length])
+  }, [ui.view, currentIndex, steps.length])
 
   function goToStep(index: number) {
-    if (steps.length === 0) return
-    setStepIndex(Math.max(0, Math.min(steps.length - 1, index)))
+    dispatch({ type: 'goToStep', index, stepCount: steps.length })
   }
 
-  function changeServings(value: string) {
-    setServingsInput(value)
-    const parsed = normalizeServings(value)
-    if (parsed !== null) setServings(parsed)
+  function openStep(index: number) {
+    shouldFocusStep.current = true
+    dispatch({ type: 'openStep', index, stepCount: steps.length })
   }
 
-  function startOver() {
-    goToStep(0)
+  function changeServings(delta: number) {
+    dispatch({
+      type: 'setServings',
+      value: cookServingsAfterDelta(targetServings, delta),
+    })
+  }
+
+  function jumpToOverviewIngredients() {
+    if (typeof document === 'undefined') return
+    document.getElementById('cook-overview-ingredients')?.scrollIntoView({ block: 'start' })
   }
 
   if (!data) {
@@ -258,53 +577,61 @@ export function CookPage({
   }
 
   const exitHref = cookSessionId ? '#/plan' : `#/recipe/${encodeURIComponent(recipe.id)}`
+  const isOverview = ui.view === 'overview'
   const progressPercent =
     steps.length === 0 ? 0 : Math.round(((currentIndex + 1) / steps.length) * 100)
+  const stepLabel =
+    steps.length > 0 ? `Schritt ${currentIndex + 1} von ${steps.length}` : 'Keine Schritte hinterlegt'
+  const atMinimumServings = targetServings <= MIN_COOK_SERVINGS + 1e-9
+  const originalLabel =
+    originalServings !== null
+      ? `Original ${formatPortionCount(originalServings)}`
+      : 'Original unbekannt'
 
   return (
-    <div className="page cook-page">
+    <div className={`page cook-page ${isOverview ? 'is-overview' : 'is-step'}`}>
       <div className="cook-topbar">
-        <a className="back-link" href={exitHref}>
+        <a className="button quiet cook-exit" href={exitHref}>
           ← {cookSessionId ? 'Zum Essensplan' : 'Zum Rezept'}
-        </a>
-        <a className="button quiet" href={exitHref}>
-          Kochmodus verlassen
         </a>
       </div>
 
       <header className="cook-header">
-        <div>
+        <div className="cook-heading">
           <h1>{recipe.title}</h1>
           <p className="cook-meta">
-            {steps.length > 0 ? (
-              <strong>
-                Schritt {currentIndex + 1} von {steps.length}
-              </strong>
-            ) : (
-              <strong>Keine Schritte hinterlegt</strong>
-            )}
-            {originalServings !== null ? (
-              <span className="muted small">
-                {' '}
-                · Original {formatPortionCount(originalServings)}
-              </span>
-            ) : (
-              <span className="muted small"> · Originalportionen unklar</span>
-            )}
+            <strong>{stepLabel}</strong>
           </p>
         </div>
-        <label className="cook-servings">
-          <span className="muted small">Kochportionen</span>
-          <input
-            type="number"
-            min={0.5}
-            step={0.5}
-            inputMode="decimal"
-            value={servingsFieldValue}
-            onChange={(event) => changeServings(event.target.value)}
-            aria-label="Kochportionen"
-          />
-        </label>
+
+        <div className="cook-servings" role="group" aria-labelledby="cook-servings-label">
+          <span className="cook-servings-label" id="cook-servings-label">
+            Kochportionen
+          </span>
+          <div className="cook-servings-control">
+            <button
+              type="button"
+              className="cook-servings-button"
+              onClick={() => changeServings(-COOK_SERVINGS_STEP)}
+              disabled={atMinimumServings}
+              aria-label="Eine halbe Portion weniger"
+            >
+              −
+            </button>
+            <output className="cook-servings-value" aria-live="polite" aria-atomic="true">
+              {formatPortionCount(targetServings)}
+            </output>
+            <button
+              type="button"
+              className="cook-servings-button"
+              onClick={() => changeServings(COOK_SERVINGS_STEP)}
+              aria-label="Eine halbe Portion mehr"
+            >
+              +
+            </button>
+          </div>
+          <span className="cook-servings-original muted small">{originalLabel}</span>
+        </div>
       </header>
 
       {data.sessionMissing ? (
@@ -321,122 +648,90 @@ export function CookPage({
         </div>
       ) : null}
 
-      {factor !== null ? (
-        <p className="muted small cook-factor">
-          Zutaten für {formatPortionCount(targetServings)} · Faktor{' '}
-          {factor.toLocaleString('de-DE', { maximumFractionDigits: 2 })}
-        </p>
+      {steps.length > 0 ? (
+        <div
+          className="cook-progress"
+          role="progressbar"
+          aria-label="Zubereitungsfortschritt"
+          aria-valuemin={0}
+          aria-valuemax={steps.length}
+          aria-valuenow={currentIndex + 1}
+          aria-valuetext={stepLabel}
+        >
+          <span style={{ width: `${progressPercent}%` }} />
+        </div>
       ) : null}
 
-      <div className="cook-progress" aria-hidden="true">
-        <span style={{ width: `${progressPercent}%` }} />
+      <div className="cook-toolbar">
+        <div className="cook-view-switch" role="group" aria-label="Kochmodus-Ansicht">
+          <button
+            type="button"
+            aria-pressed={ui.view === 'step'}
+            onClick={() => dispatch({ type: 'changeView', view: 'step' })}
+          >
+            Schritt
+          </button>
+          <button
+            type="button"
+            aria-pressed={ui.view === 'overview'}
+            onClick={() => dispatch({ type: 'changeView', view: 'overview' })}
+          >
+            Übersicht
+          </button>
+        </div>
+
+        {!isOverview ? (
+          <button
+            type="button"
+            className="button quiet cook-ingredients-toggle"
+            onClick={() => setIngredientsOpen((value) => !value)}
+            aria-expanded={ingredientsOpen}
+            aria-controls={ingredientsOpen ? 'cook-ingredients' : undefined}
+          >
+            {ingredientsOpen ? 'Zutaten ausblenden' : 'Zutaten anzeigen'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="button quiet cook-ingredients-toggle cook-overview-ingredients-jump"
+            onClick={jumpToOverviewIngredients}
+            aria-controls="cook-overview-ingredients"
+          >
+            Zu den Zutaten
+          </button>
+        )}
       </div>
 
-      {steps.length === 0 ? (
-        <section className="cook-step">
-          <p className="empty-state">Für dieses Rezept sind keine Zubereitungsschritte hinterlegt.</p>
-        </section>
+      {isOverview ? (
+        <CookOverview
+          recipe={recipe}
+          steps={steps}
+          rendered={rendered}
+          currentIndex={currentIndex}
+          originalServings={originalServings}
+          targetServings={targetServings}
+          amountFor={amountFor}
+          onSelectStep={openStep}
+        />
       ) : (
-        <section className="cook-step" aria-live="polite">
-          <div className="cook-step-text">
-            <Markdown text={current?.text ?? steps[currentIndex]?.text ?? ''} />
-          </div>
-
-          {relevantIngredients.length > 0 ? (
-            <div className="cook-step-ingredients">
-              <h2>In diesem Schritt</h2>
-              <ul>
-                {relevantIngredients.map((reference) => (
-                  <li key={reference.reference.id}>
-                    <span>{referenceLine(reference)}</span>
-                    {reference.issue === 'unsafe-remainder' ? (
-                      <span className="muted small"> Restmenge nicht sicher berechenbar</span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
-          <div className="cook-nav">
-            <button
-              type="button"
-              className="button"
-              onClick={() => goToStep(currentIndex - 1)}
-              disabled={currentIndex === 0}
-            >
-              ← Zurück
-            </button>
-            {currentIndex < steps.length - 1 ? (
-              <button
-                type="button"
-                className="button primary"
-                onClick={() => goToStep(currentIndex + 1)}
-              >
-                Weiter →
-              </button>
-            ) : (
-              <span className="cook-last-step muted small">Letzter Schritt</span>
-            )}
-          </div>
-        </section>
+        <CookStepView
+          steps={steps}
+          rendered={rendered}
+          currentIndex={currentIndex}
+          onPrevious={() => goToStep(currentIndex - 1)}
+          onNext={() => goToStep(currentIndex + 1)}
+          onSelectStep={goToStep}
+        />
       )}
 
-      {steps.length > 1 ? (
-        <nav className="cook-step-nav" aria-label="Zu einem Schritt springen">
-          {steps.map((step, index) => (
-            <button
-              type="button"
-              key={step.id}
-              className={[
-                'cook-step-dot',
-                index === currentIndex ? 'is-current' : '',
-                index < currentIndex ? 'is-done' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              onClick={() => goToStep(index)}
-              aria-current={index === currentIndex ? 'step' : undefined}
-              aria-label={`Schritt ${index + 1} von ${steps.length}`}
-            >
-              {index + 1}
-            </button>
-          ))}
-        </nav>
-      ) : null}
-
-      <div className="cook-tools">
-        <button type="button" className="button quiet" onClick={startOver}>
-          Von vorne beginnen
-        </button>
-        <button
-          type="button"
-          className="button quiet"
-          onClick={() => setShowAllIngredients((value) => !value)}
-          aria-expanded={showAllIngredients}
-        >
-          {showAllIngredients ? 'Zutatenliste ausblenden' : 'Alle Zutaten anzeigen'}
-        </button>
-      </div>
-
-      {showAllIngredients ? (
-        <section className="cook-ingredients panel">
-          <h2>Zutaten für {formatPortionCount(targetServings)}</h2>
-          {scaledIngredients && scaledIngredients.items.length > 0 ? (
-            <ul className="scaling-list">
-              {scaledIngredients.items.map((item) => (
-                <li key={item.ingredient.id} className={item.scaled ? '' : 'is-unscaled'}>
-                  <span>{scaledIngredientLine(item)}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted small">Keine Zutaten hinterlegt.</p>
-          )}
-          {scaledIngredients?.warnings.length ? (
-            <p className="muted small">{scaledIngredients.warnings.join(' ')}</p>
-          ) : null}
-        </section>
+      {!isOverview && ingredientsOpen ? (
+        <CookIngredientsPanel
+          id="cook-ingredients"
+          recipe={recipe}
+          originalServings={originalServings}
+          targetServings={targetServings}
+          amountFor={amountFor}
+        />
       ) : null}
     </div>
   )

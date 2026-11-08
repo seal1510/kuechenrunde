@@ -7,6 +7,7 @@ import {
   resolveOriginalServings,
   scaleQuantityForDisplay,
   scaleRecipeIngredients,
+  scaledIngredientAmount,
   scaledIngredientLine,
 } from './scaling'
 
@@ -76,6 +77,7 @@ describe('scaling', () => {
     const result = scaleRecipeIngredients([original], 4, 6)
     expect(result.factor).toBe(1.5)
     expect(result.items[0]?.quantityText).toBe('ca. 3–4,5')
+    expect(scaledIngredientAmount(result.items[0]!)).toBe('ca. 3–4,5 EL')
     expect(scaledIngredientLine(result.items[0]!)).toBe('ca. 3–4,5 EL Olivenöl')
     expect(original.quantityText).toBe('ca. 2-3')
     expect(original.quantity).toBe(2)
@@ -87,6 +89,7 @@ describe('scaling', () => {
     expect(result.items[0]?.scaled).toBe(false)
     expect(result.items[0]?.note).toBe('missing-quantity')
     expect(result.items[0]?.quantityText).toBeNull()
+    expect(scaledIngredientAmount(result.items[0]!)).toBe('')
   })
 
   it('reports unclear original servings and does not scale', () => {
