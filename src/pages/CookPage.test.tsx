@@ -7,6 +7,7 @@ import {
   scaledIngredientAmount,
 } from '../domain/scaling'
 import { renderRecipeInstructions } from '../recipe/references'
+import { TimerStore } from '../cook/timerStore'
 import {
   CookOverview,
   CookPage,
@@ -15,6 +16,7 @@ import {
   cookUiReducer,
   initialCookUiState,
   MIN_COOK_SERVINGS,
+  type CookUiState,
 } from './CookPage'
 
 const live = vi.hoisted(() => {
@@ -208,6 +210,14 @@ describe('cook mode entry and display', () => {
     expect(html).not.toContain('Kochmodus verlassen')
   })
 
+  it('keeps timer and wake-lock controls compact while the timer drawer is closed', () => {
+    const html = renderToStaticMarkup(<CookPage recipeId="r1" cookSessionId={null} />)
+    expect(html).toContain('aria-label="Küchentimer, öffnen"')
+    expect(html).toContain('Wachhalten')
+    expect(html).not.toContain('id="cook-timer-panel"')
+    expect(html).toContain('Schritt 1 von 2')
+  })
+
   it('uses the planned cooking event total portions and scales the step text', () => {
     live.reset(cookData(6))
     const html = renderToStaticMarkup(<CookPage recipeId="r1" cookSessionId="cook-1" />)
@@ -355,6 +365,38 @@ describe('cook mode views', () => {
 
     const step = cookUiReducer(overview, { type: 'changeView', view: 'step' })
     expect(step).toEqual({ view: 'step', stepIndex: 1, servings: 6 })
+  })
+
+  it('runs timers independently from cook view and step changes', () => {
+    let now = 1_000_000
+    const values = new Map<string, string>()
+    const store = new TimerStore({
+      storage: {
+        getItem: (key) => values.get(key) ?? null,
+        setItem: (key, value) => {
+          values.set(key, value)
+        },
+        removeItem: (key) => {
+          values.delete(key)
+        },
+      },
+      now: () => now,
+      createId: () => 'timer-1',
+    })
+    expect(store.add({ durationMs: 60_000, name: 'Unabhängig' }).ok).toBe(true)
+
+    let ui: CookUiState = { ...initialCookUiState, stepIndex: 0, servings: 4 }
+    ui = cookUiReducer(ui, { type: 'changeView', view: 'overview' })
+    ui = cookUiReducer(ui, { type: 'goToStep', index: 1, stepCount: 2 })
+    now += 10_000
+    store.tick()
+
+    expect(ui).toMatchObject({ view: 'overview', stepIndex: 1, servings: 4 })
+    expect(store.getSnapshot().timers[0]).toMatchObject({
+      status: 'running',
+      remainingMs: 50_000,
+      endsAt: 1_060_000,
+    })
   })
 
   it('opens the selected overview step in the step view without resetting portions', () => {

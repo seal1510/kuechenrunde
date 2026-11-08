@@ -30,6 +30,9 @@ import {
 } from '../mealplan/cookProgress'
 import { Markdown } from '../components/Markdown'
 import { IngredientList } from '../components/RecipeCard'
+import { useCookTimers } from '../cook/useCookTimers'
+import { useWakeLock } from '../cook/useWakeLock'
+import { CookTimerPanel, CookTimerToggle, WakeLockToggle } from './cook/CookTimers'
 import type { Ingredient, Instruction, Recipe } from '../types'
 
 interface CookData {
@@ -376,10 +379,15 @@ export function CookPage({
   const [progressReady, setProgressReady] = useState(false)
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
   const [ingredientsOpen, setIngredientsOpen] = useState(false)
+  const [timersOpen, setTimersOpen] = useState(false)
+  const cookTimers = useCookTimers()
+  const wakeLock = useWakeLock()
   // Selecting a step in the overview removes that button from the DOM. Move
   // focus to the step it opened so keyboard users do not fall back to <body>.
   const shouldFocusStep = useRef(false)
   const lastView = useRef<CookView | null>(null)
+  const timerToggleRef = useRef<HTMLButtonElement>(null)
+  const previousTimersOpen = useRef(false)
 
   const recipe = data?.recipe ?? null
   const steps = useMemo(
@@ -521,6 +529,16 @@ export function CookPage({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [ui.view, currentIndex, steps.length])
 
+  useEffect(() => {
+    // Closing the drawer from a control inside it must not drop focus on the
+    // document body. The topbar toggle stays mounted and is the logical return
+    // target for keyboard users.
+    if (previousTimersOpen.current && !timersOpen) {
+      timerToggleRef.current?.focus()
+    }
+    previousTimersOpen.current = timersOpen
+  }, [timersOpen])
+
   function goToStep(index: number) {
     dispatch({ type: 'goToStep', index, stepCount: steps.length })
   }
@@ -595,7 +613,20 @@ export function CookPage({
         <a className="button quiet cook-exit" href={exitHref}>
           ← {cookSessionId ? 'Zum Essensplan' : 'Zum Rezept'}
         </a>
+        <div className="cook-topbar-tools">
+          <CookTimerToggle
+            timers={cookTimers.timers}
+            open={timersOpen}
+            onToggle={() => setTimersOpen((value) => !value)}
+            buttonRef={timerToggleRef}
+          />
+          <WakeLockToggle snapshot={wakeLock.snapshot} onToggle={wakeLock.toggle} />
+        </div>
       </div>
+
+      <p className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+        {cookTimers.expiredNotice ?? ''}
+      </p>
 
       <header className="cook-header">
         <div className="cook-heading">
@@ -702,6 +733,22 @@ export function CookPage({
           </button>
         )}
       </div>
+
+      {timersOpen ? (
+        <CookTimerPanel
+          timers={cookTimers.timers}
+          soundEnabled={cookTimers.soundEnabled}
+          storageError={cookTimers.storageError}
+          atLimit={cookTimers.atLimit}
+          onAdd={cookTimers.addTimer}
+          onStart={cookTimers.startTimer}
+          onPause={cookTimers.pauseTimer}
+          onReset={cookTimers.resetTimer}
+          onRemove={cookTimers.removeTimer}
+          onToggleSound={cookTimers.toggleSound}
+          onClose={() => setTimersOpen(false)}
+        />
+      ) : null}
 
       {isOverview ? (
         <CookOverview
