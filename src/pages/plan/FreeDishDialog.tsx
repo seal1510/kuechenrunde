@@ -35,6 +35,7 @@ import type { CookSession, FreeDish, Ingredient, MealPlanEntry } from '../../typ
 import { DaySelectionEditor } from './DaySelectionEditor'
 import { draftSignature, useDiscardGuard } from './discardGuard'
 import { freeDishBackStep } from './planningBack'
+import { dialogFooterMode } from './planningFooter'
 import { DiscardPrompt, PlanningPanel } from './PlanningPanel'
 
 function ingredientRows(ingredients: readonly Ingredient[]): DraftIngredient[] {
@@ -241,60 +242,62 @@ export function FreeDishDialog({
     }
   }
 
-  const footer = (
-    <>
-      {discard.prompted ? (
-        <DiscardPrompt
-          onKeepEditing={discard.cancel}
-          onDiscard={discard.confirm}
-        />
-      ) : null}
-      <div className="plan-panel-actions">
-        <div className="plan-panel-actions-secondary">
-          {mode === 'edit' && onMoveRequest ? (
-            <button
-              type="button"
-              className="button quiet"
-              onClick={handleMoveRequest}
-              disabled={busy}
-            >
-              Verschieben
-            </button>
-          ) : null}
-          {mode === 'edit' && initialEntries.length > 0 ? (
-            <button
-              type="button"
-              className="button danger-quiet"
-              onClick={() => void handleDelete()}
-              disabled={busy}
-            >
-              {removesWholePlan
-                ? 'Ganze Planung entfernen'
-                : 'Gericht entfernen'}
-            </button>
-          ) : null}
-        </div>
-        <div className="plan-panel-actions-primary">
+  const footerMode = dialogFooterMode(discard.prompted)
+  const actions = (
+    <div className="plan-panel-actions">
+      <div className="plan-panel-actions-secondary">
+        {mode === 'edit' && onMoveRequest ? (
           <button
             type="button"
-            className="button"
-            onClick={handleRequestClose}
+            className="button quiet"
+            onClick={handleMoveRequest}
             disabled={busy}
           >
-            Abbrechen
+            Verschieben
           </button>
+        ) : null}
+        {mode === 'edit' && initialEntries.length > 0 ? (
           <button
             type="button"
-            className="button primary"
-            onClick={() => void handleSubmit()}
-            disabled={busy || !valid}
+            className="button danger-quiet"
+            onClick={() => void handleDelete()}
+            disabled={busy}
           >
-            {busy ? 'Speichere …' : mode === 'create' ? 'Einplanen' : 'Speichern'}
+            {removesWholePlan
+              ? 'Ganze Planung entfernen'
+              : 'Gericht entfernen'}
           </button>
-        </div>
+        ) : null}
       </div>
-    </>
+      <div className="plan-panel-actions-primary">
+        <button
+          type="button"
+          className="button"
+          onClick={handleRequestClose}
+          disabled={busy}
+        >
+          Abbrechen
+        </button>
+        <button
+          type="button"
+          className="button primary"
+          onClick={() => void handleSubmit()}
+          disabled={busy || !valid}
+        >
+          {busy ? 'Speichere …' : mode === 'create' ? 'Einplanen' : 'Speichern'}
+        </button>
+      </div>
+    </div>
   )
+  const footer =
+    footerMode === 'prompt' ? (
+      <DiscardPrompt
+        onKeepEditing={discard.cancel}
+        onDiscard={discard.confirm}
+      />
+    ) : (
+      actions
+    )
 
   return (
     <PlanningPanel

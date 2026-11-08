@@ -27,6 +27,13 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ')
 
+/**
+ * Body scroll lock is shared by all panels. Counting open panels prevents a
+ * replaced panel's cleanup from unlocking or restoring focus while its
+ * successor is already visible.
+ */
+let openPanelCount = 0
+
 export interface PlanningPanelProps {
   title: string
   subtitle?: ReactNode
@@ -80,14 +87,17 @@ export function PlanningPanel({
         : null
 
     document.body.classList.add('plan-panel-open')
+    openPanelCount += 1
 
     function handleKeyDown(event: KeyboardEvent) {
+      // A stale listener from a replaced panel must not steal Escape/Tab.
+      if (!panel?.isConnected) return
       if (event.key === 'Escape') {
         event.preventDefault()
         requestCloseRef.current()
         return
       }
-      if (event.key !== 'Tab' || !panel) return
+      if (event.key !== 'Tab') return
 
       const focusable = visibleFocusable(panel)
       if (focusable.length === 0) {
@@ -116,8 +126,11 @@ export function PlanningPanel({
     document.addEventListener('keydown', handleKeyDown)
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
-      document.body.classList.remove('plan-panel-open')
-      if (previouslyFocused?.isConnected) previouslyFocused.focus()
+      openPanelCount = Math.max(0, openPanelCount - 1)
+      if (openPanelCount === 0) {
+        document.body.classList.remove('plan-panel-open')
+        if (previouslyFocused?.isConnected) previouslyFocused.focus()
+      }
     }
   }, [])
 

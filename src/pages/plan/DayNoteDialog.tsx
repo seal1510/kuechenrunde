@@ -14,6 +14,7 @@ import { deleteDayNote, saveDayNote } from '../../mealplan/dayNoteService'
 import type { DayNote } from '../../types'
 import { draftSignature, useDiscardGuard } from './discardGuard'
 import { chooserBackStep } from './planningBack'
+import { dialogFooterMode } from './planningFooter'
 import { DiscardPrompt, PlanningPanel } from './PlanningPanel'
 
 export interface DayNoteDialogProps {
@@ -102,58 +103,60 @@ export function DayNoteDialog({
     }
   }
 
-  const footer = (
-    <>
-      {discard.prompted ? (
-        <DiscardPrompt
-          onKeepEditing={discard.cancel}
-          onDiscard={discard.confirm}
-        />
-      ) : null}
-      <div className="plan-panel-actions">
-        <div className="plan-panel-actions-secondary">
-          {hasSavedNote && onMoveRequest ? (
-            <button
-              type="button"
-              className="button quiet"
-              onClick={() => void handleMove()}
-              disabled={busy || !text.trim()}
-            >
-              Verschieben
-            </button>
-          ) : null}
-          {hasSavedNote ? (
-            <button
-              type="button"
-              className="button danger-quiet"
-              onClick={() => void handleDelete()}
-              disabled={busy}
-            >
-              Kommentar löschen
-            </button>
-          ) : null}
-        </div>
-        <div className="plan-panel-actions-primary">
+  const footerMode = dialogFooterMode(discard.prompted)
+  const actions = (
+    <div className="plan-panel-actions">
+      <div className="plan-panel-actions-secondary">
+        {hasSavedNote && onMoveRequest ? (
           <button
             type="button"
-            className="button"
-            onClick={handleRequestClose}
-            disabled={busy}
+            className="button quiet"
+            onClick={() => void handleMove()}
+            disabled={busy || !text.trim()}
           >
-            Abbrechen
+            Verschieben
           </button>
+        ) : null}
+        {hasSavedNote ? (
           <button
             type="button"
-            className="button primary"
-            onClick={() => void handleSave()}
+            className="button danger-quiet"
+            onClick={() => void handleDelete()}
             disabled={busy}
           >
-            {busy ? 'Speichere …' : 'Speichern'}
+            Kommentar löschen
           </button>
-        </div>
+        ) : null}
       </div>
-    </>
+      <div className="plan-panel-actions-primary">
+        <button
+          type="button"
+          className="button"
+          onClick={handleRequestClose}
+          disabled={busy}
+        >
+          Abbrechen
+        </button>
+        <button
+          type="button"
+          className="button primary"
+          onClick={() => void handleSave()}
+          disabled={busy}
+        >
+          {busy ? 'Speichere …' : 'Speichern'}
+        </button>
+      </div>
+    </div>
   )
+  const footer =
+    footerMode === 'prompt' ? (
+      <DiscardPrompt
+        onKeepEditing={discard.cancel}
+        onDiscard={discard.confirm}
+      />
+    ) : (
+      actions
+    )
 
   return (
     <PlanningPanel

@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -49,6 +50,11 @@ import { DishDialog } from './plan/DishDialog'
 import { FreeDishDialog } from './plan/FreeDishDialog'
 import { MoveDialog } from './plan/MoveDialog'
 import {
+  NO_PLANNING_OVERLAY,
+  planningBackDate,
+  planningSessionReducer,
+} from './plan/planningSession'
+import {
   createMoveUndoOffer,
   createNoteUndoOffer,
   type MoveUndoOffer,
@@ -93,14 +99,24 @@ export function PlanPage() {
   const settingsRows = useLiveQuery(() => db.settings.toArray(), [])
   const dayNotes = useLiveQuery(() => db.dayNotes.toArray(), [])
 
-  const [dialog, setDialog] = useState<DialogState | null>(null)
-  const [addMenuDate, setAddMenuDate] = useState<string | null>(null)
-  const [noteDate, setNoteDate] = useState<string | null>(null)
-  /**
-   * Date of the shared chooser the current create dialog was opened from.
-   * The dialog's back action returns here without saving anything.
-   */
-  const [backToAddDate, setBackToAddDate] = useState<string | null>(null)
+  const [overlay, dispatchOverlay] = useReducer(
+    planningSessionReducer,
+    NO_PLANNING_OVERLAY,
+  )
+  const dialog: DialogState | null =
+    overlay.kind === 'create'
+      ? { kind: 'create', date: overlay.date }
+      : overlay.kind === 'free-create'
+        ? { kind: 'free-create', date: overlay.date }
+        : overlay.kind === 'edit'
+          ? { kind: 'edit', entryId: overlay.entryId }
+          : null
+  const addMenuDate = overlay.kind === 'chooser' ? overlay.date : null
+  const noteDate =
+    overlay.kind === 'note' || overlay.kind === 'note-direct'
+      ? overlay.date
+      : null
+  const backToAddDate = planningBackDate(overlay)
   const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null)
   const [moving, setMoving] = useState(false)
   const [undoOffer, setUndoOffer] = useState<MoveUndoOffer | null>(null)
@@ -258,51 +274,43 @@ export function PlanPage() {
   }
 
   function handleDone() {
-    setDialog(null)
+    dispatchOverlay({ type: 'close' })
     setError(null)
-    setBackToAddDate(null)
   }
 
-  /** Close a create/edit dialog without saving and forget its return step. */
+  /** Close a create/edit dialog without saving. */
   function closeDialog() {
-    setDialog(null)
+    dispatchOverlay({ type: 'close' })
     setError(null)
-    setBackToAddDate(null)
   }
 
   function closeNote() {
-    setNoteDate(null)
-    setBackToAddDate(null)
+    dispatchOverlay({ type: 'close' })
   }
 
   /**
-   * Header back action: reopen the shared chooser on the same day. This only
-   * changes local view state; nothing is persisted and no cook session is
-   * created or changed.
+   * Header back action: reopen the shared chooser on the same day. The reducer
+   * stores the return date, so this only changes local view state; nothing is
+   * persisted and no cook session is created or changed.
    */
   function returnToAddMenu() {
-    const date = backToAddDate
-    setDialog(null)
-    setNoteDate(null)
+    dispatchOverlay({ type: 'back-to-chooser' })
     setError(null)
-    setBackToAddDate(null)
-    if (date) setAddMenuDate(date)
   }
 
   function openCreate(date: string) {
-    setDialog({ kind: 'create', date })
+    dispatchOverlay({ type: 'choose-recipe', date })
     setError(null)
   }
 
   function openCreateFree(date: string) {
-    setDialog({ kind: 'free-create', date })
+    dispatchOverlay({ type: 'choose-free-dish', date })
     setError(null)
   }
 
   function openEdit(entry: MealPlanEntry) {
-    setDialog({ kind: 'edit', entryId: entry.id })
+    dispatchOverlay({ type: 'open-edit', entryId: entry.id })
     setError(null)
-    setBackToAddDate(null)
   }
 
   function openMove(entry: MealPlanEntry) {
@@ -318,8 +326,17 @@ export function PlanPage() {
   }
 
   function openAdd(date: string) {
-    setAddMenuDate(date)
-    setBackToAddDate(null)
+    dispatchOverlay({ type: 'open-chooser', date })
+    setError(null)
+  }
+
+  function openNote(date: string) {
+    dispatchOverlay({ type: 'open-note', date })
+    setError(null)
+  }
+
+  function openNoteFromChooser(date: string) {
+    dispatchOverlay({ type: 'choose-note', date })
     setError(null)
   }
 
@@ -611,10 +628,7 @@ export function PlanPage() {
       return
     }
     if (item.kind === 'entry') openEdit(item.entry)
-    else {
-      setBackToAddDate(null)
-      setNoteDate(item.note.date)
-    }
+    else openNote(item.note.date)
   }
 
   function showUndoOffer(offer: MoveUndoOffer) {
@@ -993,24 +1007,15 @@ export function PlanPage() {
           key={addMenuDate}
           date={addMenuDate}
           onChooseRecipe={() => {
-            const date = addMenuDate
-            setAddMenuDate(null)
-            setBackToAddDate(date)
-            openCreate(date)
+            if (addMenuDate) openCreate(addMenuDate)
           }}
           onChooseFreeDish={() => {
-            const date = addMenuDate
-            setAddMenuDate(null)
-            setBackToAddDate(date)
-            openCreateFree(date)
+            if (addMenuDate) openCreateFree(addMenuDate)
           }}
           onChooseNote={() => {
-            const date = addMenuDate
-            setAddMenuDate(null)
-            setBackToAddDate(date)
-            setNoteDate(date)
+            if (addMenuDate) openNoteFromChooser(addMenuDate)
           }}
-          onClose={() => setAddMenuDate(null)}
+          onClose={closeDialog}
         />
       ) : null}
 

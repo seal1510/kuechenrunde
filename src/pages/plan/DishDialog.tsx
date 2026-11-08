@@ -40,6 +40,7 @@ import {
 import { DaySelectionEditor } from './DaySelectionEditor'
 import { draftSignature, useDiscardGuard } from './discardGuard'
 import { dishBackStep } from './planningBack'
+import { dishFooterMode } from './planningFooter'
 import { DiscardPrompt, PlanningPanel } from './PlanningPanel'
 import { RecipeCover, RecipePicker } from './RecipePicker'
 
@@ -125,16 +126,19 @@ export function DishDialog({
   )
 
   function selectDay(date: string) {
+    if (discard.prompted) discard.cancel()
     setSelection((current) => toggleDay(current, date))
     setError(null)
   }
 
   function changeServings(date: string, delta: number) {
+    if (discard.prompted) discard.cancel()
     setSelection((current) => adjustDayServings(current, date, delta))
     setError(null)
   }
 
   function chooseRecipe(id: string) {
+    if (discard.prompted) discard.cancel()
     setRecipeId(id)
     setView('plan')
     setError(null)
@@ -252,69 +256,71 @@ export function DishDialog({
     }
   }
 
-  const footer = (
-    <>
-      {discard.prompted ? (
-        <DiscardPrompt
-          onKeepEditing={discard.cancel}
-          onDiscard={discard.confirm}
-        />
-      ) : null}
-      <div className="plan-panel-actions">
-        <div className="plan-panel-actions-secondary">
-          {mode === 'edit' && recipe ? (
-            <a
-              className="button"
-              href={cookHash(recipe.id, cookSessionId)}
-              onClick={handleCookNavigation}
-            >
-              Kochen
-            </a>
-          ) : null}
-          {mode === 'edit' && onMoveRequest ? (
-            <button
-              type="button"
-              className="button quiet"
-              onClick={handleMoveRequest}
-              disabled={busy}
-            >
-              Verschieben
-            </button>
-          ) : null}
-          {mode === 'edit' && initialEntries.length > 0 ? (
-            <button
-              type="button"
-              className="button danger-quiet"
-              onClick={() => void handleDelete()}
-              disabled={busy}
-            >
-              {removesWholePlan
-                ? 'Ganze Planung entfernen'
-                : 'Gericht entfernen'}
-            </button>
-          ) : null}
-        </div>
-        <div className="plan-panel-actions-primary">
+  const footerMode = dishFooterMode(showingPicker, discard.prompted)
+  const actions = (
+    <div className="plan-panel-actions">
+      <div className="plan-panel-actions-secondary">
+        {mode === 'edit' && recipe ? (
+          <a
+            className="button"
+            href={cookHash(recipe.id, cookSessionId)}
+            onClick={handleCookNavigation}
+          >
+            Kochen
+          </a>
+        ) : null}
+        {mode === 'edit' && onMoveRequest ? (
           <button
             type="button"
-            className="button"
-            onClick={handleRequestClose}
+            className="button quiet"
+            onClick={handleMoveRequest}
             disabled={busy}
           >
-            Abbrechen
+            Verschieben
           </button>
+        ) : null}
+        {mode === 'edit' && initialEntries.length > 0 ? (
           <button
             type="button"
-            className="button primary"
-            onClick={() => void handleSubmit()}
-            disabled={busy || !valid}
+            className="button danger-quiet"
+            onClick={() => void handleDelete()}
+            disabled={busy}
           >
-            {busy ? 'Speichere …' : mode === 'create' ? 'Einplanen' : 'Speichern'}
+            {removesWholePlan
+              ? 'Ganze Planung entfernen'
+              : 'Gericht entfernen'}
           </button>
-        </div>
+        ) : null}
       </div>
-    </>
+      <div className="plan-panel-actions-primary">
+        <button
+          type="button"
+          className="button"
+          onClick={handleRequestClose}
+          disabled={busy}
+        >
+          Abbrechen
+        </button>
+        <button
+          type="button"
+          className="button primary"
+          onClick={() => void handleSubmit()}
+          disabled={busy || !valid}
+        >
+          {busy ? 'Speichere …' : mode === 'create' ? 'Einplanen' : 'Speichern'}
+        </button>
+      </div>
+    </div>
   )
+  const footer =
+    footerMode === 'prompt' ? (
+      <DiscardPrompt
+        onKeepEditing={discard.cancel}
+        onDiscard={discard.confirm}
+      />
+    ) : footerMode === 'actions' ? (
+      actions
+    ) : undefined
 
   return (
     <PlanningPanel
@@ -330,7 +336,7 @@ export function DishDialog({
       onBack={backStep ? handleBack : undefined}
       onRequestClose={handleRequestClose}
       closeDisabled={busy}
-      footer={showingPicker ? undefined : footer}
+      footer={footer}
       focusKey={showingPicker ? 'picker' : 'plan'}
       className={`dish-dialog${showingPicker ? ' is-picking' : ''}`}
     >
@@ -362,6 +368,7 @@ export function DishDialog({
                   type="button"
                   className="button quiet plan-recipe-change"
                   onClick={() => {
+                    if (discard.prompted) discard.cancel()
                     setView('picker')
                     setError(null)
                   }}
@@ -410,14 +417,20 @@ export function DishDialog({
                   step={1}
                   value={correction}
                   placeholder="z. B. 4"
-                  onChange={(event) => setCorrection(event.target.value)}
+                  onChange={(event) => {
+                    if (discard.prompted) discard.cancel()
+                    setCorrection(event.target.value)
+                  }}
                 />
               </label>
               <label className="check-field dish-correction-save">
                 <input
                   type="checkbox"
                   checked={saveCorrection}
-                  onChange={(event) => setSaveCorrection(event.target.checked)}
+                  onChange={(event) => {
+                    if (discard.prompted) discard.cancel()
+                    setSaveCorrection(event.target.checked)
+                  }}
                 />
                 Originalportionen im Rezept speichern
               </label>
