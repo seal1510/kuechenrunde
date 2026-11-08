@@ -712,7 +712,7 @@ describe('automatic ingredient amount scaling', () => {
 })
 
 describe('automatic ingredient mentions', () => {
-  it('highlights several exact ingredients in one sentence and adds safe total badges', () => {
+  it('highlights several exact ingredients and keeps safe totals in the step result', () => {
     const ingredients = [
       ingredient({ id: 'paprika', name: 'Paprika', quantity: 2, quantityText: '2' }),
       ingredient({ id: 'zwiebel', name: 'Zwiebel', quantity: 1, quantityText: '1' }),
@@ -731,14 +731,18 @@ describe('automatic ingredient mentions', () => {
     ])
     expect(mentions.map((mention) => mention.amountText)).toEqual(['4', '2'])
     expect(mentions.every((mention) => !mention.hasAmount)).toBe(true)
+    expect(mentions.every((mention) => mention.highlight)).toBe(true)
     expect(rendered[0]?.annotatedText).toContain(
       '<span class="cook-ingredient-mention">Paprika',
     )
     expect(rendered[0]?.annotatedText).toContain(
       '<span class="cook-ingredient-mention">Zwiebel',
     )
-    expect(rendered[0]?.annotatedText).toContain('>4 gesamt</span>')
-    expect(rendered[0]?.annotatedText).toContain('>2 gesamt</span>')
+    expect(rendered[0]?.annotatedText).not.toContain('gesamt')
+    expect(rendered[0]?.stepIngredients.map((info) => info.amountText)).toEqual([
+      '4',
+      '2',
+    ])
   })
 
   it('matches singular and plural ingredient forms', () => {
@@ -751,8 +755,9 @@ describe('automatic ingredient mentions', () => {
     expect(rendered[0]?.mentions[0]?.ingredient.name).toBe('Zwiebel')
     expect(rendered[0]?.mentions[0]?.amountText).toBe('4')
     expect(rendered[0]?.annotatedText).toContain(
-      '<span class="cook-ingredient-mention">Zwiebeln<span class="cook-ingredient-badge"',
+      '<span class="cook-ingredient-mention">Zwiebeln</span>',
     )
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBe('4')
   })
 
   it('links unique shortened names and safe category terms', () => {
@@ -791,8 +796,11 @@ describe('automatic ingredient mentions', () => {
     expect(rendered[0]?.annotatedText).toContain(
       '<span class="cook-ingredient-mention">Brühe',
     )
-    expect(rendered[0]?.annotatedText).toContain('1000 g gesamt')
-    expect(rendered[0]?.annotatedText).toContain('1000 ml gesamt')
+    expect(rendered[0]?.annotatedText).not.toContain('gesamt')
+    expect(rendered[0]?.stepIngredients.map((info) => info.amountText)).toEqual([
+      '1000 g',
+      '1000 ml',
+    ])
   })
 
   it('links an unambiguous poultry term to a compound ingredient', () => {
@@ -822,6 +830,7 @@ describe('automatic ingredient mentions', () => {
     ]
     const brothRendered = render([instruction('Die Brühe hinzufügen.')], broths, 2, 4)
     expect(brothRendered[0]?.mentions).toEqual([])
+    expect(brothRendered[0]?.stepIngredients).toEqual([])
     expect(brothRendered[0]?.annotatedText).toBe('Die Brühe hinzufügen.')
 
     const salts = [
@@ -830,6 +839,7 @@ describe('automatic ingredient mentions', () => {
     ]
     const saltRendered = render([instruction('Salz hinzufügen.')], salts, 2, 4)
     expect(saltRendered[0]?.mentions).toEqual([])
+    expect(saltRendered[0]?.stepIngredients).toEqual([])
     expect(saltRendered[0]?.annotatedText).toBe('Salz hinzufügen.')
   })
 
@@ -859,11 +869,13 @@ describe('automatic ingredient mentions', () => {
     expect(rendered[1]?.text).toBe('Die restliche Brühe dazugeben.')
     expect(rendered[1]?.mentions[0]?.hasAmount).toBe(false)
     expect(rendered[1]?.mentions[0]?.amountText).toBeNull()
-    expect(rendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
-    expect(rendered[1]?.annotatedText).not.toContain('cook-ingredient-badge')
+    expect(rendered[0]?.annotatedText).not.toContain('gesamt')
+    expect(rendered[1]?.annotatedText).not.toContain('gesamt')
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(rendered[1]?.stepIngredients[0]?.amountText).toBeNull()
   })
 
-  it('does not add a badge beside an already present amount', () => {
+  it('does not add a total beside an already present amount', () => {
     const ingredients = [
       ingredient({
         id: 'huhn',
@@ -881,7 +893,8 @@ describe('automatic ingredient mentions', () => {
     expect(rendered[0]?.annotatedText).toContain(
       '<span class="cook-ingredient-mention">Hähnchen</span>',
     )
-    expect(rendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+    expect(rendered[0]?.annotatedText).not.toContain('gesamt')
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBeNull()
 
     const amountAfterName = render(
       [instruction('Das Hähnchen (500 g) anbraten.')],
@@ -892,10 +905,11 @@ describe('automatic ingredient mentions', () => {
     expect(amountAfterName[0]?.text).toBe('Das Hähnchen (500 g) anbraten.')
     expect(amountAfterName[0]?.mentions[0]?.hasAmount).toBe(true)
     expect(amountAfterName[0]?.mentions[0]?.amountText).toBeNull()
-    expect(amountAfterName[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+    expect(amountAfterName[0]?.annotatedText).not.toContain('gesamt')
+    expect(amountAfterName[0]?.stepIngredients[0]?.amountText).toBeNull()
   })
 
-  it('does not add a total badge beside a spelled-out amount', () => {
+  it('does not add a total beside a spelled-out amount', () => {
     const ingredients = [
       ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
     ]
@@ -904,7 +918,8 @@ describe('automatic ingredient mentions', () => {
     expect(rendered[0]?.text).toBe('Zwei Zwiebeln schneiden.')
     expect(rendered[0]?.mentions[0]?.hasAmount).toBe(true)
     expect(rendered[0]?.mentions[0]?.amountText).toBeNull()
-    expect(rendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+    expect(rendered[0]?.annotatedText).not.toContain('gesamt')
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBeNull()
 
     const articleRendered = render(
       [instruction('Eine Zwiebel schneiden.')],
@@ -915,10 +930,11 @@ describe('automatic ingredient mentions', () => {
     expect(articleRendered[0]?.text).toBe('Eine Zwiebel schneiden.')
     expect(articleRendered[0]?.mentions[0]?.hasAmount).toBe(true)
     expect(articleRendered[0]?.mentions[0]?.amountText).toBeNull()
-    expect(articleRendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+    expect(articleRendered[0]?.annotatedText).not.toContain('gesamt')
+    expect(articleRendered[0]?.stepIngredients[0]?.amountText).toBeNull()
   })
 
-  it('does not add a total badge in a qualitative amount context', () => {
+  it('does not add a total amount in a qualitative context', () => {
     const salt = ingredient({
       id: 'salz',
       name: 'Salz',
@@ -932,9 +948,11 @@ describe('automatic ingredient mentions', () => {
       2,
       4,
     )
-    expect(saltRendered[0]?.mentions[0]?.hasAmount).toBe(true)
+    expect(saltRendered[0]?.mentions[0]?.hasAmount).toBe(false)
+    expect(saltRendered[0]?.mentions[0]?.hasUnsafeContext).toBe(true)
     expect(saltRendered[0]?.mentions[0]?.amountText).toBeNull()
-    expect(saltRendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+    expect(saltRendered[0]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(saltRendered[0]?.annotatedText).not.toContain('gesamt')
 
     const onions = [
       ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
@@ -945,12 +963,144 @@ describe('automatic ingredient mentions', () => {
       2,
       4,
     )
-    expect(onionRendered[0]?.mentions[0]?.hasAmount).toBe(true)
+    expect(onionRendered[0]?.mentions[0]?.hasAmount).toBe(false)
+    expect(onionRendered[0]?.mentions[0]?.hasUnsafeContext).toBe(true)
     expect(onionRendered[0]?.mentions[0]?.amountText).toBeNull()
-    expect(onionRendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+    expect(onionRendered[0]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(onionRendered[0]?.annotatedText).not.toContain('gesamt')
   })
 
-  it('lets a manual reference suppress a later total badge for the same ingredient', () => {
+  it('separates usage notes from the actual ingredient identity', () => {
+    const ingredients = [
+      ingredient({
+        id: 'wasser',
+        name: 'Wasser zum Nachgießen',
+        quantity: 500,
+        quantityText: '500',
+        unit: 'ml',
+      }),
+      ingredient({
+        id: 'petersilie',
+        name: 'Petersilie zum Garnieren',
+        quantity: 1,
+        quantityText: '1',
+      }),
+    ]
+    const rendered = render(
+      [instruction('Das Wasser nachgießen und mit Petersilie garnieren.')],
+      ingredients,
+      2,
+      4,
+    )
+    const mentions = rendered[0]?.mentions ?? []
+
+    expect(mentions.map((mention) => mention.ingredient.name)).toEqual([
+      'Wasser zum Nachgießen',
+      'Petersilie zum Garnieren',
+    ])
+    expect(rendered[0]?.stepIngredients.map((info) => info.displayName)).toEqual([
+      'Wasser',
+      'Petersilie',
+    ])
+    expect(rendered[0]?.annotatedText).toContain(
+      '<span class="cook-ingredient-mention">Wasser</span>',
+    )
+    expect(rendered[0]?.annotatedText).toContain(
+      '<span class="cook-ingredient-mention">Petersilie</span>',
+    )
+    expect(rendered[0]?.annotatedText).not.toContain(
+      'cook-ingredient-mention">nachgießen',
+    )
+    expect(rendered[0]?.annotatedText).not.toContain(
+      'cook-ingredient-mention">garnieren',
+    )
+  })
+
+  it('does not turn verbs from instructions or ingredient notes into aliases', () => {
+    const ingredients = [
+      ingredient({ id: 'salz', name: 'Salz', quantity: 1, quantityText: '1', unit: 'TL' }),
+      ingredient({
+        id: 'butter',
+        name: 'Butter',
+        quantity: 100,
+        quantityText: '100',
+        unit: 'g',
+      }),
+      ingredient({
+        id: 'bruehe',
+        name: 'Hühnerbrühe',
+        quantity: 500,
+        quantityText: '500',
+        unit: 'ml',
+      }),
+      ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
+    ]
+    const rendered = render(
+      [instruction('Die Zwiebeln salzen und buttern, dann kurz brühen.')],
+      ingredients,
+      2,
+      4,
+    )
+    const mentions = rendered[0]?.mentions ?? []
+
+    expect(mentions.map((mention) => mention.ingredient.name)).toEqual(['Zwiebeln'])
+    expect(rendered[0]?.stepIngredients.map((info) => info.displayName)).toEqual([
+      'Zwiebeln',
+    ])
+    expect(rendered[0]?.annotatedText).not.toContain(
+      'cook-ingredient-mention">salzen',
+    )
+    expect(rendered[0]?.annotatedText).not.toContain(
+      'cook-ingredient-mention">buttern',
+    )
+    expect(rendered[0]?.annotatedText).not.toContain(
+      'cook-ingredient-mention">brühen',
+    )
+  })
+
+  it('highlights only the first non-heading occurrence and keeps factual repeats', () => {
+    const ingredients = [
+      ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
+    ]
+    const text = '**Zwiebeln vorbereiten** Die Zwiebeln würfeln.'
+    const rendered = render([instruction(text)], ingredients, 2, 4)
+    const mentions = rendered[0]?.mentions ?? []
+    const annotated = rendered[0]?.annotatedText ?? ''
+
+    expect(mentions).toHaveLength(2)
+    expect(mentions.map((mention) => mention.highlight)).toEqual([false, true])
+    expect(mentions.every((mention) => mention.amountText === null)).toBe(true)
+    expect(rendered[0]?.stepIngredients).toHaveLength(1)
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBeNull()
+    expect(annotated).toContain('**Zwiebeln vorbereiten**')
+    expect(annotated).toContain(
+      '<span class="cook-ingredient-mention">Zwiebeln</span> würfeln.',
+    )
+    expect(annotated.match(/cook-ingredient-mention/g)).toHaveLength(1)
+  })
+
+  it('keeps bold and italic formatting around highlighted names', () => {
+    const ingredients = [
+      ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
+      ingredient({ id: 'paprika', name: 'Paprika', quantity: 1, quantityText: '1' }),
+    ]
+    const rendered = render(
+      [instruction('Die *Zwiebeln* und **Paprika** würfeln.')],
+      ingredients,
+      2,
+      4,
+    )
+    const annotated = rendered[0]?.annotatedText ?? ''
+
+    expect(annotated).toContain(
+      '*<span class="cook-ingredient-mention">Zwiebeln</span>*',
+    )
+    expect(annotated).toContain(
+      '**<span class="cook-ingredient-mention">Paprika</span>**',
+    )
+  })
+
+  it('lets a manual reference suppress a later total amount for the same ingredient', () => {
     const ingredients = [
       ingredient({
         id: 'butter',
@@ -979,8 +1129,12 @@ describe('automatic ingredient mentions', () => {
     )
 
     expect(rendered[0]?.text).toBe('200 g Butter erhitzen.')
+    expect(rendered[0]?.stepIngredients[0]?.hasAmountInText).toBe(true)
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBeNull()
     expect(rendered[1]?.mentions[0]?.amountText).toBeNull()
-    expect(rendered[1]?.annotatedText).not.toContain('cook-ingredient-badge')
+    expect(rendered[1]?.annotatedText).not.toContain('gesamt')
+    expect(rendered[1]?.stepIngredients[0]?.hasAmountInText).toBe(false)
+    expect(rendered[1]?.stepIngredients[0]?.amountText).toBeNull()
   })
 
   it('keeps Markdown intact and never links code or link destinations', () => {
@@ -988,18 +1142,18 @@ describe('automatic ingredient mentions', () => {
       ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
     ]
     const text =
-      '**Die Zwiebeln** und [Zwiebeln](https://example.com/zwiebeln) sowie `Zwiebeln` schneiden.'
+      'Die **Zwiebeln** schneiden. [Zwiebeln](https://example.com/zwiebeln) sowie `Zwiebeln` nicht.'
     const rendered = render([instruction(text)], ingredients, 2, 4)
 
     expect(rendered[0]?.mentions).toHaveLength(2)
     expect(rendered[0]?.annotatedText).toContain(
-      '**Die <span class="cook-ingredient-mention">Zwiebeln</span>**',
+      '**<span class="cook-ingredient-mention">Zwiebeln</span>**',
     )
     expect(rendered[0]?.annotatedText).toContain(
-      '[<span class="cook-ingredient-mention">Zwiebeln</span>](https://example.com/zwiebeln)',
+      '[Zwiebeln](https://example.com/zwiebeln)',
     )
     expect(rendered[0]?.annotatedText).toContain('`Zwiebeln`')
-    expect(rendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+    expect(rendered[0]?.annotatedText).not.toContain('gesamt')
   })
 
   it('does not link ingredient names inside longer compound words', () => {
@@ -1060,7 +1214,8 @@ describe('automatic ingredient mentions', () => {
     expect(rendered[0]?.annotatedText).toContain(
       '<span class="cook-ingredient-mention">Salz</span>',
     )
-    expect(rendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+    expect(rendered[0]?.annotatedText).not.toContain('gesamt')
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBeNull()
 
     const ambiguousThousands = [
       ingredient({
@@ -1078,10 +1233,11 @@ describe('automatic ingredient mentions', () => {
       4,
     )
     expect(ambiguousRendered[0]?.mentions[0]?.amountText).toBeNull()
-    expect(ambiguousRendered[0]?.annotatedText).not.toContain('cook-ingredient-badge')
+    expect(ambiguousRendered[0]?.annotatedText).not.toContain('gesamt')
+    expect(ambiguousRendered[0]?.stepIngredients[0]?.amountText).toBeNull()
   })
 
-  it('escapes badge text instead of injecting HTML', () => {
+  it('keeps display amounts out of the inline Markdown', () => {
     const ingredients = [
       ingredient({
         id: 'oel',
@@ -1095,6 +1251,7 @@ describe('automatic ingredient mentions', () => {
 
     expect(rendered[0]?.mentions[0]?.amountText).toBe('4 *<script>*')
     expect(rendered[0]?.annotatedText).not.toContain('<script>')
-    expect(rendered[0]?.annotatedText).toContain('&#42;&lt;script&gt;&#42;')
+    expect(rendered[0]?.annotatedText).not.toContain('4')
+    expect(rendered[0]?.stepIngredients[0]?.amountText).toBe('4 *<script>*')
   })
 })

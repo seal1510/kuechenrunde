@@ -22,7 +22,11 @@ import {
   scaleRecipeIngredients,
   scaledIngredientAmount,
 } from '../domain/scaling'
-import { renderRecipeInstructions, type RenderedInstruction } from '../recipe/references'
+import {
+  renderRecipeInstructions,
+  type ReferenceIssue,
+  type RenderedInstruction,
+} from '../recipe/references'
 import {
   loadCookProgress,
   pruneOrphanedCookProgress,
@@ -109,12 +113,56 @@ export function cookUiReducer(state: CookUiState, action: CookUiAction): CookUiS
   }
 }
 
-function referenceLine(reference: RenderedInstruction['references'][number]): string {
-  const ingredient = reference.ingredient
-  if (!ingredient) return ''
-  const amount = reference.amountText?.trim() ?? ''
-  const unit = ingredient.unit?.trim() ?? ''
-  return [amount, unit, ingredient.name].filter(Boolean).join(' ')
+function stepIngredientNote(issue: ReferenceIssue | null): string | null {
+  switch (issue) {
+    case 'unsafe-remainder':
+      return 'Restmenge für diesen Schritt nicht sicher berechenbar.'
+    case 'unknown-original-servings':
+    case 'invalid-target':
+      return 'Menge für diesen Schritt nicht skalierbar.'
+    case 'missing-quantity':
+      return 'Keine zuverlässige Menge für diesen Schritt.'
+    case 'anchor-not-found':
+      return 'Mengenverknüpfung im Text nicht gefunden.'
+    case 'overlapping-anchor':
+      return 'Mengenverknüpfung mehrdeutig.'
+    default:
+      return null
+  }
+}
+
+/** One calm chip row per step, shared by step view and overview. */
+export function StepIngredientChips({ entry }: { entry: RenderedInstruction }) {
+  const ingredients = entry.stepIngredients
+  if (ingredients.length === 0) return null
+
+  return (
+    <section className="cook-step-ingredients" aria-label="Zutaten dieses Schritts">
+      <ul className="cook-step-ingredient-chips">
+        {ingredients.map((info) => {
+          const note = stepIngredientNote(info.issue)
+          return (
+            <li
+              key={info.ingredient.id}
+              className="cook-step-ingredient-chip"
+              title={note ?? undefined}
+            >
+              <span className="cook-step-ingredient-name">{info.displayName}</span>
+              {info.amountText ? (
+                <span
+                  className="cook-step-ingredient-amount"
+                  aria-label={`Rezeptgesamtmenge: ${info.amountText}`}
+                >
+                  {info.amountText} gesamt
+                </span>
+              ) : null}
+              {note ? <span className="visually-hidden"> {note}</span> : null}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
 }
 
 interface CookIngredientsPanelProps {
@@ -174,9 +222,6 @@ export function CookStepView({
   const currentIndex = clampCookStepIndex(rawCurrentIndex, steps.length)
   const current = rendered[currentIndex]
   const stepText = current?.annotatedText ?? current?.text ?? steps[currentIndex]?.text ?? ''
-  const relevantIngredients = (current?.references ?? []).filter(
-    (reference) => reference.ingredient !== null,
-  )
   const isFirst = currentIndex === 0
   const isLast = currentIndex === steps.length - 1
 
@@ -197,21 +242,7 @@ export function CookStepView({
           <Markdown text={stepText} />
         </div>
 
-        {relevantIngredients.length > 0 ? (
-          <div className="cook-step-ingredients">
-            <h3>In diesem Schritt</h3>
-            <ul>
-              {relevantIngredients.map((reference) => (
-                <li key={reference.reference.id}>
-                  <span>{referenceLine(reference)}</span>
-                  {reference.issue === 'unsafe-remainder' ? (
-                    <span className="muted small"> Restmenge nicht sicher berechenbar</span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
+        {current ? <StepIngredientChips entry={current} /> : null}
 
         <div className="cook-nav">
           <button type="button" className="button" onClick={onPrevious} disabled={isFirst}>
@@ -315,6 +346,7 @@ export function CookOverview({
                         }
                       />
                     </div>
+                    {rendered[index] ? <StepIngredientChips entry={rendered[index]} /> : null}
                     <div className="cook-overview-step-action">
                       <button
                         type="button"

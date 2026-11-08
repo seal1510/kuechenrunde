@@ -14,8 +14,8 @@
  * numbers and every other unlinked number stay untouched.
  *
  * Cook mode may also highlight ingredient mentions without an explicit amount.
- * A badge with the recipe total is only added when exactly one safe mention
- * exists and no explicit or qualitative amount context is present.
+ * The recipe total is only exposed in the compact step list when exactly one
+ * safe mention exists and no explicit or qualitative amount context is present.
  */
 
 import {
@@ -51,20 +51,39 @@ export interface IngredientMention {
   /** Range in the rendered instruction text. */
   start: number
   end: number
-  /** True when an explicit or qualitative amount context is already present. */
+  /** True when an explicit numeric/spelled amount is already present. */
   hasAmount: boolean
-  /** Safe whole-recipe amount for display, or null when it must stay hidden. */
+  /** True when a qualitative context such as "nach Geschmack" is present. */
+  hasUnsafeContext: boolean
+  /** Safe whole-recipe amount for the compact step ingredient list. */
   amountText: string | null
+  /** True for the one occurrence that should receive inline highlighting. */
+  highlight: boolean
+}
+
+export interface StepIngredientInfo {
+  ingredient: Ingredient
+  /** Actual ingredient identity without usage or preparation notes. */
+  displayName: string
+  /** True when the step text itself already contains an amount. */
+  hasAmountInText: boolean
+  /** Safe recipe total for the compact step list, or null. */
+  amountText: string | null
+  /** Manual reference issue, if any. Display stays calm; details are hidden. */
+  issue: ReferenceIssue | null
 }
 
 export interface RenderedInstruction {
   instruction: Instruction
   /** Instruction text with resolved anchors replaced, without display markup. */
   text: string
-  /** Display text with safe inline ingredient highlighting and optional badges. */
+  /** Display text with safe inline ingredient highlighting. */
   annotatedText: string
   references: RenderedReference[]
+  /** All factual mentions, including repetitions that are not highlighted. */
   mentions: IngredientMention[]
+  /** Unique, reliably identified ingredients for the compact step list. */
+  stepIngredients: StepIngredientInfo[]
 }
 
 export interface QuantityPrefix {
@@ -673,9 +692,37 @@ function nameWords(value: string): string[] {
     .filter((word) => /[\p{L}\p{N}]/u.test(word))
 }
 
+const INGREDIENT_USAGE_MARKER_RE =
+  /\s+(?:zum|zur|für|fuer|mit|ohne|aus|in|im|am|an|auf|als|nach|vom|von|beim)\s+/i
+
 /**
- * Conservative German plural variants. Only the final word is varied, and
- * unusual nouns simply keep their exact spelling instead of being guessed.
+ * Strip parenthetical, comma-separated and usage/preparation notes from an
+ * ingredient line while preserving original spelling and casing.
+ */
+function ingredientHeadText(name: string): string {
+  const withoutParens = name.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!withoutParens) return ''
+
+  const beforeComma = withoutParens.split(',')[0]?.trim() ?? ''
+  const source = beforeComma || withoutParens
+  const marker = INGREDIENT_USAGE_MARKER_RE.exec(source)
+  const head = marker && marker.index > 0 ? source.slice(0, marker.index).trim() : source
+  return head || source
+}
+
+/** Human-readable identity without usage or preparation notes. */
+export function ingredientDisplayName(name: string): string {
+  return ingredientHeadText(name) || name.trim()
+}
+
+function ingredientHeadWords(name: string): string[] {
+  return nameWords(ingredientHeadText(name))
+}
+
+/**
+ * Conservative German variants. Positive plurals are only generated for
+ * nouns ending in "e"/"el" (plus "s" for loanwords), which avoids creating
+ * common verb forms such as "salzen", "zuckern" or "buttern".
  */
 function lastWordVariants(words: string[]): string[][] {
   const last = words[words.length - 1]!
@@ -688,8 +735,7 @@ function lastWordVariants(words: string[]): string[][] {
     if (last.endsWith('n')) add(last.slice(0, -1))
     if (last.endsWith('en')) add(last.slice(0, -2))
     if (last.endsWith('s')) add(last.slice(0, -1))
-    add(`${last}n`)
-    add(`${last}en`)
+    if (last.endsWith('e') || last.endsWith('el')) add(`${last}n`)
     add(`${last}s`)
   }
   if (last === 'ei') add('eier')
@@ -698,36 +744,31 @@ function lastWordVariants(words: string[]): string[][] {
   return [...alternatives].map((alternative) => [...words.slice(0, -1), alternative])
 }
 
+/** Very conservative variants for shortened compound heads. */
+function shortenedWordVariants(word: string): string[] {
+  const alternatives = new Set<string>([word])
+  const add = (value: string) => {
+    if (value.length >= 2) alternatives.add(value)
+  }
+  if (word.length >= 4) {
+    if (word.endsWith('n')) add(word.slice(0, -1))
+    add(`${word}s`)
+  }
+  if (word === 'ei') add('eier')
+  if (word === 'eier') add('ei')
+  return [...alternatives]
+}
+
 /**
  * Ingredient names often carry a note ("Zwiebeln, fein gewürfelt",
- * "Hähnchen (Brust)", "Öl zum Braten"). The shorter head phrase is generated
- * only as a candidate; unit and amount context still have to match.
+ * "Hähnchen (Brust)", "Öl zum Braten"). Only the real head is used as an
+ * identity phrase; trailing usage verbs are never turned into aliases.
  */
 function ingredientNamePhrases(name: string): string[][] {
-  const withoutParens = name.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim()
-  if (!withoutParens) return []
-
-  const pieces = new Set<string>([withoutParens])
-  const beforeComma = withoutParens.split(',')[0]?.trim()
-  if (beforeComma) pieces.add(beforeComma)
-  for (const piece of [...pieces]) {
-    const beforePreposition = piece
-      .split(/\s+(?:zum|zur|für|fuer|mit|ohne|aus|in|am|auf)\s+/i)[0]
-      ?.trim()
-    if (beforePreposition) pieces.add(beforePreposition)
-  }
-
-  const variants = new Map<string, string[]>()
-  for (const piece of pieces) {
-    const words = nameWords(piece)
-    if (words.length === 0) continue
-    if (words.length === 1 && words[0]!.length < 2) continue
-    for (const variant of lastWordVariants(words)) {
-      const key = variant.join(' ')
-      if (!variants.has(key)) variants.set(key, variant)
-    }
-  }
-  return [...variants.values()].sort((a, b) => b.join(' ').length - a.join(' ').length)
+  const words = ingredientHeadWords(name)
+  if (words.length === 0) return []
+  if (words.length === 1 && words[0]!.length < 2) return []
+  return lastWordVariants(words)
 }
 
 function nameMatchRanges(searchText: string, words: string[]): AnchorRange[] {
@@ -1032,6 +1073,9 @@ const SHORT_HEAD_WORDS = new Set([
   'rum',
   'obst',
   'pilz',
+  'käse',
+  'mehl',
+  'soße',
 ])
 
 const MENTION_MEAT_CUES = [
@@ -1118,38 +1162,38 @@ function containsCue(value: string, cues: readonly string[]): boolean {
  * the whole recipe. This is what makes "Brühe" point at "Hühnerbrühe".
  */
 function shortenedNamePhrases(name: string): string[][] {
+  const headWords = ingredientHeadWords(name)
+  if (headWords.length === 0) return []
+
   const variants = new Map<string, string[]>()
   const addWord = (word: string) => {
     if (word.length < 2) return
-    for (const variantWords of lastWordVariants([word])) {
-      const variant = variantWords[0]
-      if (variant) variants.set(variant, [variant])
+    for (const variant of shortenedWordVariants(word)) {
+      variants.set(variant, [variant])
     }
   }
 
-  for (const phrase of ingredientNamePhrases(name)) {
-    const last = phrase[phrase.length - 1]
-    if (!last) continue
+  const last = headWords[headWords.length - 1]
+  if (!last) return []
 
-    if (phrase.length > 1 && (last.length >= 3 || SHORT_HEAD_WORDS.has(last))) {
-      addWord(last)
-    }
+  if (headWords.length > 1 && (last.length >= 3 || SHORT_HEAD_WORDS.has(last))) {
+    addWord(last)
+  }
 
-    if (last.length >= 9) {
-      for (let start = 1; start < last.length - 3; start += 1) {
-        const suffix = last.slice(start)
-        if (suffix.length >= 5) addWord(suffix)
-      }
-    }
-
-    if (last.length >= 6) {
-      for (const head of SHORT_HEAD_WORDS) {
-        if (last.length > head.length && last.endsWith(head)) addWord(head)
-      }
+  if (last.length >= 9) {
+    for (let start = 1; start < last.length - 3; start += 1) {
+      const suffix = last.slice(start)
+      if (suffix.length >= 5) addWord(suffix)
     }
   }
 
-  const normalizedName = nameWords(name).join(' ')
+  if (last.length >= 6) {
+    for (const head of SHORT_HEAD_WORDS) {
+      if (last.length > head.length && last.endsWith(head)) addWord(head)
+    }
+  }
+
+  const normalizedName = headWords.join(' ')
   const looksLikeEgg = /(?:ei|eier|eiern)$/.test(normalizedName)
   if (!looksLikeEgg && !containsCue(normalizedName, MENTION_NON_FOOD_HINTS)) {
     if (containsCue(normalizedName, MENTION_FISH_CUES)) {
@@ -1252,20 +1296,25 @@ function clauseAroundMention(searchText: string, start: number, end: number): st
 }
 
 /**
- * A mention already has an amount when a number or a qualitative amount hint
- * is nearby in the same clause. This deliberately over-approximates:
- * suppressing a total badge is safe.
+ * Explicit and qualitative amount contexts are deliberately over-approximated.
+ * Suppressing a total amount is safe; inventing a step amount is not.
  */
-function hasAmountContextNearMention(
+function hasExplicitAmountNearMention(
   searchText: string,
   start: number,
   end: number,
 ): boolean {
   const beforeMention = searchText.slice(Math.max(0, start - 24), start)
   if (INDEFINITE_QUANTITY_BEFORE_RE.test(beforeMention)) return true
+  return hasQuantityInClause(clauseAroundMention(searchText, start, end))
+}
 
-  const clause = clauseAroundMention(searchText, start, end)
-  return hasQuantityInClause(clause) || QUALITATIVE_CONTEXT_RE.test(clause)
+function hasQualitativeContextNearMention(
+  searchText: string,
+  start: number,
+  end: number,
+): boolean {
+  return QUALITATIVE_CONTEXT_RE.test(clauseAroundMention(searchText, start, end))
 }
 
 function detectMentions(
@@ -1322,6 +1371,109 @@ function detectMentions(
   return selected.sort((a, b) => a.start - b.start)
 }
 
+/** Leading Markdown heading or formatted block that already provides emphasis. */
+function leadingFormattedRange(text: string): AnchorRange | null {
+  const atx = /^\s*(?:>\s*)*#{1,6}\s+/.exec(text)
+  if (atx) {
+    const start = atx.index + atx[0].length
+    const lineEnd = text.indexOf('\n', start)
+    return { start, end: lineEnd === -1 ? text.length : lineEnd }
+  }
+
+  const html = /^\s*(?:>\s*)*<(strong|b)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/i.exec(text)
+  if (html && html[2] !== undefined) {
+    const content = html[2]
+    const start = html.index + html[0].indexOf(content)
+    return { start, end: start + content.length }
+  }
+
+  const markerMatch = /^\s*(?:>\s*)*(\*\*\*|___|\*\*|__)/.exec(text)
+  const marker = markerMatch?.[1]
+  if (!markerMatch || !marker) return null
+  const start = markerMatch.index + markerMatch[0].length
+  const close = text.indexOf(marker, start)
+  return close === -1 ? null : { start, end: close }
+}
+
+/**
+ * Highlight at most one non-heading occurrence per ingredient and step.
+ * All factual mentions remain in the result for usage and amount decisions.
+ */
+function markMentionHighlights(
+  mentions: readonly IngredientMention[],
+  heading: AnchorRange | null,
+): IngredientMention[] {
+  const highlighted = new Set<string>()
+  return mentions.map((mention) => {
+    const inHeading =
+      heading !== null && mention.start >= heading.start && mention.end <= heading.end
+    if (inHeading || highlighted.has(mention.ingredient.id)) {
+      return { ...mention, highlight: false }
+    }
+    highlighted.add(mention.ingredient.id)
+    return { ...mention, highlight: true }
+  })
+}
+
+/** Unique, safely identified ingredients for the compact step list. */
+function buildStepIngredients(
+  references: readonly RenderedReference[],
+  mentions: readonly IngredientMention[],
+): StepIngredientInfo[] {
+  const manualById = new Map<string, RenderedReference[]>()
+  for (const reference of references) {
+    if (!reference.ingredient) continue
+    const list = manualById.get(reference.ingredient.id) ?? []
+    list.push(reference)
+    manualById.set(reference.ingredient.id, list)
+  }
+
+  const mentionsById = new Map<string, IngredientMention[]>()
+  for (const mention of mentions) {
+    const list = mentionsById.get(mention.ingredient.id) ?? []
+    list.push(mention)
+    mentionsById.set(mention.ingredient.id, list)
+  }
+
+  const result: StepIngredientInfo[] = []
+  const seen = new Set<string>()
+  const add = (ingredient: Ingredient) => {
+    if (seen.has(ingredient.id)) return
+    seen.add(ingredient.id)
+
+    const manualRefs = manualById.get(ingredient.id) ?? []
+    const ingredientMentions = mentionsById.get(ingredient.id) ?? []
+    const issue =
+      manualRefs
+        .map((reference) => reference.issue)
+        .find((value): value is ReferenceIssue => value !== null) ?? null
+    const hasManualAmount = manualRefs.some(
+      (reference) => reference.issue !== 'anchor-not-found',
+    )
+    const hasAmountInText =
+      hasManualAmount || ingredientMentions.some((mention) => mention.hasAmount)
+    const amountText =
+      manualRefs.length === 0
+        ? ingredientMentions.find((mention) => mention.amountText)?.amountText ?? null
+        : null
+
+    result.push({
+      ingredient,
+      displayName: ingredientDisplayName(ingredient.name),
+      hasAmountInText,
+      amountText,
+      issue,
+    })
+  }
+
+  for (const mention of mentions) add(mention.ingredient)
+  for (const refs of manualById.values()) {
+    const ingredient = refs[0]?.ingredient
+    if (ingredient) add(ingredient)
+  }
+  return result
+}
+
 function scaledTotalAmountText(
   ingredient: Ingredient,
   factor: number | null,
@@ -1339,36 +1491,16 @@ function scaledTotalAmountText(
   return [scaled, unit].filter(Boolean).join(' ')
 }
 
-function escapeBadgeText(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/#/g, '&#35;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-    .replace(/\\/g, '&#92;')
-    .replace(/`/g, '&#96;')
-    .replace(/\*/g, '&#42;')
-    .replace(/_/g, '&#95;')
-    .replace(/\[/g, '&#91;')
-    .replace(/\]/g, '&#93;')
-    .replace(/\|/g, '&#124;')
-    .replace(/~/g, '&#126;')
-}
-
 function annotateInstructionText(
   text: string,
   mentions: readonly IngredientMention[],
 ): string {
   let annotated = text
-  for (const mention of [...mentions].sort((a, b) => b.start - a.start)) {
+  for (const mention of [...mentions]
+    .filter((entry) => entry.highlight)
+    .sort((a, b) => b.start - a.start)) {
     const label = text.slice(mention.start, mention.end)
-    const amount = mention.amountText
-    const badge = amount
-      ? `<span class="cook-ingredient-badge" title="Rezeptgesamtmenge" aria-label="Rezeptgesamtmenge: ${escapeBadgeText(amount)}">${escapeBadgeText(amount)} gesamt</span>`
-      : ''
-    const wrapped = `<span class="cook-ingredient-mention">${label}${badge}</span>`
+    const wrapped = `<span class="cook-ingredient-mention">${label}</span>`
     annotated =
       annotated.slice(0, mention.start) + wrapped + annotated.slice(mention.end)
   }
@@ -1534,21 +1666,39 @@ export function renderRecipeInstructions(
       ...entry,
       annotatedText: entry.text,
       mentions: [],
+      stepIngredients: [],
     }))
   }
 
   const withMentions = base.map((entry) => {
     const searchText = searchableInstructionText(entry.text)
-    const mentions: IngredientMention[] = detectMentions(searchText, mentionPhrases).map(
-      (candidate) => ({
-        ingredient: candidate.ingredient,
-        start: candidate.start,
-        end: candidate.end,
-        hasAmount: hasAmountContextNearMention(searchText, candidate.start, candidate.end),
-        amountText: null,
-      }),
-    )
-    return { ...entry, mentions }
+    const rawMentions: IngredientMention[] = detectMentions(
+      searchText,
+      mentionPhrases,
+    ).map((candidate) => ({
+      ingredient: candidate.ingredient,
+      start: candidate.start,
+      end: candidate.end,
+      hasAmount: hasExplicitAmountNearMention(
+        searchText,
+        candidate.start,
+        candidate.end,
+      ),
+      hasUnsafeContext: hasQualitativeContextNearMention(
+        searchText,
+        candidate.start,
+        candidate.end,
+      ),
+      amountText: null,
+      highlight: false,
+    }))
+    return {
+      ...entry,
+      mentions: markMentionHighlights(
+        rawMentions,
+        leadingFormattedRange(entry.text),
+      ),
+    }
   })
 
   const mentionCounts = new Map<string, number>()
@@ -1556,6 +1706,7 @@ export function renderRecipeInstructions(
     ...manuallyReferencedIngredientIds,
     ...automaticallyScaledIngredientIds,
   ])
+  const ingredientsWithUnsafeContext = new Set<string>()
   for (const entry of withMentions) {
     for (const mention of entry.mentions) {
       mentionCounts.set(
@@ -1563,6 +1714,7 @@ export function renderRecipeInstructions(
         (mentionCounts.get(mention.ingredient.id) ?? 0) + 1,
       )
       if (mention.hasAmount) ingredientsWithAmount.add(mention.ingredient.id)
+      if (mention.hasUnsafeContext) ingredientsWithUnsafeContext.add(mention.ingredient.id)
     }
   }
 
@@ -1570,7 +1722,8 @@ export function renderRecipeInstructions(
     const mentions = entry.mentions.map<IngredientMention>((mention) => {
       const canShowTotal =
         mentionCounts.get(mention.ingredient.id) === 1 &&
-        !ingredientsWithAmount.has(mention.ingredient.id)
+        !ingredientsWithAmount.has(mention.ingredient.id) &&
+        !ingredientsWithUnsafeContext.has(mention.ingredient.id)
       return {
         ...mention,
         amountText: canShowTotal ? scaledTotalAmountText(mention.ingredient, factor) : null,
@@ -1582,6 +1735,7 @@ export function renderRecipeInstructions(
       annotatedText: annotateInstructionText(entry.text, mentions),
       references: entry.references,
       mentions,
+      stepIngredients: buildStepIngredients(entry.references, mentions),
     }
   })
 }

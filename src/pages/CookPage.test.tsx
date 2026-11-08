@@ -36,7 +36,6 @@ vi.mock('dexie-react-hooks', () => ({
 vi.mock('../components/Markdown', () => ({
   Markdown: ({ text }: { text: string }) => {
     const plain = text
-      .replace(/<span class="cook-ingredient-badge"[^>]*>.*?<\/span>/g, '')
       .replace(/<span class="cook-ingredient-mention">/g, '')
       .replace(/<\/span>/g, '')
     return (
@@ -242,6 +241,8 @@ function stepMarkup(value: Recipe = recipe, currentIndex = 0) {
   const rendered = renderRecipeInstructions(steps, value.ingredients, {
     originalServings,
     targetServings: 6,
+    autoScale: true,
+    linkIngredients: true,
   })
   return renderToStaticMarkup(
     <CookStepView
@@ -285,8 +286,9 @@ describe('cook mode entry and display', () => {
     const html = renderToStaticMarkup(<CookPage recipeId="r1" cookSessionId="cook-1" />)
     expect(html).toContain('Schritt 1 von 2')
     expect(html).toContain('Die 3 Zwiebeln fein würfeln.')
-    expect(html).toContain('In diesem Schritt')
-    expect(html).toContain('3 Zwiebeln')
+    expect(html).toContain('cook-step-ingredient-chip')
+    expect(html).toContain('cook-step-ingredient-name">Zwiebeln')
+    expect(html).not.toContain('cook-step-ingredient-amount')
     expect(html).toContain('6 Portionen')
   })
 
@@ -415,8 +417,10 @@ describe('cook mode views', () => {
     expect(html).toContain('Die 3 Zwiebeln fein würfeln.')
     expect(html).not.toContain('Die 2 Zwiebeln fein würfeln.')
     expect(html).toContain('Zutaten anzeigen')
-    // Auto-detected amounts are not added to the explicit "In diesem Schritt"
-    // relation list, which stays reserved for manual references.
+    // The amount is already in the sentence, so the compact step list only
+    // names the ingredient and never repeats the value.
+    expect(html).toContain('cook-step-ingredient-name">Zwiebeln')
+    expect(html).not.toContain('cook-step-ingredient-amount')
     expect(html).not.toContain('In diesem Schritt')
   })
 
@@ -500,15 +504,81 @@ describe('cook mode views', () => {
       <CookPage recipeId="r-mentions" cookSessionId={null} />,
     )
     expect(stepHtml).toContain('cook-ingredient-mention')
-    expect(stepHtml).toContain('cook-ingredient-badge')
+    expect(stepHtml).toContain('cook-step-ingredient-amount')
     expect(stepHtml).toContain('Paprika')
     expect(stepHtml).toContain('2 gesamt')
 
     const overviewHtml = overviewMarkup(withMentions, 4, 0)
     expect(overviewHtml).toContain('cook-ingredient-mention')
-    expect(overviewHtml).toContain('cook-ingredient-badge')
+    expect(overviewHtml).toContain('cook-step-ingredient-amount')
     expect(overviewHtml).toContain('Paprika')
     expect(overviewHtml).toContain('500 ml gesamt')
+
+    expect(overviewMarkup(withMentions, 8, 0)).toContain('1000 ml gesamt')
+  })
+
+  it('does not repeat a total for repeated or heading mentions in the step list', () => {
+    const repeated: Recipe = {
+      ...mentionRecipe(),
+      id: 'r-repeat',
+      ingredients: [
+        ingredient({
+          id: 'zwiebeln',
+          position: 0,
+          raw: '2 Zwiebeln',
+          name: 'Zwiebeln',
+          quantity: 2,
+          quantityText: '2',
+        }),
+      ],
+      instructions: [
+        {
+          id: 'repeat-step',
+          position: 0,
+          raw: '**Zwiebeln vorbereiten** Die Zwiebeln würfeln.',
+          text: '**Zwiebeln vorbereiten** Die Zwiebeln würfeln.',
+          references: [],
+        },
+      ],
+    }
+
+    const html = stepMarkup(repeated)
+    expect(html).toContain('cook-step-ingredient-name">Zwiebeln')
+    expect(html).not.toContain('cook-step-ingredient-amount')
+    expect(html.match(/cook-ingredient-mention/g)).toHaveLength(1)
+    expect(html).toContain('**Zwiebeln vorbereiten**')
+  })
+
+  it('escapes ingredient units in the compact step list', () => {
+    const unsafeUnit: Recipe = {
+      ...mentionRecipe(),
+      id: 'r-unsafe-unit',
+      ingredients: [
+        ingredient({
+          id: 'oel',
+          position: 0,
+          raw: '2 EL Öl',
+          name: 'Öl',
+          quantity: 2,
+          quantityText: '2',
+          unit: '*<script>*',
+        }),
+      ],
+      instructions: [
+        {
+          id: 'oil-step',
+          position: 0,
+          raw: 'Das Öl hinzufügen.',
+          text: 'Das Öl hinzufügen.',
+          references: [],
+        },
+      ],
+    }
+
+    const html = stepMarkup(unsafeUnit)
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('&lt;script&gt;')
+    expect(html).toContain('3 *&lt;script&gt;* gesamt')
   })
 
   it('does not mutate the recipe while rendering both views', () => {
