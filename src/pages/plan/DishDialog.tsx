@@ -39,6 +39,7 @@ import {
 } from '../../domain/daySelection'
 import { DaySelectionEditor } from './DaySelectionEditor'
 import { draftSignature, useDiscardGuard } from './discardGuard'
+import { dishBackStep } from './planningBack'
 import { DiscardPrompt, PlanningPanel } from './PlanningPanel'
 import { RecipeCover, RecipePicker } from './RecipePicker'
 
@@ -53,6 +54,8 @@ export interface DishDialogProps {
   weekStartDay: number
   /** Keyboard-accessible move alternative for an existing dish. */
   onMoveRequest?: () => void
+  /** Return from the create flow to the shared entry chooser. */
+  onBackToChooser?: () => void
   onDone: () => void
   onClose: () => void
 }
@@ -66,6 +69,7 @@ export function DishDialog({
   recipes,
   weekStartDay,
   onMoveRequest,
+  onBackToChooser,
   onDone,
   onClose,
 }: DishDialogProps) {
@@ -109,6 +113,7 @@ export function DishDialog({
   const removesWholePlan = initialEntries.length > 1 || Boolean(session)
   const showingPicker = mode === 'create' && (view === 'picker' || !recipe)
   const duration = recipe ? effectiveDuration(recipe) : ''
+  const backStep = dishBackStep(mode, showingPicker, Boolean(onBackToChooser))
 
   const discard = useDiscardGuard(
     draftSignature({
@@ -139,6 +144,18 @@ export function DishDialog({
     if (busy) return
     if (discard.cancelIfPrompted()) return
     discard.request(onClose)
+  }
+
+  function handleBack() {
+    if (!backStep || busy) return
+    if (discard.cancelIfPrompted()) return
+    if (backStep.target === 'picker') {
+      // The draft stays in this dialog; only the visible step changes.
+      setView('picker')
+      setError(null)
+      return
+    }
+    if (onBackToChooser) discard.request(onBackToChooser)
   }
 
   function handleMoveRequest() {
@@ -309,15 +326,8 @@ export function DishDialog({
             : 'Gericht bearbeiten'
       }
       subtitle={formatDayLabel(initialDate)}
-      backLabel="Zurück zur Planung"
-      onBack={
-        showingPicker && recipe
-          ? () => {
-              setView('plan')
-              setError(null)
-            }
-          : undefined
-      }
+      backLabel={backStep?.label}
+      onBack={backStep ? handleBack : undefined}
       onRequestClose={handleRequestClose}
       closeDisabled={busy}
       footer={showingPicker ? undefined : footer}

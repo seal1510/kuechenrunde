@@ -96,6 +96,11 @@ export function PlanPage() {
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [addMenuDate, setAddMenuDate] = useState<string | null>(null)
   const [noteDate, setNoteDate] = useState<string | null>(null)
+  /**
+   * Date of the shared chooser the current create dialog was opened from.
+   * The dialog's back action returns here without saving anything.
+   */
+  const [backToAddDate, setBackToAddDate] = useState<string | null>(null)
   const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null)
   const [moving, setMoving] = useState(false)
   const [undoOffer, setUndoOffer] = useState<MoveUndoOffer | null>(null)
@@ -255,6 +260,33 @@ export function PlanPage() {
   function handleDone() {
     setDialog(null)
     setError(null)
+    setBackToAddDate(null)
+  }
+
+  /** Close a create/edit dialog without saving and forget its return step. */
+  function closeDialog() {
+    setDialog(null)
+    setError(null)
+    setBackToAddDate(null)
+  }
+
+  function closeNote() {
+    setNoteDate(null)
+    setBackToAddDate(null)
+  }
+
+  /**
+   * Header back action: reopen the shared chooser on the same day. This only
+   * changes local view state; nothing is persisted and no cook session is
+   * created or changed.
+   */
+  function returnToAddMenu() {
+    const date = backToAddDate
+    setDialog(null)
+    setNoteDate(null)
+    setError(null)
+    setBackToAddDate(null)
+    if (date) setAddMenuDate(date)
   }
 
   function openCreate(date: string) {
@@ -270,6 +302,7 @@ export function PlanPage() {
   function openEdit(entry: MealPlanEntry) {
     setDialog({ kind: 'edit', entryId: entry.id })
     setError(null)
+    setBackToAddDate(null)
   }
 
   function openMove(entry: MealPlanEntry) {
@@ -286,6 +319,7 @@ export function PlanPage() {
 
   function openAdd(date: string) {
     setAddMenuDate(date)
+    setBackToAddDate(null)
     setError(null)
   }
 
@@ -577,7 +611,10 @@ export function PlanPage() {
       return
     }
     if (item.kind === 'entry') openEdit(item.entry)
-    else setNoteDate(item.note.date)
+    else {
+      setBackToAddDate(null)
+      setNoteDate(item.note.date)
+    }
   }
 
   function showUndoOffer(offer: MoveUndoOffer) {
@@ -891,8 +928,9 @@ export function PlanPage() {
           initialDate={dialog.date}
           initialEntries={[]}
           weekStartDay={calendarSettings.weekStartDay}
+          onBackToChooser={backToAddDate ? returnToAddMenu : undefined}
           onDone={handleDone}
-          onClose={() => setDialog(null)}
+          onClose={closeDialog}
         />
       ) : dialog && (dialog.kind === 'create' || dialogEntry) ? (
         dialog.kind === 'edit' && dialogEntry?.freeDishId ? (
@@ -907,13 +945,13 @@ export function PlanPage() {
             onMoveRequest={
               dialogEntry
                 ? () => {
-                    setDialog(null)
+                    closeDialog()
                     openMove(dialogEntry)
                   }
                 : undefined
             }
             onDone={handleDone}
-            onClose={() => setDialog(null)}
+            onClose={closeDialog}
           />
         ) : (
           <DishDialog
@@ -931,16 +969,21 @@ export function PlanPage() {
             session={dialogSession}
             recipes={recipes ?? []}
             weekStartDay={calendarSettings.weekStartDay}
+            onBackToChooser={
+              dialog.kind === 'create' && backToAddDate
+                ? returnToAddMenu
+                : undefined
+            }
             onMoveRequest={
               dialog.kind === 'edit' && dialogEntry
                 ? () => {
-                    setDialog(null)
+                    closeDialog()
                     openMove(dialogEntry)
                   }
                 : undefined
             }
             onDone={handleDone}
-            onClose={() => setDialog(null)}
+            onClose={closeDialog}
           />
         )
       ) : null}
@@ -952,16 +995,19 @@ export function PlanPage() {
           onChooseRecipe={() => {
             const date = addMenuDate
             setAddMenuDate(null)
+            setBackToAddDate(date)
             openCreate(date)
           }}
           onChooseFreeDish={() => {
             const date = addMenuDate
             setAddMenuDate(null)
+            setBackToAddDate(date)
             openCreateFree(date)
           }}
           onChooseNote={() => {
             const date = addMenuDate
             setAddMenuDate(null)
+            setBackToAddDate(date)
             setNoteDate(date)
           }}
           onClose={() => setAddMenuDate(null)}
@@ -973,15 +1019,16 @@ export function PlanPage() {
           key={noteDate}
           date={noteDate}
           initialText={noteByDate.get(noteDate)?.text ?? ''}
+          onBackToChooser={backToAddDate ? returnToAddMenu : undefined}
           onMoveRequest={
             noteByDate.get(noteDate)
               ? (note) => {
-                  setNoteDate(null)
+                  closeNote()
                   openMoveNote(note)
                 }
               : undefined
           }
-          onClose={() => setNoteDate(null)}
+          onClose={closeNote}
         />
       ) : null}
 

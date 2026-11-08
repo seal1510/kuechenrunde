@@ -34,6 +34,7 @@ import { removeMealEntry } from '../../mealplan/service'
 import type { CookSession, FreeDish, Ingredient, MealPlanEntry } from '../../types'
 import { DaySelectionEditor } from './DaySelectionEditor'
 import { draftSignature, useDiscardGuard } from './discardGuard'
+import { freeDishBackStep } from './planningBack'
 import { DiscardPrompt, PlanningPanel } from './PlanningPanel'
 
 function ingredientRows(ingredients: readonly Ingredient[]): DraftIngredient[] {
@@ -64,6 +65,8 @@ export interface FreeDishDialogProps {
   freeDish?: FreeDish
   weekStartDay: number
   onMoveRequest?: () => void
+  /** Return from the create flow to the shared entry chooser. */
+  onBackToChooser?: () => void
   onDone: () => void
   onClose: () => void
 }
@@ -76,6 +79,7 @@ export function FreeDishDialog({
   freeDish,
   weekStartDay,
   onMoveRequest,
+  onBackToChooser,
   onDone,
   onClose,
 }: FreeDishDialogProps) {
@@ -121,6 +125,7 @@ export function FreeDishDialog({
     reference !== null &&
     reference > 0
   const removesWholePlan = initialEntries.length > 1 || Boolean(session)
+  const backStep = freeDishBackStep(mode, Boolean(onBackToChooser))
 
   const discard = useDiscardGuard(
     draftSignature({
@@ -146,6 +151,12 @@ export function FreeDishDialog({
     if (busy) return
     if (discard.cancelIfPrompted()) return
     discard.request(onClose)
+  }
+
+  function handleBack() {
+    if (!backStep || !onBackToChooser || busy) return
+    if (discard.cancelIfPrompted()) return
+    discard.request(onBackToChooser)
   }
 
   function handleMoveRequest() {
@@ -289,6 +300,8 @@ export function FreeDishDialog({
     <PlanningPanel
       title={mode === 'create' ? 'Freies Gericht einplanen' : 'Gericht bearbeiten'}
       subtitle={formatDayLabel(initialDate)}
+      backLabel={backStep?.label}
+      onBack={backStep ? handleBack : undefined}
       onRequestClose={handleRequestClose}
       closeDisabled={busy}
       footer={footer}

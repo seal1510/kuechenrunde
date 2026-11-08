@@ -13,12 +13,15 @@ import { formatDayLabel } from '../../domain/dates'
 import { deleteDayNote, saveDayNote } from '../../mealplan/dayNoteService'
 import type { DayNote } from '../../types'
 import { draftSignature, useDiscardGuard } from './discardGuard'
+import { chooserBackStep } from './planningBack'
 import { DiscardPrompt, PlanningPanel } from './PlanningPanel'
 
 export interface DayNoteDialogProps {
   date: string
   initialText: string
   onMoveRequest?: (note: DayNote) => void
+  /** Present when the comment was opened from the shared entry chooser. */
+  onBackToChooser?: () => void
   onClose: () => void
 }
 
@@ -26,6 +29,7 @@ export function DayNoteDialog({
   date,
   initialText,
   onMoveRequest,
+  onBackToChooser,
   onClose,
 }: DayNoteDialogProps) {
   const [text, setText] = useState(initialText)
@@ -33,11 +37,18 @@ export function DayNoteDialog({
   const [error, setError] = useState<string | null>(null)
   const hasSavedNote = initialText.trim().length > 0
   const discard = useDiscardGuard(draftSignature({ text }))
+  const backStep = chooserBackStep(Boolean(onBackToChooser))
 
   function handleRequestClose() {
     if (busy) return
     if (discard.cancelIfPrompted()) return
     discard.request(onClose)
+  }
+
+  function handleBack() {
+    if (!backStep || !onBackToChooser || busy) return
+    if (discard.cancelIfPrompted()) return
+    discard.request(onBackToChooser)
   }
 
   async function handleSave() {
@@ -148,6 +159,8 @@ export function DayNoteDialog({
     <PlanningPanel
       title="Kommentar"
       subtitle={formatDayLabel(date)}
+      backLabel={backStep?.label}
+      onBack={backStep ? handleBack : undefined}
       onRequestClose={handleRequestClose}
       closeDisabled={busy}
       footer={footer}

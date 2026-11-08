@@ -339,3 +339,73 @@ describe('modern recipe selection and portion summary', () => {
     expect(html).toContain('Einplanen')
   })
 })
+
+describe('back navigation inside the planning dialog', () => {
+  it('returns from the recipe picker to the shared chooser without closing', () => {
+    const html = renderToStaticMarkup(
+      <DishDialog
+        mode="create"
+        initialDate="2026-05-29"
+        initialEntries={[]}
+        recipes={[recipe()]}
+        weekStartDay={3}
+        onBackToChooser={() => undefined}
+        onDone={() => undefined}
+        onClose={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('Rezept auswählen')
+    expect(html).toContain('aria-label="Zurück zu Hinzufügen"')
+    // Close remains a separate action in the header.
+    expect(html).toContain('aria-label="Schließen"')
+  })
+
+  it('returns from the planning form to the recipe picker', () => {
+    const html = renderToStaticMarkup(
+      <DishDialog
+        mode="create"
+        initialDate="2026-05-29"
+        initialRecipeId="r1"
+        initialEntries={[]}
+        recipes={[recipe()]}
+        weekStartDay={3}
+        onBackToChooser={() => undefined}
+        onDone={() => undefined}
+        onClose={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('Gericht einplanen')
+    expect(html).toContain('aria-label="Zurück zur Rezeptauswahl"')
+    expect(html).toContain('aria-label="Schließen"')
+    expect(html).toContain('Fr, 29.05.')
+    expect(html).toContain('2 Portionen')
+  })
+
+  it('does not add an artificial earlier step when editing an existing plan', () => {
+    const html = renderToStaticMarkup(
+      <DishDialog
+        mode="edit"
+        initialDate="2026-05-29"
+        initialRecipeId="r1"
+        initialEntries={[
+          entry('friday', '2026-05-29', 2),
+          entry('tuesday', '2026-06-02', 3),
+        ]}
+        recipes={[recipe()]}
+        weekStartDay={3}
+        onBackToChooser={() => undefined}
+        onDone={() => undefined}
+        onClose={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('Gericht bearbeiten')
+    expect(html).not.toContain('aria-label="Zurück')
+    expect(html).toContain('aria-label="Schließen"')
+    expect(html).toContain('Fr, 29.05.')
+    expect(html).toContain('Di, 02.06.')
+    expect(html).toContain('5 Portionen')
+  })
+})

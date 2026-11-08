@@ -173,3 +173,43 @@ describe('free dish planning dialog', () => {
     expect(html).not.toContain('calendar-drag-handle')
   })
 })
+
+describe('free dish back navigation', () => {
+  it('returns from the create form to the shared chooser', () => {
+    const html = renderToStaticMarkup(
+      <FreeDishDialog
+        mode="create"
+        initialDate="2026-05-29"
+        initialEntries={[]}
+        weekStartDay={3}
+        onBackToChooser={() => undefined}
+        onDone={() => undefined}
+        onClose={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('Freies Gericht einplanen')
+    expect(html).toContain('aria-label="Zurück zu Hinzufügen"')
+    expect(html).toContain('aria-label="Schließen"')
+  })
+
+  it('keeps the direct calendar entry when editing an existing free dish', () => {
+    const html = renderToStaticMarkup(
+      <FreeDishDialog
+        mode="edit"
+        initialDate="2026-05-28"
+        initialEntries={[entry('meal-1', '2026-05-28', 2)]}
+        session={session({ servings: 2 })}
+        freeDish={freeDish({ referenceServings: 2 })}
+        weekStartDay={3}
+        onBackToChooser={() => undefined}
+        onDone={() => undefined}
+        onClose={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('Gericht bearbeiten')
+    expect(html).not.toContain('aria-label="Zurück')
+    expect(html).toContain('aria-label="Schließen"')
+  })
+})

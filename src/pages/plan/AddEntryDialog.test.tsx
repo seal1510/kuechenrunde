@@ -24,5 +24,6 @@ describe('shared add entry dialog', () => {
     expect(html).toContain('aria-modal="true"')
     expect(html).toContain('plan-panel')
     expect(html).toContain('Aus der Rezeptbibliothek planen')
+    expect(html).not.toContain('aria-label="Zurück')
   })
 })
