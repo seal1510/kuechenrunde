@@ -20,6 +20,7 @@ import {
   type ShoppingQuantityCorrectionStatus,
 } from '../domain/shopping'
 import {
+  isDateInShoppingPeriod,
   resolveShoppingDistribution,
   shoppingPeriod,
   standardShoppingListId,
@@ -33,6 +34,18 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 function cleanText(value: string | null | undefined): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim()
+}
+
+function requirePeriod(anchor: string): ReturnType<typeof shoppingPeriod> {
+  const clean = cleanText(anchor)
+  if (!DATE_RE.test(clean)) {
+    throw new ShoppingListError('invalid-period', 'Der Einkaufszeitraum ist kein gültiges Datum.')
+  }
+  try {
+    return shoppingPeriod(clean)
+  } catch {
+    throw new ShoppingListError('invalid-period', 'Der Einkaufszeitraum ist kein gültiges Datum.')
+  }
 }
 
 export interface ShoppingPeriodDemandItem {
@@ -73,7 +86,7 @@ export function manualItemKey(item: Pick<ShoppingManualItem, 'name'>): string {
 export async function loadShoppingPeriodDemand(
   anchor: string,
 ): Promise<ShoppingPeriodDemand> {
-  const period = shoppingPeriod(anchor)
+  const period = requirePeriod(anchor)
   const [recipes, freeDishes, cookSessions, rules, quantityCorrections] = await Promise.all([
     db.recipes.toArray(),
     db.freeDishes.toArray(),
@@ -157,14 +170,6 @@ export async function loadShoppingDistribution(
   }
 }
 
-async function ensureStandardListRow(periodStart: string): Promise<string> {
-  const id = standardShoppingListId(periodStart)
-  const existing = await db.shoppingLists.get(id)
-  if (existing) return existing.id
-  await db.shoppingLists.put(standardShoppingListRecord(periodStart, Date.now()))
-  return id
-}
-
 export interface LegacyPurchaseTarget {
   listId: string
   manualItemId?: string
@@ -220,13 +225,36 @@ export async function resolvePurchaseTargetForLegacyWrite(input: {
         { itemKey: key, listIds: Array.from(listIds).sort() },
       )
     }
-    const listId = Array.from(listIds)[0] ?? distribution.standardListId
-    if (listId.startsWith('standard:')) await ensureStandardListRow(period.start)
+    const listId = Array.from(listIds)[0]
+    if (!listId) {
+      throw new ShoppingListError(
+        'purchase-conflict',
+        'Der Artikel hat in diesem Einkaufszeitraum keine eindeutige Zettelzuordnung.',
+        { itemKey: key, periodStart: period.start },
+      )
+    }
     return { listId }
   }
 
+  // The old page has no list concept. A manual article is only a valid target
+  // when exactly one same-key article exists in this shopping period. There is
+  // no blind fallback to the standard list for an unknown product.
+  const lists = await db.shoppingLists.toArray()
+  const listById = new Map(lists.map((list) => [list.id, list]))
   const manualItems = await db.shoppingManualItems.toArray()
-  const matches = manualItems.filter((item) => manualItemKey(item) === key)
+  const matches = manualItems.filter((item) => {
+    if (manualItemKey(item) !== key) return false
+    const itemDate = item.shoppingDate || item.weekStart || ''
+    if (!DATE_RE.test(itemDate)) return false
+    return isDateInShoppingPeriod(itemDate, period.start)
+  })
+  if (matches.length === 0) {
+    throw new ShoppingListError(
+      'purchase-conflict',
+      'Der Artikel gehört nicht zum aktuellen Einkaufszeitraum und kann nicht zugeordnet werden.',
+      { itemKey: key, periodStart: period.start },
+    )
+  }
   if (matches.length > 1) {
     throw new ShoppingListError(
       'purchase-conflict',
@@ -234,40 +262,36 @@ export async function resolvePurchaseTargetForLegacyWrite(input: {
       { itemKey: key, manualItemIds: matches.map((item) => item.id) },
     )
   }
-  if (matches.length === 1) {
-    const item = matches[0]
-    if (!item) throw new ShoppingListError('purchase-conflict', 'Der Artikel fehlt.')
-    if (item.legacyWeekAmbiguous) {
+  const item = matches[0]
+  if (!item) throw new ShoppingListError('purchase-conflict', 'Der Artikel fehlt.')
+  if (item.legacyWeekAmbiguous) {
+    throw new ShoppingListError(
+      'purchase-conflict',
+      'Der manuelle Artikel hat eine unklare historische Wochenzuordnung.',
+      { itemKey: key, manualItemId: item.id },
+    )
+  }
+  if (item.listId) {
+    const list = listById.get(item.listId)
+    if (!list) {
       throw new ShoppingListError(
         'purchase-conflict',
-        'Der manuelle Artikel hat eine unklare historische Wochenzuordnung.',
-        { itemKey: key, manualItemId: item.id },
+        'Der manuelle Artikel gehört zu einer fehlenden Einkaufsliste.',
+        { itemKey: key, manualItemId: item.id, listId: item.listId },
       )
     }
-    if (item.listId) {
-      const list = distribution.lists.find((entry) => entry.id === item.listId)
-      if (!list) {
-        throw new ShoppingListError(
-          'purchase-conflict',
-          'Der manuelle Artikel gehört zu einer fehlenden Einkaufsliste.',
-          { itemKey: key, manualItemId: item.id, listId: item.listId },
-        )
-      }
-      if (list.kind === 'standard' && list.periodStart !== period.start) {
-        throw new ShoppingListError(
-          'purchase-conflict',
-          'Der manuelle Artikel gehört zu einem anderen Einkaufszeitraum.',
-          { itemKey: key, manualItemId: item.id, listId: list.id },
-        )
-      }
-      return { listId: list.id, manualItemId: item.id }
+    if (list.kind === 'standard' && list.periodStart !== period.start) {
+      throw new ShoppingListError(
+        'purchase-conflict',
+        'Der manuelle Artikel gehört zu einem anderen Einkaufszeitraum.',
+        { itemKey: key, manualItemId: item.id, listId: list.id },
+      )
     }
-    return {
-      listId: await ensureStandardListRow(period.start),
-      manualItemId: item.id,
-    }
+    return { listId: list.id, manualItemId: item.id }
   }
-
-  return { listId: await ensureStandardListRow(period.start) }
+  return {
+    listId: standardShoppingListId(period.start),
+    manualItemId: item.id,
+  }
 }
 

@@ -91,7 +91,7 @@ describe('shopping data in backups', () => {
     await saveCategoryOrder(['canned', 'produce'])
 
     const { bytes, manifest } = await exportBackup()
-    expect(manifest.version).toBe(10)
+    expect(manifest.version).toBe(11)
     expect(manifest.counts.shoppingPurchases).toBe(1)
     expect(manifest.counts.shoppingChecks).toBe(0)
     expect(manifest.counts.shoppingQuantityCorrections).toBe(1)

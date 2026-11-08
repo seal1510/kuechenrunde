@@ -377,4 +377,23 @@ describe('shopping page', () => {
     expect(html).not.toContain('Menge offen')
     expect(html).not.toContain('ohne Mengenangabe')
   })
+
+  it('shows a legacy week conflict instead of treating the row as certainly done', () => {
+    live.reset(
+      baseValues({
+        manualItems: [
+          manual({
+            id: 'legacy-conflict',
+            shoppingDate: '2026-05-07',
+            weekStart: '2026-05-02',
+            legacyWeekAmbiguous: true,
+          }),
+        ],
+      }),
+    )
+    const html = renderToStaticMarkup(<ShoppingPage />)
+    expect(html).toContain('Historische Wochenzuordnung unklar')
+    expect(html).toContain('1 Eintrag wird nicht als gekauft gewertet')
+    expect(html).toContain('Milch')
+  })
 })

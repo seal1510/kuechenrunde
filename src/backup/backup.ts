@@ -13,6 +13,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { db } from '../db'
 import { sessionMatchesEntry } from '../domain/dishSource'
 import { normalizeInstructionList } from '../recipe/references'
+import { normalizeLegacyShoppingRows } from '../shopping/legacyNormalization'
 import {
   SHOPPING_CATEGORIES,
   shoppingIdentityMappings,
@@ -52,12 +53,14 @@ export const BACKUP_FORMAT = 'opencook-web-backup'
  * dates shopping rows independently from the week start, v7 drops the
  * discontinued pantry data, v8 adds week-scoped quantity corrections, v9 adds
  * structured instruction steps with explicit ingredient references, v10 adds
- * independent shopping lists and partial demand allocations. Older v1–v9
- * backups remain importable; their pantry section is ignored, v5 checks are
- * converted exactly once, and old rows are assigned the deterministic
- * Thursday–Wednesday standard list without changing their dates.
+ * independent shopping lists and partial demand allocations, v11 persists and
+ * normalises the legacy-week review flag. Older v1–v10 backups remain
+ * importable; their pantry section is ignored, v5 checks are converted exactly
+ * once, old rows are attached to the deterministic Thursday–Wednesday standard
+ * list without changing their dates, and rows whose historical week cannot be
+ * reconstructed are marked for review rather than treated as certain.
  */
-export const BACKUP_VERSION = 10
+export const BACKUP_VERSION = 11
 export const MAX_BACKUP_BYTES = 200 * 1024 * 1024
 export const MAX_BACKUP_ENTRIES = 5_000
 export const MAX_BACKUP_ENTRY_BYTES = 20 * 1024 * 1024
@@ -665,36 +668,39 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     rawListId: string | undefined,
     date: string,
     label: string,
-  ): string => {
+  ): { listId: string; repaired: boolean } => {
     let period: ReturnType<typeof shoppingPeriod>
     try {
       period = shoppingPeriod(date)
     } catch {
-      return rawListId ?? ''
+      return { listId: rawListId ?? '', repaired: false }
     }
     const mapped = rawListId ? (listIdRemap.get(rawListId) ?? rawListId) : ''
-    if (!mapped) return ensureStandardList(period.start).id
+    if (!mapped) return { listId: ensureStandardList(period.start).id, repaired: false }
     const list = listById.get(mapped)
     if (!list) {
       warnings.push(
         `${label} verweist auf eine fehlende Einkaufsliste und wurde dem Donnerstags-Einkauf zugeordnet.`,
       )
-      return ensureStandardList(period.start).id
+      return { listId: ensureStandardList(period.start).id, repaired: true }
     }
     if (list.kind === 'standard' && list.periodStart !== period.start) {
       warnings.push(
         `${label} verweist auf einen Standardzettel eines anderen Zeitraums und wurde dem passenden Donnerstags-Einkauf zugeordnet.`,
       )
-      return ensureStandardList(period.start).id
+      return { listId: ensureStandardList(period.start).id, repaired: true }
     }
-    return list.id
+    return { listId: list.id, repaired: false }
   }
 
+  const forceAmbiguousManualItemIds = new Set<string>()
+  const forceAmbiguousPurchaseIds = new Set<string>()
   for (const item of shoppingManualItems) {
     const date = item.shoppingDate || item.weekStart || ''
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
     const repaired = repairListId(item.listId, date, `Manueller Einkaufsartikel ${item.id}`)
-    if (repaired) item.listId = repaired
+    if (repaired.listId) item.listId = repaired.listId
+    if (repaired.repaired) forceAmbiguousManualItemIds.add(item.id)
   }
   for (const purchase of shoppingPurchases) {
     const repaired = repairListId(
@@ -702,7 +708,8 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
       purchase.shoppingDate,
       `Einkauf ${purchase.id}`,
     )
-    if (repaired) purchase.listId = repaired
+    if (repaired.listId) purchase.listId = repaired.listId
+    if (repaired.repaired) forceAmbiguousPurchaseIds.add(purchase.id)
   }
 
   const shoppingDemandAllocations: ShoppingDemandAllocation[] = []
@@ -901,6 +908,18 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     ).length,
   }
 
+  // The same normalisation as the Dexie v17 migration. Older backups without
+  // the flag are treated as legacy rows; a current backup keeps its persisted
+  // decisions and only has impossible free-list conflicts cleared.
+  const normalizedShopping = normalizeLegacyShoppingRows({
+    manualItems: shoppingManualItems,
+    purchases: shoppingPurchases,
+    lists: shoppingLists,
+    legacySource: manifest.version < 11,
+    forceAmbiguousManualItemIds,
+    forceAmbiguousPurchaseIds,
+  })
+
   return {
     manifest,
     recipes,
@@ -911,9 +930,9 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     cookSessions,
     dayNotes,
     freeDishes,
-    shoppingManualItems,
+    shoppingManualItems: normalizedShopping.manualItems,
     shoppingChecks,
-    shoppingPurchases,
+    shoppingPurchases: normalizedShopping.purchases,
     shoppingItemRules,
     shoppingQuantityCorrections,
     shoppingLists,

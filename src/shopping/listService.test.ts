@@ -6,6 +6,7 @@ import {
   standardShoppingListId,
 } from '../domain/shoppingLists'
 import type { CookSession, Ingredient, Recipe } from '../types'
+import { resolvePurchaseTargetForLegacyWrite } from './demand'
 import {
   addShoppingPurchase,
   mergeShoppingProducts,
@@ -1513,6 +1514,272 @@ describe('14A.1 integrity repairs', () => {
     expect(amountOn(distribution, key, market.id)).toBe(5)
     expect(amountOn(distribution, key, standardIdFor())).toBe(3)
     expect(distribution.conflicts.some((conflict) => conflict.code === 'unknown-list')).toBe(true)
+  })
+
+  it('adopts a v15-migrated legacy purchase that already has a listId', async () => {
+    await ensureStandardShoppingList(PERIOD)
+    const item = await createManualListItem({
+      listId: standardIdFor(),
+      name: 'Kaffee',
+      quantityText: '1',
+      unit: 'Packung',
+      shoppingDate: PERIOD,
+    })
+    await db.shoppingPurchases.put({
+      id: 'v15-purchase',
+      shoppingDate: PERIOD,
+      itemKey: shoppingItemKey('Kaffee'),
+      listId: standardIdFor(),
+      legacyWeekAmbiguous: true,
+      amounts: [{ dimension: 'unit:packung', lower: 1, upper: 1 }],
+      snapshot: [],
+      qualitative: false,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const result = await setManualItemPurchased(item.id, true)
+    expect(result.purchases).toHaveLength(1)
+    expect(result.purchases[0]).toMatchObject({
+      id: 'v15-purchase',
+      manualItemId: item.id,
+      listId: standardIdFor(),
+    })
+    expect(result.purchases[0]?.legacyWeekAmbiguous).toBeUndefined()
+    expect(await db.shoppingPurchases.count()).toBe(1)
+  })
+
+  it('deletes a manual article with a v15 listId legacy purchase without orphaning it', async () => {
+    await ensureStandardShoppingList(PERIOD)
+    const item = await createManualListItem({
+      listId: standardIdFor(),
+      name: 'Kaffee',
+      quantityText: '1',
+      unit: 'Packung',
+      shoppingDate: PERIOD,
+    })
+    await db.shoppingPurchases.put({
+      id: 'v15-purchase-delete',
+      shoppingDate: PERIOD,
+      itemKey: shoppingItemKey('Kaffee'),
+      listId: standardIdFor(),
+      amounts: [{ dimension: 'unit:packung', lower: 1, upper: 1 }],
+      snapshot: [],
+      qualitative: false,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await removeManualListItem(item.id)
+    expect(await db.shoppingManualItems.get(item.id)).toBeUndefined()
+    expect(await db.shoppingPurchases.get('v15-purchase-delete')).toBeUndefined()
+  })
+
+  it('resolves same-name manual articles by their own shopping period', async () => {
+    const firstList = await ensureStandardShoppingList(PERIOD)
+    const secondList = await ensureStandardShoppingList('2026-11-12')
+    const first = await createManualListItem({
+      listId: firstList.id,
+      name: 'Milch',
+      quantityText: '1',
+      unit: 'l',
+      shoppingDate: PERIOD,
+    })
+    await createManualListItem({
+      listId: secondList.id,
+      name: 'Milch',
+      quantityText: '2',
+      unit: 'l',
+      shoppingDate: '2026-11-12',
+    })
+    const purchase = await addShoppingPurchase({
+      shoppingDate: PERIOD,
+      itemKey: shoppingItemKey('Milch'),
+      amounts: [{ dimension: 'unit:l', lower: 1, upper: 1 }],
+      snapshot: [],
+    })
+    expect(purchase.listId).toBe(firstList.id)
+    expect(purchase.manualItemId).toBe(first.id)
+  })
+
+  it('rejects an unknown automatic purchase instead of using the standard list', async () => {
+    await expect(
+      addShoppingPurchase({
+        shoppingDate: PERIOD,
+        itemKey: 'unbekannter-artikel',
+        amounts: [{ dimension: 'count', lower: 1, upper: 1 }],
+        snapshot: [],
+      }),
+    ).rejects.toMatchObject({ code: 'purchase-conflict' })
+    expect(await db.shoppingPurchases.count()).toBe(0)
+    expect(await db.shoppingLists.count()).toBe(0)
+  })
+
+  it('does not materialise the standard list while resolving a purchase target', async () => {
+    await seed()
+    const target = await resolvePurchaseTargetForLegacyWrite({
+      shoppingDate: PERIOD,
+      itemKey: tomatoKey(),
+    })
+    expect(target.listId).toBe(standardIdFor())
+    expect(await db.shoppingLists.count()).toBe(0)
+    await addShoppingPurchase({
+      shoppingDate: PERIOD,
+      itemKey: tomatoKey(),
+      amounts: [{ dimension: 'count', lower: 8, upper: 8 }],
+      snapshot: [],
+    })
+    expect(await db.shoppingLists.count()).toBe(1)
+  })
+
+  it('keeps confirmed totals inside one Thursday period', async () => {
+    const first = await addShoppingPurchase({
+      shoppingDate: PERIOD,
+      itemKey: tomatoKey(),
+      listId: standardIdFor(),
+      amounts: [{ dimension: 'count', lower: 2, upper: 2 }],
+      snapshot: [],
+    })
+    const samePeriod = await addShoppingPurchase({
+      shoppingDate: '2026-11-06',
+      itemKey: tomatoKey(),
+      listId: standardIdFor(),
+      amounts: [{ dimension: 'count', lower: 3, upper: 3 }],
+      snapshot: [],
+    })
+    const nextPeriod = await addShoppingPurchase({
+      shoppingDate: '2026-11-12',
+      itemKey: tomatoKey(),
+      listId: standardIdFor('2026-11-12'),
+      amounts: [{ dimension: 'count', lower: 4, upper: 4 }],
+      snapshot: [],
+    })
+    expect(first.confirmedTotal).toEqual([{ dimension: 'count', lower: 2, upper: 2 }])
+    expect(samePeriod.confirmedTotal).toEqual([{ dimension: 'count', lower: 5, upper: 5 }])
+    expect(nextPeriod.confirmedTotal).toEqual([{ dimension: 'count', lower: 4, upper: 4 }])
+  })
+
+  it('returns a typed invalid-period error for an invalid demand anchor', async () => {
+    await expect(getShoppingPeriodDemand('kein-datum')).rejects.toMatchObject({
+      code: 'invalid-period',
+    })
+  })
+
+  it('rejects a purchase for an item that belongs to another shopping period', async () => {
+    await seed(recipe(), session({ date: '2026-11-02' }))
+    await expect(
+      addShoppingPurchase({
+        shoppingDate: PERIOD,
+        itemKey: tomatoKey(),
+        amounts: [{ dimension: 'count', lower: 8, upper: 8 }],
+        snapshot: [],
+      }),
+    ).rejects.toMatchObject({ code: 'purchase-conflict' })
+    expect(await db.shoppingPurchases.count()).toBe(0)
+    expect(await db.shoppingLists.count()).toBe(0)
+  })
+
+  it('keeps an explicitly linked free-list purchase visible despite an old flag', async () => {
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const item = await createManualListItem({
+      listId: market.id,
+      name: 'Kaffee',
+      quantityText: '1',
+      unit: 'Packung',
+      shoppingDate: PERIOD,
+    })
+    await db.shoppingPurchases.put({
+      id: 'free-linked',
+      shoppingDate: PERIOD,
+      itemKey: shoppingItemKey('Kaffee'),
+      listId: market.id,
+      manualItemId: item.id,
+      legacyWeekAmbiguous: true,
+      amounts: [{ dimension: 'unit:packung', lower: 1, upper: 1 }],
+      snapshot: [],
+      qualitative: false,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const open = await getOpenDemandByList(PERIOD)
+    expect(open.manualItems.find((entry) => entry.manualItem.id === item.id)?.done).toBe(true)
+    expect(open.positions.some((position) => position.listId === market.id)).toBe(false)
+  })
+
+  it('rolls back a merge when both products have complete allocations', async () => {
+    const source = tomatoKey()
+    const target = 'tomaten'
+    await db.shoppingDemandAllocations.bulkPut([
+      {
+        id: `${PERIOD_START}|${source}|*|market`,
+        periodStart: PERIOD_START,
+        itemKey: source,
+        dimension: '*',
+        listId: 'market',
+        mode: 'full',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: `${PERIOD_START}|${target}|*|evening`,
+        periodStart: PERIOD_START,
+        itemKey: target,
+        dimension: '*',
+        listId: 'evening',
+        mode: 'full',
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ])
+    await db.shoppingPurchases.put({
+      id: 'merge-purchase',
+      shoppingDate: PERIOD,
+      itemKey: source,
+      amounts: [{ dimension: 'count', lower: 2, upper: 2 }],
+      snapshot: [],
+      qualitative: false,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const before = await db.shoppingDemandAllocations.toArray()
+    await expect(mergeShoppingProducts(source, target)).rejects.toMatchObject({
+      code: 'allocation-merge-conflict',
+    })
+    expect(await db.shoppingDemandAllocations.toArray()).toEqual(before)
+    expect(await db.shoppingItemRules.get(source)).toBeUndefined()
+    expect((await db.shoppingPurchases.get('merge-purchase'))?.itemKey).toBe(source)
+  })
+
+  it('rolls back a merge of a complete and a partial allocation', async () => {
+    const source = tomatoKey()
+    const target = 'tomaten'
+    await db.shoppingDemandAllocations.bulkPut([
+      {
+        id: `${PERIOD_START}|${source}|*|market`,
+        periodStart: PERIOD_START,
+        itemKey: source,
+        dimension: '*',
+        listId: 'market',
+        mode: 'full',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: `${PERIOD_START}|${target}|count|evening`,
+        periodStart: PERIOD_START,
+        itemKey: target,
+        dimension: 'count',
+        listId: 'evening',
+        mode: 'partial',
+        quantityMilli: 3000,
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ])
+    const before = await db.shoppingDemandAllocations.toArray()
+    await expect(mergeShoppingProducts(source, target)).rejects.toMatchObject({
+      code: 'allocation-merge-conflict',
+    })
+    expect(await db.shoppingDemandAllocations.toArray()).toEqual(before)
+    expect(await db.shoppingItemRules.get(source)).toBeUndefined()
   })
 })
 })

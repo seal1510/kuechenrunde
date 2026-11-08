@@ -5561,6 +5561,19 @@ body.calendar-dragging * {
   font-size: 0.82rem;
 }
 
+.shopping-conflict-note {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: var(--surface);
+  line-height: 1.4;
+}
+
+.shopping-conflict-note strong {
+  font-weight: 650;
+}
+
 .shopping-warnings ul {
   margin: 0;
   padding-left: 1.15rem;

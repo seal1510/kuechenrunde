@@ -22,13 +22,10 @@ import {
   type ShoppingAmountPosition,
   type ShoppingCategoryId,
 } from '../domain/shopping'
-import { loadShoppingPeriodDemand, manualItemKey, resolvePurchaseTargetForLegacyWrite } from './demand'
+import { manualItemKey, resolvePurchaseTargetForLegacyWrite } from './demand'
 import { ShoppingListError } from './errors'
-import {
-  isDateInShoppingPeriod,
-  shoppingAllocationId,
-  shoppingPeriod,
-} from '../domain/shoppingLists'
+import { loadManualPurchaseContext } from './manualPurchases'
+import { shoppingAllocationId, shoppingPeriod, standardShoppingListRecord } from '../domain/shoppingLists'
 import { randomId } from '../lib/id'
 import type {
   SettingRecord,
@@ -178,50 +175,28 @@ export async function updateManualItem(
 export async function removeManualItem(id: string): Promise<void> {
   const item = await db.shoppingManualItems.get(id)
   if (!item) return
-  const date = item.shoppingDate || item.weekStart || ''
-  if (!DATE_RE.test(date)) {
-    throw new ShoppingListError('invalid-period', 'Der Einkaufstag des Artikels ist ungültig.')
-  }
-  const period = shoppingPeriod(date)
-  const key = manualItemKey(item)
-  const [demand, rules, allManualItems, allPurchases] = await Promise.all([
-    loadShoppingPeriodDemand(period.start),
-    db.shoppingItemRules.toArray(),
-    db.shoppingManualItems.toArray(),
-    db.shoppingPurchases.toArray(),
-  ])
-  const sameKey = allManualItems.filter((other) => manualItemKey(other) === key)
-  const hasAutomaticDemand = demand.items.some((entry) => entry.key === key)
-  const legacyPurchases = allPurchases.filter(
-    (purchase) =>
-      !purchase.manualItemId &&
-      resolveCanonicalKey(purchase.itemKey, rules) === key,
-  )
-  const deletableLegacy = legacyPurchases.filter(
-    (purchase) =>
-      !purchase.listId &&
-      DATE_RE.test(purchase.shoppingDate) &&
-      isDateInShoppingPeriod(purchase.shoppingDate, period.start),
-  )
-  const ambiguous =
-    hasAutomaticDemand ||
-    sameKey.length !== 1 ||
-    deletableLegacy.length !== legacyPurchases.length
-  if (ambiguous && legacyPurchases.length > 0) {
+  const context = await loadManualPurchaseContext(item)
+  if (context.ambiguous) {
     throw new ShoppingListError(
       'purchase-conflict',
-      'Vorhandene Käufe ohne Artikelzuordnung sind nicht eindeutig diesem manuellen Artikel zuzuordnen.',
+      'Vorhandene Käufe sind nicht eindeutig diesem manuellen Artikel zuzuordnen.',
       {
         manualItemId: item.id,
-        itemKey: key,
-        purchaseIds: legacyPurchases.map((purchase) => purchase.id),
+        itemKey: manualItemKey(item),
+        purchaseIds: context.candidatePurchases.map((purchase) => purchase.id),
       },
     )
   }
   await db.transaction('rw', [db.shoppingManualItems, db.shoppingPurchases], async () => {
     const linked = await db.shoppingPurchases.where('manualItemId').equals(id).toArray()
     for (const purchase of linked) await db.shoppingPurchases.delete(purchase.id)
-    for (const purchase of deletableLegacy) await db.shoppingPurchases.delete(purchase.id)
+    if (context.adoptablePurchase) {
+      const candidate = await db.shoppingPurchases.get(context.adoptablePurchase.id)
+      // Never delete a row that was linked to another article in the meantime.
+      if (candidate && !candidate.manualItemId) {
+        await db.shoppingPurchases.delete(candidate.id)
+      }
+    }
     await db.shoppingManualItems.delete(id)
   })
 }
@@ -347,6 +322,78 @@ async function transactionMergeRules(
 }
 
 /**
+ * Product merges must not silently decide between competing list decisions.
+ * Two full assignments, or a full assignment and any subset/full decision for
+ * the same dimension, are not mergeable without user confirmation.
+ */
+async function assertMergeAllocationsCompatible(
+  sourceKey: string,
+  targetKey: string,
+): Promise<void> {
+  const [sourceAllocations, targetAllocations] = await Promise.all([
+    db.shoppingDemandAllocations.where('itemKey').equals(sourceKey).toArray(),
+    db.shoppingDemandAllocations.where('itemKey').equals(targetKey).toArray(),
+  ])
+  if (sourceAllocations.length === 0 || targetAllocations.length === 0) return
+
+  const targetByPeriod = new Map<string, typeof targetAllocations>()
+  for (const allocation of targetAllocations) {
+    const rows = targetByPeriod.get(allocation.periodStart) ?? []
+    rows.push(allocation)
+    targetByPeriod.set(allocation.periodStart, rows)
+  }
+  const sourceByPeriod = new Map<string, typeof sourceAllocations>()
+  for (const allocation of sourceAllocations) {
+    const rows = sourceByPeriod.get(allocation.periodStart) ?? []
+    rows.push(allocation)
+    sourceByPeriod.set(allocation.periodStart, rows)
+  }
+
+  const conflict = (periodStart: string, dimension: string, listId: string | null): never => {
+    throw new ShoppingListError(
+      'allocation-merge-conflict',
+      'Zwei Einkaufsverteilungen lassen sich nach der Produktzusammenführung nicht eindeutig vereinigen.',
+      { sourceKey, targetKey, periodStart, dimension, listId },
+    )
+  }
+
+  for (const [periodStart, sourceRows] of sourceByPeriod) {
+    const targetRows = targetByPeriod.get(periodStart)
+    if (!targetRows || targetRows.length === 0) continue
+
+    const sourceFull = sourceRows.find((allocation) => allocation.dimension === '*')
+    const targetFull = targetRows.find((allocation) => allocation.dimension === '*')
+    if (sourceFull) conflict(periodStart, '*', sourceFull.listId)
+    if (targetFull) conflict(periodStart, '*', targetFull.listId)
+
+    const dimensions = new Set(
+      [...sourceRows, ...targetRows]
+        .map((allocation) => allocation.dimension)
+        .filter((dimension) => dimension !== '*'),
+    )
+    for (const dimension of dimensions) {
+      const sourceDimension = sourceRows.filter(
+        (allocation) => allocation.dimension === dimension,
+      )
+      const targetDimension = targetRows.filter(
+        (allocation) => allocation.dimension === dimension,
+      )
+      if (sourceDimension.length === 0 || targetDimension.length === 0) continue
+      if (
+        sourceDimension.some((allocation) => allocation.mode === 'full') ||
+        targetDimension.some((allocation) => allocation.mode === 'full')
+      ) {
+        conflict(
+          periodStart,
+          dimension,
+          sourceDimension[0]?.listId ?? targetDimension[0]?.listId ?? null,
+        )
+      }
+    }
+  }
+}
+
+/**
  * Merge one identity into another. Purchase actions keep their individual
  * rows; only their product key changes, so amounts are neither lost nor
  * counted twice.
@@ -368,6 +415,12 @@ export async function mergeShoppingProducts(
       db.shoppingDemandAllocations,
     ],
     async () => {
+      const rules = await db.shoppingItemRules.toArray()
+      const resolvedTarget = resolveCanonicalKey(target, rules)
+      if (resolvedTarget === source) {
+        throw new ShoppingError('Diese beiden Artikel können nicht so zusammengeführt werden.')
+      }
+      await assertMergeAllocationsCompatible(source, resolvedTarget)
       const finalTarget = await transactionMergeRules(source, target)
       const now = Date.now()
 
@@ -483,19 +536,25 @@ export async function resolveAmbiguousRule(
 
 async function refreshConfirmedTotals(itemKey: string): Promise<void> {
   const purchases = await db.shoppingPurchases.where('itemKey').equals(itemKey).toArray()
-  const byDate = new Map<string, ShoppingPurchase[]>()
+  const byPeriod = new Map<string, ShoppingPurchase[]>()
   for (const purchase of purchases) {
-    const list = byDate.get(purchase.shoppingDate) ?? []
+    let periodStart: string
+    try {
+      periodStart = shoppingPeriod(purchase.shoppingDate).start
+    } catch {
+      continue
+    }
+    const list = byPeriod.get(periodStart) ?? []
     list.push(purchase)
-    byDate.set(purchase.shoppingDate, list)
+    byPeriod.set(periodStart, list)
   }
-  for (const [shoppingDate, rows] of byDate) {
+  for (const rows of byPeriod.values()) {
     rows.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
     const latest = rows[rows.length - 1]
     if (!latest) continue
     await db.shoppingPurchases.put({
       ...latest,
-      confirmedTotal: confirmedTotals(rows.slice(0, -1), shoppingDate, latest.amounts),
+      confirmedTotal: confirmedTotals(rows.slice(0, -1), latest.shoppingDate, latest.amounts),
       updatedAt: Date.now(),
     })
   }
@@ -667,8 +726,21 @@ function confirmedTotals(
       existing.upper = Math.round((existing.upper + Math.max(0, entry.upper)) * 1000) / 1000
     }
   }
+  let targetPeriod: string | null = null
+  try {
+    targetPeriod = shoppingPeriod(shoppingDate).start
+  } catch {
+    targetPeriod = null
+  }
   for (const purchase of previous) {
-    if (purchase.shoppingDate !== shoppingDate) continue
+    if (!targetPeriod) break
+    let purchasePeriod: string
+    try {
+      purchasePeriod = shoppingPeriod(purchase.shoppingDate).start
+    } catch {
+      continue
+    }
+    if (purchasePeriod !== targetPeriod) continue
     for (const entry of purchase.amounts) add(entry)
   }
   for (const entry of added) add(entry)
@@ -748,7 +820,14 @@ export async function addShoppingPurchase(input: PurchaseInput): Promise<Shoppin
     listId = target.listId
     manualItemId = target.manualItemId
   }
-  return db.transaction('rw', db.shoppingPurchases, async () => {
+  return db.transaction('rw', [db.shoppingPurchases, db.shoppingLists], async () => {
+    if (listId?.startsWith('standard:')) {
+      const existing = await db.shoppingLists.get(listId)
+      if (!existing) {
+        const periodStart = listId.slice('standard:'.length)
+        await db.shoppingLists.put(standardShoppingListRecord(periodStart, Date.now()))
+      }
+    }
     return addShoppingPurchaseRecord({
       ...input,
       shoppingDate,

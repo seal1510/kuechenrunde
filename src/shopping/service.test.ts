@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { db } from '../db'
 import type { ShoppingAmountPosition } from '../domain/shopping'
+import { standardShoppingListId } from '../domain/shoppingLists'
 import {
   addManualItem,
   addShoppingPurchase,
@@ -38,6 +39,9 @@ function position(
 ): ShoppingAmountPosition {
   return { dimension, unit: null, lower, upper, qualifier: '' }
 }
+
+const LIST_05 = standardShoppingListId('2026-11-05')
+const LIST_12 = standardShoppingListId('2026-11-12')
 
 beforeEach(async () => {
   await clearAll()
@@ -99,12 +103,14 @@ describe('individual purchase actions', () => {
     const first = await addShoppingPurchase({
       shoppingDate: '2026-11-05',
       itemKey: 'zwiebel',
+      listId: LIST_05,
       amounts: [{ dimension: 'count', lower: 2, upper: 2 }],
       snapshot: [position('count', 2)],
     })
     const second = await addShoppingPurchase({
       shoppingDate: '2026-11-05',
       itemKey: 'zwiebel',
+      listId: LIST_05,
       amounts: [{ dimension: 'count', lower: 3, upper: 3 }],
       snapshot: [position('count', 5)],
     })
@@ -122,12 +128,14 @@ describe('individual purchase actions', () => {
     const first = await addShoppingPurchase({
       shoppingDate: '2026-11-05',
       itemKey: 'zwiebel',
+      listId: LIST_05,
       amounts: [{ dimension: 'count', lower: 2, upper: 2 }],
       snapshot: [position('count', 2)],
     })
     await addShoppingPurchase({
       shoppingDate: '2026-11-05',
       itemKey: 'zwiebel',
+      listId: LIST_05,
       amounts: [{ dimension: 'count', lower: 3, upper: 3 }],
       snapshot: [position('count', 5)],
     })
@@ -141,18 +149,21 @@ describe('individual purchase actions', () => {
     await addShoppingPurchase({
       shoppingDate: '2026-11-05',
       itemKey: 'zwiebel',
+      listId: LIST_05,
       amounts: [{ dimension: 'count', lower: 2, upper: 2 }],
       snapshot: [position('count', 2)],
     })
     await addShoppingPurchase({
       shoppingDate: '2026-11-12',
       itemKey: 'zwiebel',
+      listId: LIST_12,
       amounts: [{ dimension: 'count', lower: 3, upper: 3 }],
       snapshot: [position('count', 3)],
     })
     await addShoppingPurchase({
       shoppingDate: '2026-11-05',
       itemKey: 'tomate',
+      listId: LIST_05,
       amounts: [{ dimension: 'count', lower: 1, upper: 1 }],
       snapshot: [position('count', 1)],
     })
@@ -166,6 +177,7 @@ describe('product identity merging', () => {
     await addShoppingPurchase({
       shoppingDate: '2026-11-05',
       itemKey: 'tomate mutti',
+      listId: LIST_05,
       amounts: [{ dimension: 'volume', lower: 200, upper: 200 }],
       snapshot: [position('volume', 350)],
     })
@@ -187,6 +199,7 @@ describe('product identity merging', () => {
     await addShoppingPurchase({
       shoppingDate: '2026-11-05',
       itemKey: 'tomate mutti',
+      listId: LIST_05,
       amounts: [{ dimension: 'volume', lower: 200, upper: 200 }],
       snapshot: [position('volume', 200)],
     })

@@ -8,6 +8,7 @@ import {
   standardShoppingListRecord,
 } from './domain/shoppingLists'
 import { normalizeInstructionList } from './recipe/references'
+import { normalizeLegacyShoppingRows } from './shopping/legacyNormalization'
 import type {
   CookProgress,
   CookSession,
@@ -40,7 +41,9 @@ import type {
  * own ingredient snapshot; v14 adds explicit instruction ingredient references
  * and the local cook-mode progress table; v15 adds independent shopping lists
  * and explicit partial demand allocations; v16 marks historical rows with an
- * unreconstructable calendar-week grouping for review.
+ * unreconstructable calendar-week grouping for review; v17 corrects that
+ * marking for free lists and uses the shared legacy normalisation so old rows
+ * are never treated as an invented Thursday grouping.
  * Upgrades only add tables/indexes or backfill/reinterpret new fields; existing
  * recipes, images and plans are not deleted.
  */
@@ -732,6 +735,56 @@ export class OpenCookDatabase extends Dexie {
         }
         if (manualUpdates.length > 0) await manualTable.bulkPut(manualUpdates)
         if (purchaseUpdates.length > 0) await purchaseTable.bulkPut(purchaseUpdates)
+      })
+    // v17 uses the shared legacy normalisation. It corrects v16 false
+    // positives on free lists and explicit manual purchases, but keeps every
+    // standard-list purchase without a stored historical week start as a
+    // review conflict instead of inventing a Thursday grouping.
+    this.version(17)
+      .stores({
+        recipes:
+          'id, &importId, title, updatedAt, *categories, *cuisine, *dishType, effort, *tags, favorite, wantToCook, importUrl',
+        images: 'id, recipeId, [recipeId+position]',
+        mealPlans:
+          'id, date, [date+slot], recipeId, freeDishId, pinned, cooked, cookSessionId, status',
+        mealDays: 'date',
+        settings: 'key',
+        cookSessions: 'id, recipeId, freeDishId, date, status, [recipeId+date]',
+        dayNotes: 'date, updatedAt',
+        freeDishes: 'id, updatedAt',
+        shoppingManualItems: 'id, shoppingDate, weekStart, listId',
+        shoppingChecks: 'id, weekStart, [weekStart+itemKey], itemKey',
+        shoppingPurchases:
+          'id, shoppingDate, itemKey, createdAt, [itemKey+shoppingDate], listId, manualItemId',
+        shoppingItemRules: 'key, updatedAt',
+        shoppingQuantityCorrections:
+          'id, shoppingDate, itemKey, [itemKey+shoppingDate]',
+        shoppingLists: 'id, kind, periodStart, createdAt',
+        shoppingDemandAllocations:
+          'id, periodStart, itemKey, listId, [periodStart+itemKey]',
+        pantryItems: null,
+        cookProgress: 'cookSessionId, updatedAt',
+      })
+      .upgrade(async (transaction) => {
+        const listTable = transaction.table<ShoppingList, string>('shoppingLists')
+        const manualTable = transaction.table<ShoppingManualItem, string>(
+          'shoppingManualItems',
+        )
+        const purchaseTable = transaction.table<ShoppingPurchase, string>(
+          'shoppingPurchases',
+        )
+        const normalized = normalizeLegacyShoppingRows({
+          lists: await listTable.toArray(),
+          manualItems: await manualTable.toArray(),
+          purchases: await purchaseTable.toArray(),
+          legacySource: true,
+        })
+        if (normalized.changedManualItems > 0) {
+          await manualTable.bulkPut(normalized.manualItems)
+        }
+        if (normalized.changedPurchases > 0) {
+          await purchaseTable.bulkPut(normalized.purchases)
+        }
       })
   }
 }

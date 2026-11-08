@@ -276,8 +276,12 @@ describe('shopping lists in backups', () => {
     expect(inspection.shoppingLists).toHaveLength(1)
     expect(inspection.shoppingLists[0]?.id).toBe(standardId())
     expect(inspection.shoppingManualItems[0]?.listId).toBe(standardId())
-    // 2026-11-09 is a Monday inside the same Thursday–Wednesday period.
+    // 2026-11-09 is a Monday inside the same Thursday–Wednesday period. The
+    // list is deterministic, but the original calendar week is not stored, so
+    // the purchase must stay a review conflict.
     expect(inspection.shoppingPurchases[0]?.listId).toBe(standardId())
+    expect(inspection.shoppingPurchases[0]?.legacyWeekAmbiguous).toBe(true)
+    expect(inspection.shoppingManualItems[0]?.legacyWeekAmbiguous).toBeUndefined()
     expect(inspection.shoppingPurchases[0]?.snapshot[0]?.upper).toBe(3)
 
     await restoreBackup(inspection, 'merge')
@@ -287,6 +291,53 @@ describe('shopping lists in backups', () => {
     await restoreBackup(inspection, 'merge')
     expect(await db.shoppingLists.count()).toBe(1)
     expect(await db.shoppingPurchases.count()).toBe(1)
+  })
+
+  it('normalises an old Monday-week backup in both merge and replace', async () => {
+    const bytes = minimalBackup(10, {
+      shoppingManualItems: [
+        {
+          id: 'monday-manual',
+          shoppingDate: '2026-11-06',
+          weekStart: '2026-11-02',
+          name: 'Milch',
+          quantityText: '1',
+          unit: 'l',
+          purchaseNote: '',
+          categoryId: 'dairy',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      shoppingPurchases: [
+        {
+          id: 'monday-purchase',
+          shoppingDate: '2026-11-06',
+          itemKey: shoppingItemKey('Milch'),
+          amounts: [{ dimension: 'unit:l', lower: 1, upper: 1 }],
+          snapshot: [],
+          qualitative: false,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      shoppingItemRules: [],
+      shoppingQuantityCorrections: [],
+    })
+
+    const inspection = await inspectBackup(toArrayBuffer(bytes))
+    expect(inspection.shoppingManualItems[0]?.legacyWeekAmbiguous).toBe(true)
+    expect(inspection.shoppingPurchases[0]?.legacyWeekAmbiguous).toBe(true)
+
+    await restoreBackup(inspection, 'merge')
+    expect((await db.shoppingManualItems.get('monday-manual'))?.legacyWeekAmbiguous).toBe(true)
+    expect((await db.shoppingPurchases.get('monday-purchase'))?.legacyWeekAmbiguous).toBe(true)
+
+    await restoreBackup(inspection, 'replace')
+    expect(await db.shoppingManualItems.count()).toBe(1)
+    expect(await db.shoppingPurchases.count()).toBe(1)
+    expect((await db.shoppingManualItems.get('monday-manual'))?.legacyWeekAmbiguous).toBe(true)
+    expect((await db.shoppingPurchases.get('monday-purchase'))?.legacyWeekAmbiguous).toBe(true)
   })
 
   it('drops orphaned allocation references and keeps the affected rows safe', async () => {
@@ -341,10 +392,12 @@ describe('shopping lists in backups', () => {
       true,
     )
     expect(inspection.shoppingManualItems[0]?.listId).toBe(standardId())
+    expect(inspection.shoppingManualItems[0]?.legacyWeekAmbiguous).toBe(true)
 
     await restoreBackup(inspection, 'merge')
     expect(await db.shoppingDemandAllocations.count()).toBe(0)
     expect((await db.shoppingManualItems.get('manual-orphan'))?.listId).toBe(standardId())
+    expect((await db.shoppingManualItems.get('manual-orphan'))?.legacyWeekAmbiguous).toBe(true)
   })
 
   it('clears all shopping lists and allocations in replace mode', async () => {

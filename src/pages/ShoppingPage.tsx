@@ -14,9 +14,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
 import { addDays, formatDayLabel, todayKey } from '../domain/dates'
-import { calendarSettingsFromRows } from '../settings/calendar'
 import {
-  buildShoppingList,
   categoryLabel,
   categoryOrderWithMove,
   editableShoppingAmount,
@@ -29,12 +27,12 @@ import {
   shoppingIdentityMappings,
   shoppingItemKey,
   shoppingPositionSignature,
-  shoppingWeek,
   splitIngredientName,
   type ShoppingCategoryId,
   type ShoppingListItem,
 } from '../domain/shopping'
 import { shoppingPeriod } from '../domain/shoppingLists'
+import { buildShoppingPeriodView } from '../shopping/periodView'
 import {
   addManualItem,
   addShoppingPurchase,
@@ -134,7 +132,7 @@ function CloseIcon() {
 
 export function ShoppingPage() {
   const today = useMemo(() => todayKey(), [])
-  const [anchorDate, setAnchorDate] = useState(today)
+  const [periodStart, setPeriodStart] = useState(() => shoppingPeriod(today).start)
   const [addOpen, setAddOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [editingKey, setEditingKey] = useState<string | null>(null)
@@ -156,30 +154,14 @@ export function ShoppingPage() {
   )
   const settingsRows = useLiveQuery(() => db.settings.toArray(), [])
 
-  const calendarSettings = useMemo(
-    () => calendarSettingsFromRows(settingsRows ?? []),
-    [settingsRows],
-  )
   const categoryOrder = useMemo(
     () => categoryOrderFromRows(settingsRows ?? []),
     [settingsRows],
   )
-  const week = useMemo(
-    () => shoppingWeek(anchorDate, calendarSettings.weekStartDay),
-    [anchorDate, calendarSettings.weekStartDay],
-  )
-  const shoppingPeriodForAnchor = useMemo(() => shoppingPeriod(anchorDate), [anchorDate])
-  // Writes from the legacy page must be visible both in the configured
-  // calendar week and in the fixed Thursday–Wednesday shopping period.
-  const entryDate = useMemo(() => {
-    const overlap = week.days.find((day) => shoppingPeriodForAnchor.days.includes(day))
-    return overlap ?? shoppingPeriodForAnchor.start
-  }, [week, shoppingPeriodForAnchor])
-  const list = useMemo(
+  const view = useMemo(
     () =>
-      buildShoppingList({
-        anchor: anchorDate,
-        weekStartDay: calendarSettings.weekStartDay,
+      buildShoppingPeriodView({
+        periodStart,
         recipes: recipes ?? [],
         freeDishes: freeDishes ?? [],
         cookSessions: cookSessions ?? [],
@@ -190,8 +172,7 @@ export function ShoppingPage() {
         today,
       }),
     [
-      anchorDate,
-      calendarSettings.weekStartDay,
+      periodStart,
       recipes,
       freeDishes,
       cookSessions,
@@ -202,6 +183,16 @@ export function ShoppingPage() {
       today,
     ],
   )
+  const period = view.period
+  const list = view.list
+  const conflicts = view.conflicts
+  const conflictLabels = useMemo(() => {
+    const labels = [
+      ...conflicts.manualItems.map((item) => item.name),
+      ...conflicts.purchases.map((purchase) => purchase.itemKey),
+    ]
+    return Array.from(new Set(labels))
+  }, [conflicts])
 
   const openGroups = useMemo(
     () => groupOpenItems(list.items, categoryOrder),
@@ -262,7 +253,7 @@ export function ShoppingPage() {
     try {
       setError(null)
       await addManualItem({
-        shoppingDate: entryDate,
+        shoppingDate: period.start,
         name: input.name,
         quantityText: input.quantityText,
         unit: input.unit,
@@ -306,7 +297,7 @@ export function ShoppingPage() {
         upper: position.upper,
       }))
       await addShoppingPurchase({
-        shoppingDate: entryDate,
+        shoppingDate: period.start,
         itemKey: item.key,
         amounts,
         snapshot: item.requiredPositions,
@@ -339,7 +330,7 @@ export function ShoppingPage() {
     )
     await run(async () => {
       await addShoppingPurchase({
-        shoppingDate: entryDate,
+        shoppingDate: period.start,
         itemKey: item.key,
         amounts: confirmed,
         snapshot: item.requiredPositions,
@@ -408,23 +399,23 @@ export function ShoppingPage() {
       </header>
 
       <div className="shopping-toolbar">
-        <div className="shopping-weeknav" role="group" aria-label="Einkaufswoche wechseln">
+        <div className="shopping-weeknav" role="group" aria-label="Einkaufsperiode wechseln">
           <button
             type="button"
             className="shopping-nav-button"
-            aria-label="Vorherige Einkaufswoche"
-            onClick={() => setAnchorDate(addDays(anchorDate, -7))}
+            aria-label="Vorherige Einkaufsperiode"
+            onClick={() => setPeriodStart(addDays(period.start, -7))}
           >
             ‹
           </button>
           <span className="shopping-week-label" aria-live="polite">
-            {list.week.label}
+            {period.label}
           </span>
           <button
             type="button"
             className="shopping-nav-button"
-            aria-label="Nächste Einkaufswoche"
-            onClick={() => setAnchorDate(addDays(anchorDate, 7))}
+            aria-label="Nächste Einkaufsperiode"
+            onClick={() => setPeriodStart(addDays(period.start, 7))}
           >
             ›
           </button>
@@ -433,7 +424,7 @@ export function ShoppingPage() {
           <button
             type="button"
             className="shopping-today"
-            onClick={() => setAnchorDate(today)}
+            onClick={() => setPeriodStart(shoppingPeriod(today).start)}
           >
             Heute
           </button>
@@ -452,6 +443,21 @@ export function ShoppingPage() {
         <p className="notice danger shopping-notice" role="alert">
           {error}
         </p>
+      ) : null}
+
+      {conflicts.total > 0 ? (
+        <div className="notice shopping-notice shopping-conflict-note" role="status">
+          <strong>Historische Wochenzuordnung unklar.</strong>{' '}
+          {conflicts.total === 1
+            ? '1 Eintrag wird nicht als gekauft gewertet.'
+            : `${conflicts.total} Einträge werden nicht als gekauft gewertet.`}{' '}
+          {conflictLabels.length > 0
+            ? `Betroffen: ${conflictLabels.slice(0, 4).join(', ')}${
+                conflictLabels.length > 4 ? ' …' : ''
+              }. `
+            : ''}
+          Die Auflösung folgt in 14B.
+        </div>
       ) : null}
 
       {list.warnings.length > 0 ? (
@@ -559,7 +565,7 @@ export function ShoppingPage() {
           key={editingItem.key}
           item={editingItem}
           allItems={list.items}
-          shoppingDate={anchorDate}
+          shoppingDate={period.start}
           ambiguousRules={ambiguousRulesForEditing}
           onClose={() => setEditingKey(null)}
           onRemoveManual={removeManual}
