@@ -1335,6 +1335,68 @@ h3 {
   line-height: 1;
 }
 
+/* Central unsaved-changes prompt */
+
+.unsaved-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: var(--overlay);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.unsaved-dialog {
+  width: min(430px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.unsaved-dialog h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.unsaved-dialog p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.unsaved-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-top: 0.35rem;
+}
+
+@media (max-width: 480px) {
+  .unsaved-dialog {
+    padding: 1.1rem;
+  }
+
+  .unsaved-dialog-actions {
+    flex-direction: column-reverse;
+  }
+
+  .unsaved-dialog-actions .button {
+    width: 100%;
+  }
+}
+
 /* Editor workbench */
 
 .editor-page {

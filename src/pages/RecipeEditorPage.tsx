@@ -12,7 +12,7 @@ import {
   type RecipeDraft,
 } from '../recipe/editor'
 import { editorFingerprint, hasEditorChanges } from '../recipe/editorSession'
-import { confirmDiscardChanges, useUnsavedChangesGuard } from '../recipe/unsavedChanges'
+import { useUnsavedChangesGuard } from '../recipe/unsavedChanges'
 import { saveRecipeWithImages, type EditorImage } from '../recipe/repository'
 import type { RecipeImage } from '../types'
 
@@ -69,11 +69,17 @@ export function RecipeEditorPage({ id }: { id?: string }) {
     [draft, images],
   )
 
-  useUnsavedChangesGuard(dirty, initialized && Boolean(draft))
+  const { requestLeave, allowNextNavigation } = useUnsavedChangesGuard(
+    dirty,
+    initialized && Boolean(draft),
+  )
 
   function handleCancel() {
-    if (!draft || !confirmDiscardChanges(dirty)) return
-    window.location.hash = id ? `#/recipe/${encodeURIComponent(id)}` : '#/'
+    if (!draft) return
+    const targetHash = id ? `#/recipe/${encodeURIComponent(id)}` : '#/'
+    requestLeave(() => {
+      window.location.hash = targetHash
+    }, targetHash)
   }
 
   async function handleDelete() {
@@ -81,6 +87,7 @@ export function RecipeEditorPage({ id }: { id?: string }) {
     setDeleting(true)
     try {
       await deleteRecipe(id)
+      allowNextNavigation('#/')
       baselineRef.current = null
       window.location.hash = '#/'
     } finally {
@@ -102,8 +109,10 @@ export function RecipeEditorPage({ id }: { id?: string }) {
       if (id && !existing) throw new Error('Das Rezept wurde nicht gefunden.')
       const recipe = buildRecipeFromDraft(draft, existing)
       await saveRecipeWithImages(recipe, images)
+      const targetHash = `#/recipe/${encodeURIComponent(recipe.id)}`
+      allowNextNavigation(targetHash)
       baselineRef.current = editorFingerprint(draft, images)
-      window.location.hash = `#/recipe/${encodeURIComponent(recipe.id)}`
+      window.location.hash = targetHash
     } catch (cause) {
       setError((cause as Error).message || 'Das Rezept konnte nicht gespeichert werden.')
     } finally {
