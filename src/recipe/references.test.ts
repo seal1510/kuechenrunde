@@ -46,10 +46,12 @@ function render(
   ingredients: Ingredient[],
   originalServings: number | null,
   targetServings: number,
+  autoScale = true,
 ) {
   return renderRecipeInstructions(instructions, ingredients, {
     originalServings,
     targetServings,
+    autoScale,
   })
 }
 
@@ -378,5 +380,329 @@ describe('instruction ingredient references', () => {
     expect((normalized[0] as unknown as Record<string, unknown>).custom).toBe('keep')
     expect(normalized[1]?.id).not.toBe('s1')
     expect(normalized[1]?.position).toBe(1)
+  })
+})
+
+describe('automatic ingredient amount scaling', () => {
+  it('scales unambiguous amounts, units, fractions and ranges', () => {
+    const ingredients = [
+      ingredient({ id: 'huhn', name: 'Hähnchen', quantity: 500, quantityText: '500', unit: 'g' }),
+      ingredient({ id: 'oel', name: 'Öl', quantity: 2, quantityText: '2', unit: 'EL' }),
+      ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 3, quantityText: '3' }),
+      ingredient({ id: 'salz', name: 'Salz', quantity: 0.5, quantityText: '½', unit: 'TL' }),
+      ingredient({ id: 'wasser', name: 'Wasser', quantity: 2, quantityText: '2-3', unit: 'EL' }),
+    ]
+    const text =
+      '500 g Hähnchen mit 2 EL Öl und 3 Zwiebeln anbraten. Mit ½ TL Salz und 2-3 EL Wasser ablöschen.'
+
+    const rendered = render([instruction(text)], ingredients, 2, 4)
+
+    expect(rendered[0]?.text).toBe(
+      '1000 g Hähnchen mit 4 EL Öl und 6 Zwiebeln anbraten. Mit 1 TL Salz und 4–6 EL Wasser ablöschen.',
+    )
+  })
+
+  it('scales decimal commas, mixed fractions and unit synonyms', () => {
+    const ingredients = [
+      ingredient({
+        id: 'kartoffeln',
+        name: 'Kartoffeln',
+        quantity: 1.5,
+        quantityText: '1,5',
+        unit: 'kg',
+      }),
+      ingredient({ id: 'salz', name: 'Salz', quantity: 1.5, quantityText: '1 1/2', unit: 'TL' }),
+      ingredient({ id: 'oel', name: 'Öl', quantity: 2, quantityText: '2', unit: 'EL' }),
+    ]
+    const text = '1,5 kg Kartoffeln schälen, mit 1 1/2 TL Salz und 2 Esslöffel Öl mischen.'
+
+    const rendered = render([instruction(text)], ingredients, 2, 4)
+
+    expect(rendered[0]?.text).toBe(
+      '3 kg Kartoffeln schälen, mit 3 TL Salz und 4 Esslöffel Öl mischen.',
+    )
+  })
+
+  it('compares compatible mass and volume units conservatively', () => {
+    const ingredients = [
+      ingredient({
+        id: 'kartoffeln',
+        name: 'Kartoffeln',
+        quantity: 1,
+        quantityText: '1',
+        unit: 'kg',
+      }),
+      ingredient({ id: 'milch', name: 'Milch', quantity: 500, quantityText: '500', unit: 'ml' }),
+    ]
+    const text = '500 g Kartoffeln und 0,5 l Milch abmessen.'
+
+    const rendered = render([instruction(text)], ingredients, 2, 4)
+
+    expect(rendered[0]?.text).toBe('1000 g Kartoffeln und 1 l Milch abmessen.')
+    expect(
+      render([instruction('1500 g Kartoffeln abmessen.')], ingredients, 2, 4)[0]?.text,
+    ).toBe('1500 g Kartoffeln abmessen.')
+    expect(
+      render([instruction('0,6 l Milch abmessen.')], ingredients, 2, 4)[0]?.text,
+    ).toBe('0,6 l Milch abmessen.')
+  })
+
+  it('does not treat a thousands separator as an ingredient amount', () => {
+    const mehl = ingredient({
+      id: 'mehl',
+      name: 'Mehl',
+      quantity: 1500,
+      quantityText: '1500',
+      unit: 'g',
+    })
+
+    expect(render([instruction('1 500 g Mehl abwiegen.')], [mehl], 2, 4)[0]?.text).toBe(
+      '1 500 g Mehl abwiegen.',
+    )
+    expect(render([instruction('1 kg 500 g Mehl abwiegen.')], [mehl], 2, 4)[0]?.text).toBe(
+      '1 kg 500 g Mehl abwiegen.',
+    )
+    expect(render([instruction('1.500 g Mehl abwiegen.')], [mehl], 2, 4)[0]?.text).toBe(
+      '1.500 g Mehl abwiegen.',
+    )
+  })
+
+  it('keeps temperatures, times, geometry and step labels untouched', () => {
+    const ingredients = [
+      ingredient({ id: 'huhn', name: 'Hähnchen', quantity: 500, quantityText: '500', unit: 'g' }),
+      ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' }),
+      ingredient({ id: 'ingwer', name: 'Ingwer', quantity: 10, quantityText: '10', unit: 'g' }),
+    ]
+    const text =
+      'Bei 180 °C die 500 g Hähnchen 20 Minuten garen. Danach 2 Zwiebeln 5 Minuten dünsten und 2 cm Ingwer fein hacken. Schritt 3: Zwiebeln beiseitelegen.'
+
+    const rendered = render([instruction(text)], ingredients, 2, 4)
+
+    expect(rendered[0]?.text).toBe(
+      'Bei 180 °C die 1000 g Hähnchen 20 Minuten garen. Danach 4 Zwiebeln 5 Minuten dünsten und 2 cm Ingwer fein hacken. Schritt 3: Zwiebeln beiseitelegen.',
+    )
+  })
+
+  it('rejects time, temperature and geometry even for unitless ingredients', () => {
+    const zwiebeln = ingredient({
+      id: 'zwiebeln',
+      name: 'Zwiebeln',
+      quantity: 2,
+      quantityText: '2',
+    })
+    const ingwer = ingredient({ id: 'ingwer', name: 'Ingwer', quantity: 2, quantityText: '2' })
+
+    expect(
+      render([instruction('2 Minuten Zwiebeln dünsten.')], [zwiebeln], 2, 4)[0]?.text,
+    ).toBe('2 Minuten Zwiebeln dünsten.')
+    expect(
+      render([instruction('180 °C Zwiebeln rösten.')], [zwiebeln], 2, 4)[0]?.text,
+    ).toBe('180 °C Zwiebeln rösten.')
+    expect(
+      render([instruction('2 cm Ingwer schneiden.')], [ingwer], 2, 4)[0]?.text,
+    ).toBe('2 cm Ingwer schneiden.')
+  })
+
+  it('scales partial and repeated amounts across steps', () => {
+    const ingredients = [
+      ingredient({ id: 'mehl', name: 'Mehl', quantity: 500, quantityText: '500', unit: 'g' }),
+      ingredient({ id: 'butter', name: 'Butter', quantity: 100, quantityText: '100', unit: 'g' }),
+    ]
+    const steps = [
+      instruction('200 g Mehl mit 40 g Butter mischen.'),
+      instruction('Später 60 g Butter und 300 g Mehl dazugeben.'),
+    ]
+
+    const rendered = render(steps, ingredients, 2, 4)
+
+    expect(rendered.map((step) => step.text)).toEqual([
+      '400 g Mehl mit 80 g Butter mischen.',
+      'Später 120 g Butter und 600 g Mehl dazugeben.',
+    ])
+  })
+
+  it('does not double-scale an explicit reference and still scales another ingredient', () => {
+    const ingredients = [
+      ingredient({ id: 'butter', name: 'Butter', quantity: 100, quantityText: '100', unit: 'g' }),
+      ingredient({ id: 'oel', name: 'Öl', quantity: 2, quantityText: '2', unit: 'EL' }),
+    ]
+    const steps = [
+      instruction('100 g Butter und 2 EL Öl erhitzen.', [
+        reference({
+          id: 'butter-ref',
+          ingredientId: 'butter',
+          anchor: '100',
+          anchorOffset: 0,
+          quantity: { kind: 'full' },
+        }),
+      ]),
+    ]
+
+    const rendered = render(steps, ingredients, 2, 4)
+
+    expect(rendered[0]?.text).toBe('200 g Butter und 4 EL Öl erhitzen.')
+    expect(rendered[0]?.text).not.toContain('400 g Butter')
+  })
+
+  it('matches singular/plural forms and common ingredient notes', () => {
+    const singular = [
+      ingredient({ id: 'zwiebel', name: 'Zwiebel', quantity: 2, quantityText: '2' }),
+    ]
+    expect(render([instruction('2 Zwiebeln würfeln.')], singular, 2, 4)[0]?.text).toBe(
+      '4 Zwiebeln würfeln.',
+    )
+    expect(
+      render([instruction('2 große Zwiebeln würfeln.')], singular, 2, 4)[0]?.text,
+    ).toBe('4 große Zwiebeln würfeln.')
+    expect(
+      render([instruction('2 Stk. Zwiebeln würfeln.')], singular, 2, 4)[0]?.text,
+    ).toBe('4 Stk. Zwiebeln würfeln.')
+
+    const withNote = [
+      ingredient({
+        id: 'zwiebeln',
+        name: 'Zwiebeln, fein gewürfelt',
+        quantity: 2,
+        quantityText: '2',
+      }),
+    ]
+    expect(render([instruction('2 Zwiebeln würfeln.')], withNote, 2, 4)[0]?.text).toBe(
+      '4 Zwiebeln würfeln.',
+    )
+
+    const withPurpose = [
+      ingredient({
+        id: 'oel',
+        name: 'Öl zum Braten',
+        quantity: 2,
+        quantityText: '2',
+        unit: 'EL',
+      }),
+    ]
+    expect(render([instruction('2 EL Öl erhitzen.')], withPurpose, 2, 4)[0]?.text).toBe(
+      '4 EL Öl erhitzen.',
+    )
+
+    const withParens = [
+      ingredient({
+        id: 'huhn',
+        name: 'Hähnchen (Brust)',
+        quantity: 500,
+        quantityText: '500',
+        unit: 'g',
+      }),
+    ]
+    expect(render([instruction('500 g Hähnchen anbraten.')], withParens, 2, 4)[0]?.text).toBe(
+      '1000 g Hähnchen anbraten.',
+    )
+  })
+
+  it('leaves ambiguous, contradictory or unsafe matches unchanged', () => {
+    const mehl = ingredient({
+      id: 'mehl',
+      name: 'Mehl',
+      quantity: 500,
+      quantityText: '500',
+      unit: 'g',
+    })
+    expect(render([instruction('2 EL Mehl verrühren.')], [mehl], 2, 4)[0]?.text).toBe(
+      '2 EL Mehl verrühren.',
+    )
+    expect(render([instruction('600 g Mehl verrühren.')], [mehl], 2, 4)[0]?.text).toBe(
+      '600 g Mehl verrühren.',
+    )
+
+    const oel = ingredient({ id: 'oel', name: 'Öl', quantity: 2, quantityText: '2', unit: 'EL' })
+    expect(
+      render([instruction('2 EL Olivenöl verwenden.')], [oel], 2, 4)[0]?.text,
+    ).toBe('2 EL Olivenöl verwenden.')
+
+    const unclearSalt = ingredient({
+      id: 'salz',
+      name: 'Salz',
+      quantity: null,
+      quantityText: null,
+      unit: null,
+      parseStatus: 'plain',
+    })
+    expect(
+      render([instruction('2 TL Salz hinzufügen.')], [unclearSalt], 2, 4)[0]?.text,
+    ).toBe('2 TL Salz hinzufügen.')
+
+    const saltA = ingredient({ id: 'salt-a', name: 'Salz', quantity: 1, quantityText: '1', unit: 'TL' })
+    const saltB = ingredient({ id: 'salt-b', name: 'Salz', quantity: 2, quantityText: '2', unit: 'TL' })
+    expect(render([instruction('2 TL Salz hinzufügen.')], [saltA, saltB], 2, 4)[0]?.text).toBe(
+      '2 TL Salz hinzufügen.',
+    )
+
+    const zwiebeln = ingredient({ id: 'zwiebeln', name: 'Zwiebeln', quantity: 2, quantityText: '2' })
+    expect(render([instruction('Schritt 2: Zwiebeln würfeln.')], [zwiebeln], 2, 4)[0]?.text).toBe(
+      'Schritt 2: Zwiebeln würfeln.',
+    )
+    expect(render([instruction('2. Zwiebeln würfeln.')], [zwiebeln], 2, 4)[0]?.text).toBe(
+      '2. Zwiebeln würfeln.',
+    )
+    expect(render([instruction('Nr. 2 Zwiebeln würfeln.')], [zwiebeln], 2, 4)[0]?.text).toBe(
+      'Nr. 2 Zwiebeln würfeln.',
+    )
+    expect(
+      render([instruction('2 bis 3 Zwiebeln würfeln.')], [zwiebeln], 2, 4)[0]?.text,
+    ).toBe('2 bis 3 Zwiebeln würfeln.')
+    expect(
+      render([instruction('2 EL Zwiebeln würfeln.')], [zwiebeln], 2, 4)[0]?.text,
+    ).toBe('2 EL Zwiebeln würfeln.')
+    expect(
+      render([instruction('3 Zwiebeln würfeln.')], [zwiebeln], 2, 4)[0]?.text,
+    ).toBe('3 Zwiebeln würfeln.')
+    expect(
+      render([instruction('Die Zwiebeln (2 Stück) würfeln.')], [zwiebeln], 2, 4)[0]?.text,
+    ).toBe('Die Zwiebeln (2 Stück) würfeln.')
+  })
+
+  it('keeps Markdown emphasis while replacing only the amount', () => {
+    const ingredients = [
+      ingredient({ id: 'huhn', name: 'Hähnchen', quantity: 500, quantityText: '500', unit: 'g' }),
+    ]
+    const rendered = render(
+      [instruction('**500 g Hähnchen** kräftig anbraten.')],
+      ingredients,
+      2,
+      4,
+    )
+
+    expect(rendered[0]?.text).toBe('**1000 g Hähnchen** kräftig anbraten.')
+  })
+
+  it('does not auto-scale when the caller has not opted in', () => {
+    const ingredients = [
+      ingredient({ id: 'huhn', name: 'Hähnchen', quantity: 500, quantityText: '500', unit: 'g' }),
+    ]
+    const rendered = renderRecipeInstructions(
+      [instruction('500 g Hähnchen anbraten.')],
+      ingredients,
+      {
+        originalServings: 2,
+        targetServings: 4,
+      },
+    )
+
+    expect(rendered[0]?.text).toBe('500 g Hähnchen anbraten.')
+  })
+
+  it('never mutates the stored instruction or ingredient', () => {
+    const huhn = ingredient({
+      id: 'huhn',
+      name: 'Hähnchen',
+      quantity: 500,
+      quantityText: '500',
+      unit: 'g',
+    })
+    const step = instruction('500 g Hähnchen anbraten.')
+    const before = { ...huhn }
+
+    render([step], [huhn], 2, 4)
+
+    expect(step.text).toBe('500 g Hähnchen anbraten.')
+    expect(huhn).toEqual(before)
   })
 })

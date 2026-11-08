@@ -401,6 +401,7 @@ export function CookPage({
         ? renderRecipeInstructions(steps, recipe.ingredients, {
             originalServings,
             targetServings,
+            autoScale: true,
           })
         : [],
     [recipe, steps, originalServings, targetServings],

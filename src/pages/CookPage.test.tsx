@@ -150,6 +150,7 @@ function overviewMarkup(value: Recipe = recipe, targetServings = 6, currentIndex
   const rendered = renderRecipeInstructions(steps, value.ingredients, {
     originalServings,
     targetServings,
+    autoScale: true,
   })
   const scaled = scaleRecipeIngredients(value.ingredients, originalServings, targetServings)
   const amounts = new Map(
@@ -316,7 +317,7 @@ describe('cook mode views', () => {
     expect(secondStep).toBeGreaterThan(firstStep)
   })
 
-  it('shows the complete ingredient list even when no step has a reference', () => {
+  it('scales step amounts and shows the complete ingredient list without references', () => {
     const withoutReferences: Recipe = {
       ...recipe,
       instructions: recipe.instructions.map((step) => ({ ...step, references: [] })),
@@ -326,8 +327,25 @@ describe('cook mode views', () => {
     expect(html).toContain('Zutaten für 6 Portionen')
     expect(html).toContain('600 g')
     expect(html).toContain('750 ml')
-    expect(html).toContain('400 g Hackfleisch kräftig anbraten.')
-    expect(html).not.toContain('600 g Hackfleisch kräftig anbraten.')
+    expect(html).toContain('Die 3 Zwiebeln fein würfeln.')
+    expect(html).toContain('600 g Hackfleisch kräftig anbraten.')
+    expect(html).not.toContain('400 g Hackfleisch kräftig anbraten.')
+  })
+
+  it('scales step amounts without references in the focused step view', () => {
+    const withoutReferences: Recipe = {
+      ...recipe,
+      instructions: recipe.instructions.map((step) => ({ ...step, references: [] })),
+    }
+    live.reset({ ...cookData(6), recipe: withoutReferences })
+    const html = renderToStaticMarkup(<CookPage recipeId="r1" cookSessionId="cook-1" />)
+
+    expect(html).toContain('Die 3 Zwiebeln fein würfeln.')
+    expect(html).not.toContain('Die 2 Zwiebeln fein würfeln.')
+    expect(html).toContain('Zutaten anzeigen')
+    // Auto-detected amounts are not added to the explicit "In diesem Schritt"
+    // relation list, which stays reserved for manual references.
+    expect(html).not.toContain('In diesem Schritt')
   })
 
   it('keeps step position and servings when switching views', () => {

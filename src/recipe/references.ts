@@ -3,13 +3,15 @@
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Explicit ingredient references inside instruction texts.
+ * Ingredient amounts inside instruction texts.
  *
- * The imported instruction text is the source of truth. A reference only marks
- * one amount substring (its anchor) that may be replaced for display. Amounts
- * are parsed and scaled with the existing `domain/scaling` logic. No global
- * search-and-replace is ever performed, so temperatures, times and every other
- * unlinked number stay untouched.
+ * The imported instruction text is the source of truth. An explicit reference
+ * marks one amount substring (its anchor) that may be replaced for display.
+ * Cook mode can additionally opt into a conservative automatic detection:
+ * only a quantity directly followed by a matching ingredient name and unit is
+ * touched. Amounts are parsed and scaled with the existing `domain/scaling`
+ * logic. There is no global search-and-replace, so temperatures, times, step
+ * numbers and every other unlinked number stay untouched.
  */
 
 import {
@@ -18,6 +20,7 @@ import {
   parseQuantityToken,
   scaleQuantityText,
 } from '../domain/scaling'
+import { canonicalUnitWord, isCountUnit, unitConversionFactor } from '../import/ingredients'
 import type { Ingredient, Instruction, InstructionReference } from '../types'
 
 export type ReferenceIssue =
@@ -451,16 +454,537 @@ function baseAmountFor(
   return { text: formatScaledNumber(remaining), issue: null, scaledFromRemainder: remaining }
 }
 
+interface AutoIngredientMatcher {
+  ingredientId: string
+  /** Canonical unit, or null when the ingredient is counted without a unit. */
+  unit: string | null
+  /** Upper bound of the stored amount, used only to reject contradictions. */
+  maxQuantity: number
+  /** Variants already normalised to lower-case words. */
+  variants: string[][]
+}
+
+interface AutoCandidate {
+  ingredientId: string
+  nameRange: AnchorRange
+  quantityRange: AnchorRange
+  value: string
+}
+
+/**
+ * Quantities are only considered when they sit directly before an ingredient
+ * name. This keeps temperatures, times, step numbers and geometry out of the
+ * replacement path instead of trying to blacklist every possible number.
+ */
+const AUTO_QUANTITY_RE = new RegExp(
+  `${STRICT_QUALIFIER}${STRICT_BOUND}(?:\\s*[-–—]\\s*${STRICT_BOUND})?`,
+  'giu',
+)
+
+const AUTO_PRECEDING_STOPWORDS = new Set([
+  'schritt',
+  'schritte',
+  'punkt',
+  'punkte',
+  'phase',
+  'phasen',
+  'stufe',
+  'stufen',
+  'teil',
+  'teile',
+  'variante',
+  'varianten',
+  'nr',
+  'nummer',
+  'nummern',
+  'bis',
+  'oder',
+  'von',
+  'vom',
+  'je',
+  'pro',
+  'mal',
+  'x',
+  'tag',
+  'tage',
+  'tagen',
+  'woche',
+  'wochen',
+  'monat',
+  'monate',
+  'monaten',
+  'jahr',
+  'jahre',
+  'jahren',
+])
+
+const AUTO_MODIFIER_STOPWORDS = new Set([
+  'der',
+  'die',
+  'das',
+  'den',
+  'dem',
+  'des',
+  'ein',
+  'eine',
+  'einen',
+  'einem',
+  'einer',
+  'eines',
+  'und',
+  'oder',
+  'sowie',
+  'mit',
+  'ohne',
+  'von',
+  'vom',
+  'für',
+  'fuer',
+  'auf',
+  'aus',
+  'in',
+  'im',
+  'am',
+  'an',
+  'zu',
+  'zum',
+  'zur',
+  'bei',
+  'bis',
+  'je',
+  'pro',
+  'mal',
+  'x',
+  'ca',
+  'circa',
+  'etwa',
+  'zirka',
+  'rund',
+  'ungefähr',
+  'ungefaehr',
+  'gut',
+])
+
+/** Words that unambiguously describe time, temperature or geometry. */
+const AUTO_BLOCKED_CONTEXT_WORDS = new Set([
+  'cm',
+  'mm',
+  'm',
+  'meter',
+  'zentimeter',
+  'millimeter',
+  'zoll',
+  'inch',
+  'inches',
+  'grad',
+  'celsius',
+  'fahrenheit',
+  'prozent',
+  'uhr',
+  'person',
+  'personen',
+  'minute',
+  'minuten',
+  'min',
+  'stunde',
+  'stunden',
+  'std',
+  'sekunde',
+  'sekunden',
+  'sek',
+  'tag',
+  'tage',
+  'tagen',
+  'woche',
+  'wochen',
+  'monat',
+  'monate',
+  'monaten',
+  'jahr',
+  'jahre',
+  'jahren',
+  'stufe',
+  'stufen',
+  'schritt',
+  'schritte',
+  'punkt',
+  'punkte',
+  'phase',
+  'phasen',
+])
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function normalizeMatchWord(value: string): string {
+  return value.trim().toLocaleLowerCase('de').replace(/\.+$/, '')
+}
+
+/** Same length as the source so replacement offsets stay valid. */
+function searchableInstructionText(text: string): string {
+  return text
+    .replace(/\]\([^)]*\)/g, (match) => `]${' '.repeat(Math.max(0, match.length - 1))}`)
+    .replace(/[*_`~]/g, ' ')
+}
+
+function nameWords(value: string): string[] {
+  return value
+    .toLocaleLowerCase('de')
+    .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter((word) => /[\p{L}\p{N}]/u.test(word))
+}
+
+/**
+ * Conservative German plural variants. Only the final word is varied, and
+ * unusual nouns simply keep their exact spelling instead of being guessed.
+ */
+function lastWordVariants(words: string[]): string[][] {
+  const last = words[words.length - 1]!
+  const alternatives = new Set<string>([last])
+  const add = (value: string) => {
+    if (value.length >= 2) alternatives.add(value)
+  }
+
+  if (last.length >= 4) {
+    if (last.endsWith('n')) add(last.slice(0, -1))
+    if (last.endsWith('en')) add(last.slice(0, -2))
+    if (last.endsWith('s')) add(last.slice(0, -1))
+    add(`${last}n`)
+    add(`${last}en`)
+    add(`${last}s`)
+  }
+  if (last === 'ei') add('eier')
+  if (last === 'eier') add('ei')
+
+  return [...alternatives].map((alternative) => [...words.slice(0, -1), alternative])
+}
+
+/**
+ * Ingredient names often carry a note ("Zwiebeln, fein gewürfelt",
+ * "Hähnchen (Brust)", "Öl zum Braten"). The shorter head phrase is generated
+ * only as a candidate; unit and amount context still have to match.
+ */
+function ingredientNamePhrases(name: string): string[][] {
+  const withoutParens = name.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!withoutParens) return []
+
+  const pieces = new Set<string>([withoutParens])
+  const beforeComma = withoutParens.split(',')[0]?.trim()
+  if (beforeComma) pieces.add(beforeComma)
+  for (const piece of [...pieces]) {
+    const beforePreposition = piece
+      .split(/\s+(?:zum|zur|für|fuer|mit|ohne|aus|in|am|auf)\s+/i)[0]
+      ?.trim()
+    if (beforePreposition) pieces.add(beforePreposition)
+  }
+
+  const variants = new Map<string, string[]>()
+  for (const piece of pieces) {
+    const words = nameWords(piece)
+    if (words.length === 0) continue
+    if (words.length === 1 && words[0]!.length < 2) continue
+    for (const variant of lastWordVariants(words)) {
+      const key = variant.join(' ')
+      if (!variants.has(key)) variants.set(key, variant)
+    }
+  }
+  return [...variants.values()].sort((a, b) => b.join(' ').length - a.join(' ').length)
+}
+
+function nameMatchRanges(searchText: string, words: string[]): AnchorRange[] {
+  const phrase = words.map(escapeRegExp).join('\\s+')
+  const pattern = new RegExp(
+    `(?:^|[^\\p{L}\\p{N}-])(${phrase})(?![\\p{L}\\p{N}-])`,
+    'giu',
+  )
+  const ranges: AnchorRange[] = []
+  for (const match of searchText.matchAll(pattern)) {
+    const value = match[1] ?? ''
+    if (!value) continue
+    const start = (match.index ?? 0) + match[0].length - value.length
+    ranges.push({ start, end: start + value.length })
+  }
+  return ranges
+}
+
+/**
+ * Validate the text between a quantity and the following ingredient name and
+ * return the factor needed to compare its unit with the stored unit.
+ * The first word may be a matching unit; at most two further words may be
+ * descriptive adjectives. Anything time-, temperature-, geometry- or
+ * article-like rejects the match. Null means "not safe".
+ */
+function autoQuantityConversion(
+  between: string,
+  matcher: AutoIngredientMatcher,
+): number | null {
+  if (between.includes('\n')) return null
+  if (!/\s/.test(between)) return null
+
+  const trimmed = between.trim()
+  const words = trimmed ? trimmed.split(/\s+/) : []
+  if (words.length > 3) return null
+  for (const word of words) {
+    if (!/^[\p{L}]+(?:[-'’][\p{L}]+)*\.?$/u.test(word)) return null
+  }
+  if (words.some((word) => AUTO_BLOCKED_CONTEXT_WORDS.has(normalizeMatchWord(word)))) {
+    return null
+  }
+
+  let cursor = 0
+  let textUnit: string | null = null
+  const firstUnit = words[0] ? canonicalUnitWord(words[0]) : null
+  if (firstUnit !== null) {
+    textUnit = firstUnit
+    cursor = 1
+  }
+
+  const modifiers = words.slice(cursor)
+  if (modifiers.length > 2) return null
+  if (modifiers.some((word) => AUTO_MODIFIER_STOPWORDS.has(normalizeMatchWord(word)))) {
+    return null
+  }
+  if (modifiers.some((word) => canonicalUnitWord(word) !== null)) return null
+
+  if (textUnit !== null) {
+    if (matcher.unit === null) return isCountUnit(textUnit) ? 1 : null
+    return unitConversionFactor(textUnit, matcher.unit)
+  }
+  if (matcher.unit === null) return 1
+  // "Stück" is routinely omitted: "2 Zwiebeln" for "2 Stück Zwiebeln".
+  return matcher.unit === 'stück' ? 1 : null
+}
+
+function hasBlockedPrecedingWord(searchText: string, amountStart: number): boolean {
+  const before = searchText
+    .slice(Math.max(0, amountStart - 32), amountStart)
+    .toLocaleLowerCase('de')
+    .replace(/[.,:;!?()[\]{}]/g, ' ')
+    .trim()
+  if (!before) return false
+  const words = before.split(/\s+/)
+  const last = words[words.length - 1]
+  if (!last) return false
+  // A preceding number can be a thousands separator ("1 500 g"), a multiplier
+  // ("2x 500 g") or a step number; none is a safe amount context. A preceding
+  // unit indicates a compound amount such as "1 kg 500 g" as well.
+  const numericToken = /\d/.test(last) && !/^\p{L}/u.test(last)
+  return (
+    numericToken ||
+    AUTO_PRECEDING_STOPWORDS.has(last) ||
+    canonicalUnitWord(last) !== null
+  )
+}
+
+function findAutoQuantityBefore(
+  searchText: string,
+  nameStart: number,
+  matcher: AutoIngredientMatcher,
+): { range: AnchorRange; text: string } | null {
+  const windowStart = Math.max(0, nameStart - 96)
+  const prefix = searchText.slice(windowStart, nameStart)
+  AUTO_QUANTITY_RE.lastIndex = 0
+  const matches = [...prefix.matchAll(AUTO_QUANTITY_RE)]
+
+  for (let index = matches.length - 1; index >= 0; index -= 1) {
+    const match = matches[index]!
+    const start = windowStart + (match.index ?? 0)
+    const end = start + match[0].length
+    if (nameStart <= end) continue
+
+    const beforeChar = start > 0 ? searchText.charAt(start - 1) : ''
+    if (beforeChar && /[\p{L}\p{N}.,/]/u.test(beforeChar)) continue
+    if (beforeChar === '-' || beforeChar === '+') continue
+
+    const afterText = searchText.slice(end)
+    const afterChar = afterText.charAt(0)
+    if (afterChar && /[\p{N}.,/]/u.test(afterChar)) continue
+    if (afterChar && /[\p{L}]/u.test(afterChar)) {
+      const attachedUnit = /^[\p{L}]+/u.exec(afterText)?.[0] ?? ''
+      if (canonicalUnitWord(attachedUnit) === null) continue
+    }
+
+    const conversion = autoQuantityConversion(
+      searchText.slice(end, nameStart),
+      matcher,
+    )
+    if (conversion === null) continue
+    if (hasBlockedPrecedingWord(searchText, start)) continue
+
+    const quantityText = match[0].trim()
+    if (!isStrictQuantityText(quantityText)) continue
+    // "1.500" is a common German thousands separator, not a decimal value.
+    // The shared parser accepts dots as decimals, so this ambiguity is skipped.
+    if (/\d{1,3}(?:\.\d{3})+/.test(quantityText)) continue
+    const parsed = parseQuantityToken(quantityText)
+    if (!parsed) continue
+    // A partial amount is safe, but an amount larger than the complete stored
+    // ingredient quantity is contradictory and must stay untouched. Compatible
+    // mass/volume units are converted only for this comparison.
+    if (Math.max(...parsed.values) * conversion > matcher.maxQuantity + 1e-9) {
+      continue
+    }
+    return { range: { start, end }, text: quantityText }
+  }
+
+  return null
+}
+
+function buildAutoMatchers(ingredients: readonly Ingredient[]): AutoIngredientMatcher[] {
+  // A phrase that belongs to more than one ingredient is ambiguous, even when
+  // only one of them has a usable quantity. Such phrases are never auto-scaled.
+  const phrasesById = new Map<string, string[][]>()
+  const phraseOwners = new Map<string, Set<string>>()
+  for (const ingredient of ingredients) {
+    const variants = ingredientNamePhrases(ingredient.name)
+    if (variants.length === 0) continue
+    phrasesById.set(ingredient.id, variants)
+    for (const variant of variants) {
+      const key = variant.join(' ')
+      const owners = phraseOwners.get(key) ?? new Set<string>()
+      owners.add(ingredient.id)
+      phraseOwners.set(key, owners)
+    }
+  }
+
+  const matchers: AutoIngredientMatcher[] = []
+  for (const ingredient of ingredients) {
+    const storedQuantity = ingredientQuantityText(ingredient)
+    if (!isStrictQuantityText(storedQuantity)) continue
+    const parsedStored = parseQuantityToken(storedQuantity)
+    if (!parsedStored || parsedStored.values.length === 0) continue
+
+    const rawUnit = ingredient.unit?.trim() ?? ''
+    const unit = rawUnit ? canonicalUnitWord(rawUnit) : null
+    // An unknown unit cannot be compared reliably, so leave the text alone.
+    if (rawUnit && unit === null) continue
+
+    const variants = (phrasesById.get(ingredient.id) ?? []).filter(
+      (variant) => phraseOwners.get(variant.join(' '))?.size === 1,
+    )
+    if (variants.length === 0) continue
+    matchers.push({
+      ingredientId: ingredient.id,
+      unit,
+      maxQuantity: Math.max(...parsedStored.values),
+      variants,
+    })
+  }
+  return matchers
+}
+
+function automaticReplacements(
+  searchText: string,
+  matchers: readonly AutoIngredientMatcher[],
+  factor: number,
+  blockedIngredientIds: ReadonlySet<string>,
+  blockedRanges: readonly AnchorRange[],
+): Array<AnchorRange & { value: string }> {
+  const candidates: AutoCandidate[] = []
+  for (const matcher of matchers) {
+    if (blockedIngredientIds.has(matcher.ingredientId)) continue
+    for (const variant of matcher.variants) {
+      for (const nameRange of nameMatchRanges(searchText, variant)) {
+        const quantity = findAutoQuantityBefore(searchText, nameRange.start, matcher)
+        if (!quantity) continue
+        if (overlaps(quantity.range, blockedRanges)) continue
+        const value = scaleQuantityText(quantity.text, factor)
+        if (value === null || value === quantity.text) continue
+        candidates.push({
+          ingredientId: matcher.ingredientId,
+          nameRange,
+          quantityRange: quantity.range,
+          value,
+        })
+      }
+    }
+  }
+
+  const deduped = new Map<string, AutoCandidate>()
+  for (const candidate of candidates) {
+    const key = [
+      candidate.ingredientId,
+      candidate.nameRange.start,
+      candidate.nameRange.end,
+      candidate.quantityRange.start,
+      candidate.quantityRange.end,
+    ].join(':')
+    if (!deduped.has(key)) deduped.set(key, candidate)
+  }
+
+  // If two different ingredients match exactly the same name phrase, the
+  // relation is ambiguous and both stay untouched.
+  const byNameRange = new Map<string, AutoCandidate[]>()
+  for (const candidate of deduped.values()) {
+    const key = `${candidate.nameRange.start}:${candidate.nameRange.end}`
+    const group = byNameRange.get(key)
+    if (group) group.push(candidate)
+    else byNameRange.set(key, [candidate])
+  }
+  const ambiguousNames = new Set<string>()
+  for (const [key, group] of byNameRange) {
+    if (new Set(group.map((candidate) => candidate.ingredientId)).size > 1) {
+      ambiguousNames.add(key)
+    }
+  }
+
+  const selected: AutoCandidate[] = []
+  const sorted = [...deduped.values()]
+    .filter(
+      (candidate) =>
+        !ambiguousNames.has(`${candidate.nameRange.start}:${candidate.nameRange.end}`),
+    )
+    .sort((a, b) => {
+      const nameLength = b.nameRange.end - b.nameRange.start
+      const otherNameLength = a.nameRange.end - a.nameRange.start
+      if (nameLength !== otherNameLength) return nameLength - otherNameLength
+      return (
+        b.quantityRange.end -
+        b.quantityRange.start -
+        (a.quantityRange.end - a.quantityRange.start)
+      )
+    })
+
+  for (const candidate of sorted) {
+    // A longer name ("brauner Zucker") wins over its shorter substring
+    // ("Zucker"). Candidates sharing an amount are equally ambiguous.
+    if (
+      selected.some(
+        (entry) =>
+          overlaps(candidate.nameRange, [entry.nameRange]) ||
+          overlaps(candidate.quantityRange, [entry.quantityRange]),
+      )
+    ) {
+      continue
+    }
+    selected.push(candidate)
+  }
+
+  return selected.map((candidate) => ({
+    ...candidate.quantityRange,
+    value: candidate.value,
+  }))
+}
+
 export interface RenderOptions {
   /** Recipe's original portion count; null keeps every value unchanged. */
   originalServings: number | null
   targetServings: number
+  /** Cook mode opts into conservative automatic detection of instruction amounts. */
+  autoScale?: boolean
 }
 
 /**
- * Render all instruction texts for one portion count. Only explicitly linked
- * anchors are touched. A missing ingredient, unknown amount, unsafe remainder
- * or stale anchor leaves the original text exactly as it is.
+ * Render all instruction texts for one portion count. Explicit references win
+ * and are never auto-scaled again. When `autoScale` is enabled (cook mode),
+ * every other ingredient amount that sits directly before a matching
+ * ingredient name is replaced through the same shared quantity parser. A
+ * missing ingredient, unknown amount, unsafe remainder, ambiguous name or
+ * stale anchor leaves the original text exactly as it is.
  */
 export function renderRecipeInstructions(
   instructions: readonly Instruction[],
@@ -478,11 +1002,17 @@ export function renderRecipeInstructions(
       ? options.targetServings / options.originalServings
       : null
   const usageByIngredient = new Map<string, UsageState>()
+  const autoMatchers =
+    options.autoScale && factor !== null && factor !== 1
+      ? buildAutoMatchers(ingredients)
+      : []
 
   return instructions.map((instruction, instructionIndex) => {
     const text = instruction.text
     const references = normalizeReferenceAnchors(text, instruction.references ?? [])
     const used: AnchorRange[] = []
+    const manualRanges: AnchorRange[] = []
+    const manualIngredientIds = new Set<string>()
     const replacements: Array<AnchorRange & { value: string }> = []
     const renderedReferences: RenderedReference[] = []
 
@@ -490,6 +1020,7 @@ export function renderRecipeInstructions(
       const issues: ReferenceIssue[] = []
       const ingredient = ingredientById.get(reference.ingredientId) ?? null
       if (!ingredient) issues.push('missing-ingredient')
+      manualIngredientIds.add(reference.ingredientId)
 
       const usage = usageByIngredient.get(reference.ingredientId) ?? newUsage()
       if (!usageByIngredient.has(reference.ingredientId)) {
@@ -535,6 +1066,7 @@ export function renderRecipeInstructions(
       }
 
       const anchor = resolveReferenceAnchor(text, reference, used)
+      if (anchor) manualRanges.push(anchor)
       if (!anchor) issues.push('anchor-not-found')
 
       if (scaled && anchor && !overlaps(anchor, used)) {
@@ -553,6 +1085,18 @@ export function renderRecipeInstructions(
         scaled,
         issue: firstIssue(issues),
       })
+    }
+
+    if (autoMatchers.length > 0 && factor !== null) {
+      replacements.push(
+        ...automaticReplacements(
+          searchableInstructionText(text),
+          autoMatchers,
+          factor,
+          manualIngredientIds,
+          manualRanges,
+        ),
+      )
     }
 
     let renderedText = text

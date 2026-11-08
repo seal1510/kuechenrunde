@@ -27,6 +27,192 @@ const UNIT_WORDS = new Set([
   'slice', 'slices',
 ])
 
+/**
+ * Canonical unit spelling for conservative text matching. The parser above
+ * deliberately preserves the source spelling; automatic instruction scaling
+ * only needs to know whether "EL", "Esslöffel" and "Essloeffel" describe the
+ * same unit.
+ */
+const UNIT_ALIASES: Record<string, string> = {
+  g: 'g',
+  gr: 'g',
+  gramm: 'g',
+  kg: 'kg',
+  kilo: 'kg',
+  kilos: 'kg',
+  kilogramm: 'kg',
+  mg: 'mg',
+  l: 'l',
+  liter: 'l',
+  ml: 'ml',
+  milliliter: 'ml',
+  cl: 'cl',
+  zentiliter: 'cl',
+  dl: 'dl',
+  deziliter: 'dl',
+  el: 'el',
+  esslöffel: 'el',
+  essloeffel: 'el',
+  tl: 'tl',
+  teelöffel: 'tl',
+  teeloeffel: 'tl',
+  msp: 'msp',
+  messerspitze: 'msp',
+  messerspitzen: 'msp',
+  prise: 'prise',
+  prisen: 'prise',
+  stück: 'stück',
+  stk: 'stück',
+  stueck: 'stück',
+  bund: 'bund',
+  bünde: 'bund',
+  buende: 'bund',
+  becher: 'becher',
+  dose: 'dose',
+  dosen: 'dose',
+  glas: 'glas',
+  gläser: 'glas',
+  glaeser: 'glas',
+  pck: 'packung',
+  packung: 'packung',
+  packungen: 'packung',
+  päckchen: 'päckchen',
+  paeckchen: 'päckchen',
+  beutel: 'beutel',
+  tube: 'tube',
+  tuben: 'tube',
+  flasche: 'flasche',
+  flaschen: 'flasche',
+  kugel: 'kugel',
+  kugeln: 'kugel',
+  zehe: 'zehe',
+  zehen: 'zehe',
+  scheibe: 'scheibe',
+  scheiben: 'scheibe',
+  blatt: 'blatt',
+  blätter: 'blatt',
+  blaetter: 'blatt',
+  tasse: 'tasse',
+  tassen: 'tasse',
+  tropfen: 'tropfen',
+  cm: 'cm',
+  kopf: 'kopf',
+  köpfe: 'kopf',
+  koepfe: 'kopf',
+  knolle: 'knolle',
+  knollen: 'knolle',
+  stange: 'stange',
+  stangen: 'stange',
+  zweig: 'zweig',
+  zweige: 'zweig',
+  handvoll: 'handvoll',
+  schuss: 'schuss',
+  spritzer: 'spritzer',
+  würfel: 'würfel',
+  wuerfel: 'würfel',
+  portion: 'portion',
+  portionen: 'portion',
+  ecke: 'ecke',
+  ecken: 'ecke',
+  riegel: 'riegel',
+  topf: 'topf',
+  töpfe: 'topf',
+  toepfe: 'topf',
+  cup: 'cup',
+  cups: 'cup',
+  tbsp: 'tbsp',
+  tablespoon: 'tbsp',
+  tablespoons: 'tbsp',
+  tsp: 'tsp',
+  teaspoon: 'tsp',
+  teaspoons: 'tsp',
+  oz: 'oz',
+  ounce: 'oz',
+  ounces: 'oz',
+  lb: 'lb',
+  pound: 'lb',
+  pounds: 'lb',
+  clove: 'clove',
+  cloves: 'clove',
+  pinch: 'pinch',
+  pinches: 'pinch',
+  can: 'can',
+  cans: 'can',
+  slice: 'slice',
+  slices: 'slice',
+  gram: 'g',
+  grams: 'g',
+  kilogram: 'kg',
+  kilograms: 'kg',
+  liters: 'l',
+  millilitre: 'ml',
+  millilitres: 'ml',
+  milliliters: 'ml',
+}
+
+/** Count/container units can be omitted or added around a plain number. */
+const COUNT_UNITS = new Set([
+  'prise', 'stück', 'bund', 'becher', 'dose', 'glas', 'packung', 'päckchen',
+  'beutel', 'tube', 'flasche', 'kugel', 'zehe', 'scheibe', 'blatt', 'tasse',
+  'tropfen', 'kopf', 'knolle', 'stange', 'zweig', 'handvoll', 'schuss',
+  'spritzer', 'würfel', 'portion', 'ecke', 'riegel', 'topf', 'cup', 'clove',
+  'pinch', 'can', 'slice',
+])
+
+/** Canonical spelling of a known unit, or null for unknown/ambiguous text. */
+export function canonicalUnitWord(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value
+    .trim()
+    .toLocaleLowerCase('de')
+    .replace(/\.+$/, '')
+    .replace(/\/n$/, '')
+    .replace(/\(n\)$/, '')
+    .replace(/\(en\)$/, '')
+  if (!normalized) return null
+  const alias = UNIT_ALIASES[normalized]
+  if (alias) return alias
+  return UNIT_WORDS.has(normalized) ? normalized : null
+}
+
+/** True for units that describe countable pieces rather than a measure. */
+export function isCountUnit(value: string | null | undefined): boolean {
+  const canonical = canonicalUnitWord(value)
+  return canonical !== null && COUNT_UNITS.has(canonical)
+}
+
+/**
+ * Conversion factor between two units of the same reliable dimension. Spoons
+ * and cups intentionally stay exact-match only; mass and volume conversions
+ * are deterministic and therefore safe for the automatic contradiction check.
+ */
+const UNIT_DIMENSIONS: Record<string, { dimension: 'mass' | 'volume'; factor: number }> = {
+  g: { dimension: 'mass', factor: 1 },
+  kg: { dimension: 'mass', factor: 1000 },
+  mg: { dimension: 'mass', factor: 0.001 },
+  ml: { dimension: 'volume', factor: 1 },
+  cl: { dimension: 'volume', factor: 10 },
+  dl: { dimension: 'volume', factor: 100 },
+  l: { dimension: 'volume', factor: 1000 },
+}
+
+/** Factor for `fromUnit` → `toUnit`, or null when the units are not comparable. */
+export function unitConversionFactor(
+  fromUnit: string | null | undefined,
+  toUnit: string | null | undefined,
+): number | null {
+  const from = canonicalUnitWord(fromUnit)
+  const to = canonicalUnitWord(toUnit)
+  if (!from || !to) return null
+  if (from === to) return 1
+  const fromDimension = UNIT_DIMENSIONS[from]
+  const toDimension = UNIT_DIMENSIONS[to]
+  if (!fromDimension || !toDimension || fromDimension.dimension !== toDimension.dimension) {
+    return null
+  }
+  return fromDimension.factor / toDimension.factor
+}
+
 const UNICODE_FRACTIONS: Record<string, number> = {
   '½': 0.5,
   '¼': 0.25,
