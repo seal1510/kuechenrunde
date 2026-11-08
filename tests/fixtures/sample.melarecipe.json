@@ -1,0 +1,28 @@
+{
+  "id": "https://example.com/rezepte/kartoffelsuppe",
+  "title": "Kartoffelsuppe",
+  "text": "Ein **klassisches** Rezept mit [Quelle](https://example.com).",
+  "images": [
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGPcYmPEgA0wYRUdtBIA59YBMmaXUkMAAAAASUVORK5CYII=",
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGO0ydvCgA0wYRUdtBIAFVMBbv5cOyQAAAAASUVORK5CYII="
+  ],
+  "categories": [
+    "Suppe",
+    "Vegetarisch"
+  ],
+  "yield": "4 Portionen",
+  "prepTime": "15 min",
+  "cookTime": "30 min",
+  "totalTime": "45 min",
+  "ingredients": "# Suppe\n500 g Kartoffeln\n1 Bund Lauchzwiebeln\n2 EL Olivenöl\nSalz und Pfeffer\n# Topping\n1 Handvoll Petersilie\n",
+  "instructions": "## Vorbereitung\nKartoffeln schälen und würfeln.\n**Kochen**: Alles 30 Minuten köcheln lassen.\nMit Petersilie servieren.\n",
+  "notes": "Rest am nächsten Tag aufwärmen.",
+  "nutrition": "**Calories:** 320 kcal\n**Protein:** 8 g",
+  "link": "https://example.com/rezepte/kartoffelsuppe",
+  "favorite": true,
+  "wantToCook": false,
+  "date": 700000000,
+  "customField": {
+    "keep": true
+  }
+}

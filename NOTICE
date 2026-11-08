@@ -1,0 +1,22 @@
+openCook Web
+============
+
+This project is a new web application inspired by and based on ideas, data-model
+concepts and algorithms from openCook:
+
+  https://github.com/oliexdev/openCook
+  Copyright (C) 2026 olie.xdev <olie.xdeveloper@googlemail.com>
+  Licensed under the GNU General Public License v3 (see LICENSE).
+
+The Mela importer in this repository is newly written for openCook Web and follows
+the publicly documented Mela file format:
+
+  https://mela.recipes/fileformat/index.html
+
+openCook Web is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software Foundation,
+either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.

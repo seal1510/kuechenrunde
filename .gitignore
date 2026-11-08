@@ -1,0 +1,34 @@
+# Dependencies, build output and caches
+node_modules/
+.pnpm-store/
+dist/
+dev-dist/
+coverage/
+.vite/
+*.tsbuildinfo
+.eslintcache
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+
+# Private Mela exports / personal recipe data must never be committed.
+fixtures-private/
+
+# Local backups and exports
+backups/
+*.bak
+*.backup
+*.log
+
+# Editor and operating system metadata
+.DS_Store
+.idea/
+.vscode/
+
+# Separate upstream checkout; it is its own repository and not part of this project.
+upstream-openCook/
