@@ -10,21 +10,16 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
 import {
   addDays,
-  formatDayLabel,
   formatWeekRange,
-  parseDateKey,
   todayKey,
-  weekdayShort,
   WEEKDAY_NAMES,
 } from '../domain/dates'
 import {
   buildCalendarLayout,
   buildCalendarWindow,
-  type CalendarDay,
   type CalendarSettings,
 } from '../domain/calendar'
-import { groupThemeFor, isGroupHighlighted } from '../domain/groupColor'
-import { formatPortionCount } from '../lib/format'
+import { groupThemeFor } from '../domain/groupColor'
 import {
   CookedMoveConflictError,
   DishPlanMoveConflictError,
@@ -38,12 +33,18 @@ import {
   undoDayNoteMove,
 } from '../mealplan/dayNoteService'
 import { calendarSettingsFromRows, setCalendarSettings } from '../settings/calendar'
-import type { DayNote, FreeDish, MealPlanEntry, Recipe } from '../types'
+import type { DayNote, MealPlanEntry } from '../types'
 import { AddEntryDialog } from './plan/AddEntryDialog'
 import {
   CalendarDragOverlay,
   type CalendarDragOverlayState,
 } from './plan/CalendarDragOverlay'
+import {
+  PlanCalendar,
+  dishTitleFor,
+  type CalendarDragHandlers,
+} from './plan/PlanCalendar'
+import { resolveCalendarSelection } from './plan/calendarSelection'
 import { DayNoteDialog } from './plan/DayNoteDialog'
 import { DishDialog } from './plan/DishDialog'
 import { FreeDishDialog } from './plan/FreeDishDialog'
@@ -77,193 +78,16 @@ type MoveRequest =
   | { kind: 'entry'; entry: MealPlanEntry }
   | { kind: 'note'; note: DayNote }
 
-interface CalendarDragHandlers {
-  onPointerDown: (
-    item: DragItem,
-    event: ReactPointerEvent<HTMLButtonElement>,
-  ) => void
-  onPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => void
-  onPointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => void
-  onPointerCancel: (event: ReactPointerEvent<HTMLButtonElement>) => void
-  onClick: (item: DragItem) => void
-}
-
 const OVERLAP_OPTIONS = Array.from({ length: 8 }, (_, index) => index)
 
 function normalizePointerType(value: string): DragPointerType {
   return value === 'touch' ? 'touch' : value === 'pen' ? 'pen' : 'mouse'
 }
 
-interface CalendarDayCardProps {
-  day: CalendarDay
-  overlap: boolean
-  today: string
-  recipeById: Map<string, Recipe>
-  freeDishById: Map<string, FreeDish>
-  groupSizeBySession: Map<string, number>
-  note?: DayNote
-  dropTarget: boolean
-  originDragKey: string | null
-  highlightedSessionId: string | null
-  dragHandlers: CalendarDragHandlers
-  onAdd: (date: string) => void
-  onHighlightSession: (sessionId: string | null) => void
-}
-
-function dishTitleFor(
-  entry: Pick<MealPlanEntry, 'recipeId' | 'freeDishId'>,
-  recipeById: Map<string, Recipe>,
-  freeDishById: Map<string, FreeDish>,
-): string {
-  if (entry.freeDishId) {
-    return freeDishById.get(entry.freeDishId)?.name ?? 'Gericht nicht gefunden'
-  }
-  if (entry.recipeId) {
-    return recipeById.get(entry.recipeId)?.title ?? 'Rezept nicht gefunden'
-  }
-  return 'Gericht nicht gefunden'
-}
-
-function CalendarDayCard({
-  day,
-  overlap,
-  today,
-  recipeById,
-  freeDishById,
-  groupSizeBySession,
-  note,
-  dropTarget,
-  originDragKey,
-  highlightedSessionId,
-  dragHandlers,
-  onAdd,
-  onHighlightSession,
-}: CalendarDayCardProps) {
-  const { date, entries: dayEntries } = day
-  const isToday = date === today
-  const isPast = date < today
-  const { day: dayNumber, month } = parseDateKey(date)
-  const className = [
-    'calendar-day',
-    overlap ? 'is-overlap' : '',
-    isToday ? 'is-today' : '',
-    isPast ? 'is-past' : '',
-    day.empty ? 'is-empty' : '',
-    dropTarget ? 'is-drop-target' : '',
-  ]
-    .filter(Boolean)
-    .join(' ')
-
-  const occupied = Boolean(note) || dayEntries.length > 0
-
-  return (
-    <section className={className} data-calendar-date={date}>
-      <header className="calendar-day-head">
-        <div>
-          <span className="calendar-weekday">{weekdayShort(date)}</span>
-          <span className="calendar-date">
-            {String(dayNumber).padStart(2, '0')}.{String(month).padStart(2, '0')}.
-          </span>
-        </div>
-        {isToday ? <span className="calendar-today">Heute</span> : null}
-      </header>
-
-      {occupied ? (
-        <ul className="calendar-entries">
-          {note ? (
-            <li key={`note-${date}`}>
-              <button
-                type="button"
-                className={`calendar-entry calendar-note-entry${originDragKey === dragItemKey({ kind: 'note', note }) ? ' is-drag-origin' : ''}`}
-                aria-label={`Kommentar am ${formatDayLabel(date)} bearbeiten`}
-                onPointerDown={(event) =>
-                  dragHandlers.onPointerDown({ kind: 'note', note }, event)
-                }
-                onPointerMove={dragHandlers.onPointerMove}
-                onPointerUp={dragHandlers.onPointerUp}
-                onPointerCancel={dragHandlers.onPointerCancel}
-                onContextMenu={(event) => event.preventDefault()}
-                onClick={() => dragHandlers.onClick({ kind: 'note', note })}
-              >
-                <span className="calendar-note-text">{note.text}</span>
-              </button>
-            </li>
-          ) : null}
-
-          {dayEntries.map((entry) => {
-            const title = dishTitleFor(entry, recipeById, freeDishById)
-            const groupSize = entry.cookSessionId
-              ? groupSizeBySession.get(entry.cookSessionId) ?? 1
-              : 1
-            const theme = groupThemeFor(entry, groupSize)
-            const dragKey = dragItemKey({ kind: 'entry', entry })
-            const entryClassName = [
-              'calendar-entry',
-              'calendar-entry--dish',
-              theme ? `calendar-entry--group group-color-${theme.colorIndex}` : '',
-              isGroupHighlighted(theme, highlightedSessionId)
-                ? 'is-group-highlighted'
-                : '',
-              originDragKey === dragKey ? 'is-drag-origin' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')
-            return (
-              <li key={entry.id}>
-                <button
-                  type="button"
-                  className={entryClassName}
-                  aria-label={`${title} bearbeiten, ${formatDayLabel(date)}`}
-                  onPointerDown={(event) =>
-                    dragHandlers.onPointerDown({ kind: 'entry', entry }, event)
-                  }
-                  onPointerMove={dragHandlers.onPointerMove}
-                  onPointerUp={dragHandlers.onPointerUp}
-                  onPointerCancel={dragHandlers.onPointerCancel}
-                  onContextMenu={(event) => event.preventDefault()}
-                  onMouseEnter={() => {
-                    if (theme) onHighlightSession(theme.sessionId)
-                  }}
-                  onMouseLeave={() => {
-                    if (theme) onHighlightSession(null)
-                  }}
-                  onFocus={() => {
-                    if (theme) onHighlightSession(theme.sessionId)
-                  }}
-                  onBlur={() => {
-                    if (theme) onHighlightSession(null)
-                  }}
-                  onClick={() =>
-                    dragHandlers.onClick({ kind: 'entry', entry })
-                  }
-                >
-                  <span className="calendar-entry-title">{title}</span>
-                  <span className="calendar-entry-meta">
-                    {formatPortionCount(entry.servings ?? 1)}
-                  </span>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      ) : null}
-
-      <button
-        type="button"
-        className={`calendar-add-day${occupied ? ' is-occupied' : ' is-empty'}`}
-        aria-label={`Eintrag am ${formatDayLabel(date)} hinzufügen`}
-        onClick={() => onAdd(date)}
-      >
-        <span aria-hidden="true">+</span>
-        <span>Hinzufügen</span>
-      </button>
-    </section>
-  )
-}
-
 export function PlanPage() {
   const today = useMemo(() => todayKey(), [])
   const [anchorDate, setAnchorDate] = useState(today)
+  const [selectedDate, setSelectedDate] = useState(today)
   const entries = useLiveQuery(() => db.mealPlans.toArray(), [])
   const recipes = useLiveQuery(() => db.recipes.toArray(), [])
   const freeDishes = useLiveQuery(() => db.freeDishes.toArray(), [])
@@ -340,6 +164,23 @@ export function PlanPage() {
     () => buildCalendarLayout(calendarWindow, entries ?? []),
     [calendarWindow, entries],
   )
+  const activeSelectedDate = resolveCalendarSelection(
+    calendarWindow.visibleDays,
+    calendarWindow.coreDays,
+    today,
+    selectedDate,
+  )
+
+  useEffect(() => {
+    setSelectedDate((current) =>
+      resolveCalendarSelection(
+        calendarWindow.visibleDays,
+        calendarWindow.coreDays,
+        today,
+        current,
+      ),
+    )
+  }, [calendarWindow, today])
   const noRecipes = recipes !== undefined && recipes.length === 0
   const hasDayNotes = (dayNotes?.length ?? 0) > 0
   const showEmptyState =
@@ -469,8 +310,11 @@ export function PlanPage() {
 
   function dropDateAt(clientX: number, clientY: number): string | null {
     const element = document.elementFromPoint(clientX, clientY)
+    const dropTarget = element?.closest<HTMLElement>('[data-calendar-drop-date]')
+    const dateTarget = element?.closest<HTMLElement>('[data-calendar-date]')
     return (
-      element?.closest<HTMLElement>('[data-calendar-date]')?.dataset.calendarDate ??
+      dropTarget?.dataset.calendarDropDate ??
+      dateTarget?.dataset.calendarDate ??
       null
     )
   }
@@ -698,7 +542,16 @@ export function PlanPage() {
     const dayElement = document.querySelector<HTMLElement>(
       `[data-calendar-date="${targetDate}"]`,
     )
-    const rect = dayElement?.getBoundingClientRect()
+    // On mobile only the selected day card is visible; the other core days are
+    // reachable through the date strip, so fall back to its target chip.
+    const visibleDay =
+      dayElement && dayElement.getBoundingClientRect().width > 0
+        ? dayElement
+        : null
+    const dateChip = document.querySelector<HTMLElement>(
+      `[data-calendar-drop-date="${targetDate}"]`,
+    )
+    const rect = (visibleDay ?? dateChip)?.getBoundingClientRect()
     // Switch to the transition-enabled phase first, then move on the next
     // frame so the settle animation is guaranteed to run.
     setDragOverlay((current) =>
@@ -919,70 +772,49 @@ export function PlanPage() {
     }
   }
 
-  function renderDay(day: CalendarDay, overlap: boolean) {
-    return (
-      <CalendarDayCard
-        key={day.date}
-        day={day}
-        overlap={overlap}
-        today={today}
-        recipeById={recipeById}
-        freeDishById={freeDishById}
-        groupSizeBySession={groupSizeBySession}
-        note={noteByDate.get(day.date)}
-        dropTarget={dropDate === day.date}
-        originDragKey={dragOverlay ? dragItemKey(dragOverlay.item) : null}
-        highlightedSessionId={
-          dragOverlay ? dragOverlay.groupSessionId : hoveredSessionId
-        }
-        dragHandlers={dragHandlers}
-        onAdd={openAdd}
-        onHighlightSession={setHoveredSessionId}
-      />
-    )
-  }
-
   return (
     <div className="page">
-      <header className="page-head">
-        <h1>Essensplan</h1>
-      </header>
-
-      <div className="plan-toolbar panel">
-        <div className="plan-weeknav" role="group" aria-label="Woche wechseln">
-          <button
-            type="button"
-            className="button quiet plan-nav-arrow"
-            aria-label="Vorherige Woche"
-            onClick={() => setAnchorDate(addDays(anchorDate, -7))}
-          >
-            ‹
-          </button>
-          <span className="plan-range" aria-live="polite">
+      <header className="page-head plan-head">
+        <div className="plan-head-copy">
+          <h1>Essensplan</h1>
+          <p className="plan-range" aria-live="polite">
             {formatWeekRange(calendarWindow.coreStart)}
-          </span>
-          <button
-            type="button"
-            className="button quiet plan-nav-arrow"
-            aria-label="Nächste Woche"
-            onClick={() => setAnchorDate(addDays(anchorDate, 7))}
-          >
-            ›
-          </button>
+          </p>
         </div>
 
-        <div className="plan-toolbar-actions">
-          <button
-            type="button"
-            className="button quiet"
-            onClick={() => setAnchorDate(today)}
-          >
-            Heute
-          </button>
+        <div className="plan-head-actions">
+          <div className="plan-weeknav" role="group" aria-label="Woche wechseln">
+            <button
+              type="button"
+              className="button quiet plan-nav-arrow"
+              aria-label="Vorherige Woche"
+              onClick={() => setAnchorDate(addDays(anchorDate, -7))}
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              className="button quiet plan-today"
+              onClick={() => {
+                setAnchorDate(today)
+                setSelectedDate(today)
+              }}
+            >
+              Heute
+            </button>
+            <button
+              type="button"
+              className="button quiet plan-nav-arrow"
+              aria-label="Nächste Woche"
+              onClick={() => setAnchorDate(addDays(anchorDate, 7))}
+            >
+              ›
+            </button>
+          </div>
 
           <details className="plan-menu">
             <summary
-              className="button quiet"
+              className="button quiet plan-settings-trigger"
               aria-label="Kalender-Einstellungen"
               title="Kalender-Einstellungen"
             >
@@ -1043,7 +875,7 @@ export function PlanPage() {
             </div>
           </details>
         </div>
-      </div>
+      </header>
 
       {error ? (
         <div className="notice danger" role="alert">
@@ -1068,32 +900,24 @@ export function PlanPage() {
       {loading ? (
         <p className="empty-state">Lade Essensplan …</p>
       ) : (
-        <div className="calendar-layout">
-          {calendarLayout.before.length > 0 ? (
-            <section className="calendar-overlap-row" aria-label="Tage davor">
-              <h2 className="calendar-row-title">Tage davor</h2>
-              <div className="calendar-overlap-days">
-                {calendarLayout.before.map((day) => renderDay(day, true))}
-              </div>
-            </section>
-          ) : null}
-
-          <section className="calendar-core-row" aria-label="Planungswoche">
-            <h2 className="calendar-row-title">Woche</h2>
-            <div className="calendar-week">
-              {calendarLayout.main.map((day) => renderDay(day, false))}
-            </div>
-          </section>
-
-          {calendarLayout.after.length > 0 ? (
-            <section className="calendar-overlap-row" aria-label="Tage danach">
-              <h2 className="calendar-row-title">Tage danach</h2>
-              <div className="calendar-overlap-days">
-                {calendarLayout.after.map((day) => renderDay(day, true))}
-              </div>
-            </section>
-          ) : null}
-        </div>
+        <PlanCalendar
+          layout={calendarLayout}
+          today={today}
+          selectedDate={activeSelectedDate}
+          noteByDate={noteByDate}
+          dropDate={dropDate}
+          recipeById={recipeById}
+          freeDishById={freeDishById}
+          groupSizeBySession={groupSizeBySession}
+          originDragKey={dragOverlay ? dragItemKey(dragOverlay.item) : null}
+          highlightedSessionId={
+            dragOverlay ? dragOverlay.groupSessionId : hoveredSessionId
+          }
+          dragHandlers={dragHandlers}
+          onSelectDate={setSelectedDate}
+          onAdd={openAdd}
+          onHighlightSession={setHoveredSessionId}
+        />
       )}
 
       {dialog?.kind === 'free-create' ? (

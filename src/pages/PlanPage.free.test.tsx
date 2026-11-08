@@ -99,7 +99,7 @@ afterEach(() => {
 })
 
 describe('free dish calendar presentation', () => {
-  it('renders a free dish as a normal dish card even with an empty recipe library', () => {
+  it('renders a free dish as a full dish card with a quiet free marker', () => {
     const html = renderToStaticMarkup(<PlanPage />)
 
     expect(html).toContain('Nudeln mit Pesto')
@@ -107,10 +107,11 @@ describe('free dish calendar presentation', () => {
     expect(html).toContain('1 Portion')
     expect(html).toContain('calendar-entry calendar-entry--dish')
     expect(html).toContain('calendar-entry--group group-color-')
+    expect(html).toContain('calendar-entry--free')
+    expect(html).toContain('calendar-entry-kind')
     expect(html).not.toContain('Rezept nicht gefunden')
     expect(html).not.toContain('Noch keine Rezepte für die Planung.')
     expect(html).not.toContain('Freies Gericht</span>')
-    expect(html).not.toContain('calendar-entry--free')
   })
 
   it('keeps the shared add action available on every day', () => {
