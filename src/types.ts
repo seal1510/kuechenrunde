@@ -344,7 +344,62 @@ export interface SettingRecord {
 }
 
 /**
- * A manually added shopping article. It belongs to exactly one shopping week
+ * One independent shopping list. A `standard` list always represents exactly
+ * one Thursday–Wednesday shopping period and has a deterministic id derived
+ * from that period. A `free` list has no mandatory period and can be renamed
+ * or deleted at any time.
+ */
+export type ShoppingListKind = 'standard' | 'free'
+
+export interface ShoppingList {
+  id: string
+  kind: ShoppingListKind
+  name: string
+  /** Thursday of the shopping period; `null` for free lists. */
+  periodStart: string | null
+  /** Wednesday of the shopping period; `null` for free lists. */
+  periodEnd: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * How an automatically calculated demand position is distributed to a list.
+ *
+ * - `partial`: a fixed amount the user assigned to this list. The remainder
+ *   stays on the Thursday list and grows/shrinks with the current demand.
+ * - `full`: the complete position (including future demand changes) belongs to
+ *   this list. A `dimension` of `"*"` means every dimension of the item.
+ */
+export type ShoppingAllocationMode = 'partial' | 'full'
+
+/**
+ * A persisted user decision that moves part or all of an automatically
+ * calculated demand position to one shopping list. The demand itself is never
+ * stored here; it is always recomputed from the planned cooking events.
+ */
+export interface ShoppingDemandAllocation {
+  /** Deterministic: `${periodStart}|${itemKey}|${dimension}|${listId}`. */
+  id: string
+  /** Thursday of the shopping period, "YYYY-MM-DD". */
+  periodStart: string
+  /** Canonical product identity from the existing shopping rules. */
+  itemKey: string
+  /** "mass", "volume", "count", "unit:<label>" or "*" for the whole item. */
+  dimension: string
+  listId: string
+  mode: ShoppingAllocationMode
+  /**
+   * Exact amount in thousandths of the dimension's base unit. Only present for
+   * `partial` allocations; integer storage keeps every split lossless.
+   */
+  quantityMilli?: number
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * A manually added shopping article. It belongs to exactly one shopping list
  * and is never derived from a recipe. Its numeric/text quantity is stored as
  * entered; aggregation with recipe demand happens only for display.
  */
@@ -360,6 +415,11 @@ export interface ShoppingManualItem {
    * from this date with the currently configured week start.
    */
   shoppingDate?: string
+  /**
+   * Owning shopping list. Missing on legacy rows; readers resolve such rows to
+   * the standard list of the Thursday–Wednesday period containing the date.
+   */
+  listId?: string
   name: string
   quantityText: string | null
   unit: string | null
@@ -409,6 +469,16 @@ export interface ShoppingPurchase {
   /** Actual date; the shopping week is derived from it. */
   shoppingDate: string
   itemKey: string
+  /**
+   * Shopping list the purchase belongs to. Missing on legacy rows; readers
+   * resolve those to the standard list of their shopping period.
+   */
+  listId?: string
+  /**
+   * Set when this purchase belongs to one explicit manual article. Such a row
+   * is never counted again as automatic recipe demand.
+   */
+  manualItemId?: string
   amounts: ShoppingPurchasedAmount[]
   /** Cumulative purchased totals for this week after this action. */
   confirmedTotal?: ShoppingPurchasedAmount[]

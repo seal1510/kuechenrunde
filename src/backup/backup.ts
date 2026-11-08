@@ -19,6 +19,12 @@ import {
   shoppingItemKey,
 } from '../domain/shopping'
 import {
+  shoppingAllocationId,
+  shoppingPeriod,
+  standardShoppingListId,
+  standardShoppingListRecord,
+} from '../domain/shoppingLists'
+import {
   DEFAULT_HOUSEHOLD_SIZE,
   type CookSession,
   type DayNote,
@@ -31,7 +37,9 @@ import {
   type RecipeImportMeta,
   type SettingRecord,
   type ShoppingCheck,
+  type ShoppingDemandAllocation,
   type ShoppingItemRule,
+  type ShoppingList,
   type ShoppingManualItem,
   type ShoppingPurchase,
   type ShoppingQuantityCorrection,
@@ -43,12 +51,13 @@ export const BACKUP_FORMAT = 'opencook-web-backup'
  * list data, v6 turns aggregate checks into individual purchase actions and
  * dates shopping rows independently from the week start, v7 drops the
  * discontinued pantry data, v8 adds week-scoped quantity corrections, v9 adds
- * structured instruction steps with explicit ingredient references. Older
- * v1–v8 backups remain importable; their pantry section is ignored, v5 checks
- * are converted exactly once, and old product-wide quantity corrections are
- * imported as legacy values without being applied.
+ * structured instruction steps with explicit ingredient references, v10 adds
+ * independent shopping lists and partial demand allocations. Older v1–v9
+ * backups remain importable; their pantry section is ignored, v5 checks are
+ * converted exactly once, and old rows are assigned the deterministic
+ * Thursday–Wednesday standard list without changing their dates.
  */
-export const BACKUP_VERSION = 9
+export const BACKUP_VERSION = 10
 export const MAX_BACKUP_BYTES = 200 * 1024 * 1024
 export const MAX_BACKUP_ENTRIES = 5_000
 export const MAX_BACKUP_ENTRY_BYTES = 20 * 1024 * 1024
@@ -72,6 +81,8 @@ export interface BackupManifest {
     shoppingPurchases: number
     shoppingItemRules: number
     shoppingQuantityCorrections: number
+    shoppingLists: number
+    shoppingDemandAllocations: number
   }
   includes: string[]
 }
@@ -103,6 +114,8 @@ export interface BackupPayload {
   shoppingPurchases: ShoppingPurchase[]
   shoppingItemRules: ShoppingItemRule[]
   shoppingQuantityCorrections: ShoppingQuantityCorrection[]
+  shoppingLists: ShoppingList[]
+  shoppingDemandAllocations: ShoppingDemandAllocation[]
 }
 
 export interface BackupConflicts {
@@ -118,6 +131,8 @@ export interface BackupConflicts {
   shoppingPurchases: number
   shoppingItemRules: number
   shoppingQuantityCorrections: number
+  shoppingLists: number
+  shoppingDemandAllocations: number
 }
 
 export interface BackupInspection {
@@ -135,6 +150,8 @@ export interface BackupInspection {
   shoppingPurchases: ShoppingPurchase[]
   shoppingItemRules: ShoppingItemRule[]
   shoppingQuantityCorrections: ShoppingQuantityCorrection[]
+  shoppingLists: ShoppingList[]
+  shoppingDemandAllocations: ShoppingDemandAllocation[]
   /** Repairs/normalisations applied while reading (e.g. detached broken links). */
   warnings: string[]
   conflicts: BackupConflicts
@@ -167,6 +184,10 @@ export interface RestoreResult {
   skippedShoppingItemRules: number
   addedShoppingQuantityCorrections: number
   skippedShoppingQuantityCorrections: number
+  addedShoppingLists: number
+  skippedShoppingLists: number
+  addedShoppingDemandAllocations: number
+  skippedShoppingDemandAllocations: number
   detachedMealLinks: number
 }
 
@@ -200,6 +221,8 @@ export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: Bac
     shoppingPurchases,
     shoppingItemRules,
     shoppingQuantityCorrections,
+    shoppingLists,
+    shoppingDemandAllocations,
   ] = await Promise.all([
     db.recipes.toArray(),
     db.images.toArray(),
@@ -214,6 +237,8 @@ export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: Bac
     db.shoppingPurchases.toArray(),
     db.shoppingItemRules.toArray(),
     db.shoppingQuantityCorrections.toArray(),
+    db.shoppingLists.toArray(),
+    db.shoppingDemandAllocations.toArray(),
   ])
 
   const manifest: BackupManifest = {
@@ -234,6 +259,8 @@ export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: Bac
       shoppingPurchases: shoppingPurchases.length,
       shoppingItemRules: shoppingItemRules.length,
       shoppingQuantityCorrections: shoppingQuantityCorrections.length,
+      shoppingLists: shoppingLists.length,
+      shoppingDemandAllocations: shoppingDemandAllocations.length,
     },
     includes: [
       'recipes',
@@ -252,6 +279,8 @@ export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: Bac
       'importMetadata',
       'portionLinks',
       'shoppingList',
+      'shoppingLists',
+      'shoppingDemandAllocations',
       'quantityCorrections',
     ],
   }
@@ -284,6 +313,8 @@ export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: Bac
       shoppingPurchases,
       shoppingItemRules,
       shoppingQuantityCorrections,
+      shoppingLists,
+      shoppingDemandAllocations,
     }),
   }
 
@@ -519,8 +550,36 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
         shoppingPurchases?: unknown
         shoppingItemRules?: unknown
         shoppingQuantityCorrections?: unknown
+        shoppingLists?: unknown
+        shoppingDemandAllocations?: unknown
       }>('shopping.json')
     : {}
+
+  // Shopping lists were added in backup v10. Older backups have no list
+  // section; their dated rows are attached to the deterministic Thursday list
+  // below without changing any date.
+  const importNow = Date.now()
+  const shoppingLists: ShoppingList[] = []
+  const seenListIds = new Set<string>()
+  const listIdRemap = new Map<string, string>()
+  if (Array.isArray(shoppingFile.shoppingLists)) {
+    shoppingFile.shoppingLists.forEach((value, index) => {
+      const list = normalizeShoppingList(value, index)
+      if (!list) {
+        warnings.push(`Einkaufsliste ${index + 1} war unvollständig und wurde ignoriert.`)
+        return
+      }
+      if (seenListIds.has(list.id)) {
+        warnings.push(`Doppelte Einkaufsliste ${list.id} wurde nur einmal übernommen.`)
+        return
+      }
+      const rawId = isRecord(value) ? asString(value.id) : ''
+      if (rawId && rawId !== list.id) listIdRemap.set(rawId, list.id)
+      seenListIds.add(list.id)
+      shoppingLists.push(list)
+    })
+  }
+
   const shoppingManualItems: ShoppingManualItem[] = []
   const seenManualIds = new Set<string>()
   if (Array.isArray(shoppingFile.shoppingManualItems)) {
@@ -591,6 +650,103 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
       })
     }
   }
+  const listById = new Map(shoppingLists.map((list) => [list.id, list]))
+  const ensureStandardList = (periodStart: string): ShoppingList => {
+    const period = shoppingPeriod(periodStart)
+    const id = standardShoppingListId(period.start)
+    const existing = listById.get(id)
+    if (existing) return existing
+    const record = standardShoppingListRecord(period.start, importNow)
+    shoppingLists.push(record)
+    listById.set(id, record)
+    return record
+  }
+  const repairListId = (
+    rawListId: string | undefined,
+    date: string,
+    label: string,
+  ): string => {
+    let period: ReturnType<typeof shoppingPeriod>
+    try {
+      period = shoppingPeriod(date)
+    } catch {
+      return rawListId ?? ''
+    }
+    const mapped = rawListId ? (listIdRemap.get(rawListId) ?? rawListId) : ''
+    if (!mapped) return ensureStandardList(period.start).id
+    const list = listById.get(mapped)
+    if (!list) {
+      warnings.push(
+        `${label} verweist auf eine fehlende Einkaufsliste und wurde dem Donnerstags-Einkauf zugeordnet.`,
+      )
+      return ensureStandardList(period.start).id
+    }
+    if (list.kind === 'standard' && list.periodStart !== period.start) {
+      warnings.push(
+        `${label} verweist auf einen Standardzettel eines anderen Zeitraums und wurde dem passenden Donnerstags-Einkauf zugeordnet.`,
+      )
+      return ensureStandardList(period.start).id
+    }
+    return list.id
+  }
+
+  for (const item of shoppingManualItems) {
+    const date = item.shoppingDate || item.weekStart || ''
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+    const repaired = repairListId(item.listId, date, `Manueller Einkaufsartikel ${item.id}`)
+    if (repaired) item.listId = repaired
+  }
+  for (const purchase of shoppingPurchases) {
+    const repaired = repairListId(
+      purchase.listId,
+      purchase.shoppingDate,
+      `Einkauf ${purchase.id}`,
+    )
+    if (repaired) purchase.listId = repaired
+  }
+
+  const shoppingDemandAllocations: ShoppingDemandAllocation[] = []
+  const seenAllocationIds = new Set<string>()
+  if (Array.isArray(shoppingFile.shoppingDemandAllocations)) {
+    shoppingFile.shoppingDemandAllocations.forEach((value, index) => {
+      const allocation = normalizeShoppingDemandAllocation(value, index)
+      if (!allocation) {
+        warnings.push(`Einkaufszuweisung ${index + 1} war unvollständig und wurde ignoriert.`)
+        return
+      }
+      const period = shoppingPeriod(allocation.periodStart)
+      let listId: string
+      if (allocation.listId.startsWith('standard:')) {
+        listId = ensureStandardList(period.start).id
+      } else {
+        listId = listIdRemap.get(allocation.listId) ?? allocation.listId
+        if (!listById.has(listId)) {
+          warnings.push(
+            `Einkaufszuweisung ${allocation.id} verweist auf eine fehlende Einkaufsliste und wurde ignoriert.`,
+          )
+          return
+        }
+      }
+      const id = shoppingAllocationId(
+        period.start,
+        allocation.itemKey,
+        allocation.dimension,
+        listId,
+      )
+      if (seenAllocationIds.has(id)) {
+        warnings.push(`Doppelte Einkaufszuweisung ${id} wurde nur einmal übernommen.`)
+        return
+      }
+      seenAllocationIds.add(id)
+      shoppingDemandAllocations.push({
+        ...allocation,
+        id,
+        periodStart: period.start,
+        listId,
+      })
+    })
+  }
+
   const shoppingItemRules: ShoppingItemRule[] = []
   const seenRuleKeys = new Set<string>()
   if (Array.isArray(shoppingFile.shoppingItemRules)) {
@@ -688,6 +844,8 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     existingPurchases,
     existingRules,
     existingCorrections,
+    existingLists,
+    existingAllocations,
   ] = await Promise.all([
     db.recipes.toArray(),
     db.mealPlans.toArray(),
@@ -700,6 +858,8 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     db.shoppingPurchases.toArray(),
     db.shoppingItemRules.toArray(),
     db.shoppingQuantityCorrections.toArray(),
+    db.shoppingLists.toArray(),
+    db.shoppingDemandAllocations.toArray(),
   ])
   const existingIds = new Set(existingRecipes.map((recipe) => recipe.id))
   const existingImportIds = new Set(existingRecipes.map((recipe) => recipe.importId))
@@ -714,6 +874,8 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
   const existingPurchaseIds = new Set(existingPurchases.map((purchase) => purchase.id))
   const existingRuleKeys = new Set(existingRules.map((rule) => rule.key))
   const existingCorrectionIds = new Set(existingCorrections.map((entry) => entry.id))
+  const existingListIds = new Set(existingLists.map((entry) => entry.id))
+  const existingAllocationIds = new Set(existingAllocations.map((entry) => entry.id))
 
   const conflicts: BackupConflicts = {
     recipes: recipes.filter(
@@ -733,6 +895,10 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     shoppingQuantityCorrections: shoppingQuantityCorrections.filter((entry) =>
       existingCorrectionIds.has(entry.id),
     ).length,
+    shoppingLists: shoppingLists.filter((entry) => existingListIds.has(entry.id)).length,
+    shoppingDemandAllocations: shoppingDemandAllocations.filter((entry) =>
+      existingAllocationIds.has(entry.id),
+    ).length,
   }
 
   return {
@@ -750,6 +916,8 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     shoppingPurchases,
     shoppingItemRules,
     shoppingQuantityCorrections,
+    shoppingLists,
+    shoppingDemandAllocations,
     warnings,
     conflicts,
   }
@@ -976,6 +1144,7 @@ function normalizeShoppingManualItem(value: unknown, index: number): ShoppingMan
     id,
     shoppingDate,
     weekStart: weekStart || shoppingDate,
+    listId: asString(value.listId).trim() || undefined,
     name,
     quantityText: typeof value.quantityText === 'string' ? value.quantityText : null,
     unit: typeof value.unit === 'string' ? value.unit : null,
@@ -1050,6 +1219,8 @@ function normalizeShoppingPurchase(value: unknown, index: number): ShoppingPurch
     id,
     shoppingDate,
     itemKey,
+    listId: asString(value.listId).trim() || undefined,
+    manualItemId: asString(value.manualItemId).trim() || undefined,
     amounts: normalizePurchasedAmounts(value.amounts),
     confirmedTotal: normalizePurchasedAmounts(value.confirmedTotal),
     snapshot: normalizePurchasedAmounts(value.snapshot),
@@ -1107,6 +1278,89 @@ function normalizeQuantityCorrection(
   }
 }
 
+function normalizeShoppingList(value: unknown, index: number): ShoppingList | null {
+  if (!isRecord(value)) return null
+  const kind = value.kind === 'free' ? 'free' : value.kind === 'standard' ? 'standard' : null
+  if (!kind) return null
+  const createdAt = typeof value.createdAt === 'number' ? value.createdAt : index
+  const updatedAt = typeof value.updatedAt === 'number' ? value.updatedAt : createdAt
+  if (kind === 'free') {
+    const id = asString(value.id).trim()
+    const name = asString(value.name).replace(/\s+/g, ' ').trim() || 'Einkauf'
+    if (!id) return null
+    return {
+      id,
+      kind,
+      name,
+      periodStart: null,
+      periodEnd: null,
+      createdAt,
+      updatedAt,
+    }
+  }
+  const periodStart = asString(value.periodStart)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart)) return null
+  let period: ReturnType<typeof shoppingPeriod>
+  try {
+    period = shoppingPeriod(periodStart)
+  } catch {
+    return null
+  }
+  return {
+    ...standardShoppingListRecord(period.start, createdAt),
+    updatedAt,
+  }
+}
+
+function normalizeShoppingDemandAllocation(
+  value: unknown,
+  index: number,
+): ShoppingDemandAllocation | null {
+  if (!isRecord(value)) return null
+  const periodStart = asString(value.periodStart)
+  const itemKey = asString(value.itemKey).trim()
+  const dimension = asString(value.dimension).trim()
+  const listId = asString(value.listId).trim()
+  const mode = value.mode === 'full' ? 'full' : value.mode === 'partial' ? 'partial' : null
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(periodStart) ||
+    !itemKey ||
+    !dimension ||
+    !listId ||
+    !mode
+  ) {
+    return null
+  }
+  let period: ReturnType<typeof shoppingPeriod>
+  try {
+    period = shoppingPeriod(periodStart)
+  } catch {
+    return null
+  }
+  let quantityMilli: number | undefined
+  if (mode === 'partial') {
+    const rawMilli = Number(value.quantityMilli)
+    if (Number.isFinite(rawMilli) && rawMilli > 0) {
+      quantityMilli = Math.round(rawMilli)
+    } else {
+      const legacyLower = Number(value.lower)
+      if (!Number.isFinite(legacyLower) || legacyLower <= 0) return null
+      quantityMilli = Math.round(legacyLower * 1000)
+    }
+  }
+  return {
+    id: shoppingAllocationId(period.start, itemKey, dimension, listId),
+    periodStart: period.start,
+    itemKey,
+    dimension,
+    listId,
+    mode,
+    ...(quantityMilli !== undefined ? { quantityMilli } : {}),
+    createdAt: typeof value.createdAt === 'number' ? value.createdAt : index,
+    updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : index,
+  }
+}
+
 export async function restoreBackup(
   inspection: BackupInspection,
   mode: RestoreMode,
@@ -1136,6 +1390,10 @@ export async function restoreBackup(
     skippedShoppingItemRules: 0,
     addedShoppingQuantityCorrections: 0,
     skippedShoppingQuantityCorrections: 0,
+    addedShoppingLists: 0,
+    skippedShoppingLists: 0,
+    addedShoppingDemandAllocations: 0,
+    skippedShoppingDemandAllocations: 0,
     detachedMealLinks: 0,
   }
 
@@ -1156,6 +1414,8 @@ export async function restoreBackup(
       db.shoppingPurchases,
       db.shoppingItemRules,
       db.shoppingQuantityCorrections,
+      db.shoppingLists,
+      db.shoppingDemandAllocations,
     ],
     async () => {
       if (mode === 'replace') {
@@ -1174,6 +1434,8 @@ export async function restoreBackup(
           db.shoppingPurchases.clear(),
           db.shoppingItemRules.clear(),
           db.shoppingQuantityCorrections.clear(),
+          db.shoppingLists.clear(),
+          db.shoppingDemandAllocations.clear(),
         ])
         if (inspection.recipes.length > 0) await db.recipes.bulkPut(inspection.recipes)
         if (inspection.images.length > 0) {
@@ -1194,6 +1456,9 @@ export async function restoreBackup(
         if (inspection.mealDays.length > 0) await db.mealDays.bulkPut(inspection.mealDays)
         if (inspection.settings.length > 0) await db.settings.bulkPut(inspection.settings)
         if (inspection.dayNotes.length > 0) await db.dayNotes.bulkPut(inspection.dayNotes)
+        if (inspection.shoppingLists.length > 0) {
+          await db.shoppingLists.bulkPut(inspection.shoppingLists)
+        }
         if (inspection.shoppingManualItems.length > 0) {
           await db.shoppingManualItems.bulkPut(inspection.shoppingManualItems)
         }
@@ -1206,6 +1471,11 @@ export async function restoreBackup(
         if (inspection.shoppingQuantityCorrections.length > 0) {
           await db.shoppingQuantityCorrections.bulkPut(
             inspection.shoppingQuantityCorrections,
+          )
+        }
+        if (inspection.shoppingDemandAllocations.length > 0) {
+          await db.shoppingDemandAllocations.bulkPut(
+            inspection.shoppingDemandAllocations,
           )
         }
         result.addedRecipes = inspection.recipes.length
@@ -1222,6 +1492,9 @@ export async function restoreBackup(
         result.addedShoppingItemRules = inspection.shoppingItemRules.length
         result.addedShoppingQuantityCorrections =
           inspection.shoppingQuantityCorrections.length
+        result.addedShoppingLists = inspection.shoppingLists.length
+        result.addedShoppingDemandAllocations =
+          inspection.shoppingDemandAllocations.length
         return
       }
 
@@ -1345,6 +1618,17 @@ export async function restoreBackup(
 
     // Shopping data is merged only when its key does not exist locally. The
     // local row always wins, matching the non-destructive merge contract.
+    const existingListIds = new Set((await db.shoppingLists.toArray()).map((list) => list.id))
+    for (const list of inspection.shoppingLists) {
+      if (existingListIds.has(list.id)) {
+        result.skippedShoppingLists += 1
+        continue
+      }
+      await db.shoppingLists.put(list)
+      existingListIds.add(list.id)
+      result.addedShoppingLists += 1
+    }
+
     const existingManualIds = new Set(
       (await db.shoppingManualItems.toArray()).map((item) => item.id),
     )
@@ -1395,6 +1679,26 @@ export async function restoreBackup(
       await db.shoppingQuantityCorrections.put(correction)
       existingCorrectionIds.add(correction.id)
       result.addedShoppingQuantityCorrections += 1
+    }
+
+    // Allocations are merged last so a target list always exists locally.
+    // Unknown list references are dropped instead of orphaning a row.
+    const existingAllocationIds = new Set(
+      (await db.shoppingDemandAllocations.toArray()).map((entry) => entry.id),
+    )
+    const mergedListIds = new Set((await db.shoppingLists.toArray()).map((list) => list.id))
+    for (const allocation of inspection.shoppingDemandAllocations) {
+      if (existingAllocationIds.has(allocation.id)) {
+        result.skippedShoppingDemandAllocations += 1
+        continue
+      }
+      if (!mergedListIds.has(allocation.listId)) {
+        result.skippedShoppingDemandAllocations += 1
+        continue
+      }
+      await db.shoppingDemandAllocations.put(allocation)
+      existingAllocationIds.add(allocation.id)
+      result.addedShoppingDemandAllocations += 1
     }
 
   })

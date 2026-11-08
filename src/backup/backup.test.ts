@@ -99,6 +99,8 @@ async function clearAll(): Promise<void> {
   await db.shoppingPurchases.clear()
   await db.shoppingItemRules.clear()
   await db.shoppingQuantityCorrections.clear()
+  await db.shoppingLists.clear()
+  await db.shoppingDemandAllocations.clear()
 }
 
 async function seed(): Promise<void> {
@@ -136,6 +138,8 @@ describe('backup roundtrip', () => {
       shoppingPurchases: 0,
       shoppingItemRules: 0,
       shoppingQuantityCorrections: 0,
+      shoppingLists: 0,
+      shoppingDemandAllocations: 0,
     })
     expect(archive.byteLength).toBeGreaterThan(0)
 
@@ -402,7 +406,7 @@ describe('backup roundtrip', () => {
     await db.mealPlans.bulkPut(linked)
 
     const { bytes: archive, manifest } = await exportBackup()
-    expect(manifest.version).toBe(9)
+    expect(manifest.version).toBe(10)
     expect(manifest.includes).toContain('cookSessions')
     expect(manifest.includes).toContain('dayNotes')
     expect(manifest.includes).toContain('freeDishes')

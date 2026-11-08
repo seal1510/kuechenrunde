@@ -95,6 +95,8 @@ export interface ManualItemInput {
   shoppingDate?: string
   /** Legacy alias for shoppingDate. */
   weekStart?: string
+  /** Owning shopping list; omitted for legacy callers. */
+  listId?: string | null
   name: string
   quantityText?: string | null
   unit?: string | null
@@ -116,6 +118,7 @@ export async function addManualItem(input: ManualItemInput): Promise<ShoppingMan
     id: randomId(),
     shoppingDate,
     weekStart: shoppingDate,
+    listId: optionalText(input.listId) ?? undefined,
     name,
     quantityText: optionalText(input.quantityText),
     unit: optionalText(input.unit),
@@ -144,6 +147,10 @@ export async function updateManualItem(
     const next: ShoppingManualItem = {
       ...existing,
       shoppingDate,
+      listId:
+        patch.listId === undefined
+          ? existing.listId
+          : (optionalText(patch.listId) ?? undefined),
       name,
       quantityText:
         patch.quantityText === undefined
@@ -162,7 +169,15 @@ export async function updateManualItem(
 }
 
 export async function removeManualItem(id: string): Promise<void> {
-  await db.shoppingManualItems.delete(id)
+  await db.transaction('rw', db.shoppingManualItems, db.shoppingPurchases, async () => {
+    await db.shoppingManualItems.delete(id)
+    // Explicitly linked purchases belong to this article alone. Purchases
+    // without a manualItemId are never guessed to belong to it.
+    const linked = await db.shoppingPurchases.where('manualItemId').equals(id).toArray()
+    if (linked.length > 0) {
+      await db.shoppingPurchases.bulkDelete(linked.map((purchase) => purchase.id))
+    }
+  })
 }
 
 export async function restoreManualItem(item: ShoppingManualItem): Promise<void> {
@@ -557,6 +572,10 @@ function confirmedTotals(
 export interface PurchaseInput {
   shoppingDate: string
   itemKey: string
+  /** Owning shopping list; omitted for legacy callers. */
+  listId?: string
+  /** Set only when this purchase belongs to one explicit manual article. */
+  manualItemId?: string
   /** Confirmed quantities, one fixed amount per dimension. */
   amounts: readonly ShoppingPurchasedAmount[]
   /** Full required demand at confirmation time (stored for range settling). */
@@ -583,6 +602,8 @@ export async function addShoppingPurchase(input: PurchaseInput): Promise<Shoppin
       id: randomId(),
       shoppingDate,
       itemKey,
+      listId: optionalText(input.listId) ?? undefined,
+      manualItemId: optionalText(input.manualItemId) ?? undefined,
       confirmedTotal: input.confirmedTotal
         ? confirmedTotals([], '', input.confirmedTotal)
         : confirmedTotals(previous, shoppingDate, input.amounts),

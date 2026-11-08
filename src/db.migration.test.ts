@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { OpenCookDatabase } from './db'
 import type { MealPlanEntry } from './types'
 import { shoppingItemKey } from './domain/shopping'
+import { standardShoppingListId } from './domain/shoppingLists'
 
 const NAME = 'opencook-migration-test'
 
@@ -60,7 +61,7 @@ describe('Dexie migrations', () => {
 
     const upgraded = new OpenCookDatabase(NAME)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     expect(await upgraded.recipes.count()).toBe(1)
     const upgradedRecipe = await upgraded.recipes.get('r1')
     expect(upgradedRecipe?.title).toBe('Migrationstest')
@@ -137,7 +138,7 @@ describe('Dexie migrations', () => {
 
     const upgraded = new OpenCookDatabase(name)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     const migrated = await upgraded.recipes.get('r1')
     expect(migrated?.cuisine).toEqual([])
     expect(migrated?.dishType).toEqual([])
@@ -188,7 +189,7 @@ describe('Dexie migrations', () => {
 
     const upgraded = new OpenCookDatabase(name)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     const migrated = await upgraded.recipes.get('r1')
     const ingredient = migrated?.ingredients[0]
     expect(ingredient?.purchaseNote).toBe('')
@@ -268,7 +269,7 @@ describe('Dexie migrations', () => {
 
     const upgraded = new OpenCookDatabase(name)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     const migrated = await upgraded.recipes.get('r1')
     const byId = new Map((migrated?.ingredients ?? []).map((entry) => [entry.id, entry]))
 
@@ -340,7 +341,7 @@ describe('Dexie migrations', () => {
 
     const upgraded = new OpenCookDatabase(name)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     const migrated = await upgraded.recipes.get('r1')
     expect(migrated?.title).toBe('Migrationstest')
     expect(migrated?.importUrl).toBe('')
@@ -426,7 +427,7 @@ describe('Dexie migrations', () => {
 
     const upgraded = new OpenCookDatabase(name)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     expect(await upgraded.recipes.count()).toBe(1)
     const normal = (await upgraded.mealPlans.get('plan-normal'))!
     expect(normal.pinned).toBe(true)
@@ -541,7 +542,7 @@ describe('Dexie migrations', () => {
 
     const upgraded = new OpenCookDatabase(name)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     expect(await upgraded.recipes.count()).toBe(1)
     expect(await upgraded.cookSessions.count()).toBe(1)
     expect((await upgraded.mealPlans.get('plan-v7'))?.cookSessionId).toBe('cook-v7')
@@ -617,7 +618,7 @@ describe('Dexie migrations', () => {
 
     const upgraded = new OpenCookDatabase(name)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     expect(await upgraded.recipes.count()).toBe(1)
     expect(await upgraded.cookSessions.count()).toBe(1)
     expect((await upgraded.mealPlans.get('plan-v8'))?.recipeId).toBe('r1')
@@ -711,7 +712,7 @@ describe('Dexie migrations', () => {
 
     const upgraded = new OpenCookDatabase(name)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     expect(await upgraded.shoppingManualItems.count()).toBe(0)
     expect(await upgraded.shoppingChecks.count()).toBe(0)
     expect(await upgraded.shoppingItemRules.count()).toBe(0)
@@ -814,7 +815,7 @@ describe('Dexie migrations', () => {
 
     const upgraded = new OpenCookDatabase(name)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     expect((await upgraded.shoppingManualItems.get('manual-old'))?.shoppingDate).toBe(
       '2026-11-05',
     )
@@ -906,7 +907,7 @@ describe('pantry removal migration', () => {
 
     const upgraded = new OpenCookDatabase(name)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     expect(upgraded.tables.map((table) => table.name)).not.toContain('pantryItems')
     expect(await upgraded.shoppingManualItems.count()).toBe(1)
     expect((await upgraded.shoppingPurchases.get('purchase-keep'))?.amounts[0]?.upper).toBe(2)
@@ -987,7 +988,7 @@ describe('rule identity migration', () => {
     await createV12(name, ['Pesto (grün)'])
     const upgraded = new OpenCookDatabase(name)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     const rule = await upgraded.shoppingItemRules.get('pesto')
     expect(rule?.canonicalKey).toBe(shoppingItemKey('Pesto grün'))
     expect(rule?.displayName).toBe('Pesto')
@@ -1087,7 +1088,7 @@ describe('instruction reference migration (v13 → v14)', () => {
 
     const upgraded = new OpenCookDatabase(name)
     await upgraded.open()
-    expect(upgraded.verno).toBe(14)
+    expect(upgraded.verno).toBe(15)
     const migrated = await upgraded.recipes.get('r1')
     expect(migrated?.instructions).toHaveLength(2)
     expect(migrated?.instructions[0]?.text).toBe(text)
@@ -1099,6 +1100,127 @@ describe('instruction reference migration (v13 → v14)', () => {
     expect(migrated?.instructions[1]?.text).toBe('Zweiter Schritt')
     expect(upgraded.tables.map((table) => table.name)).toContain('cookProgress')
     upgraded.close()
+    await Dexie.delete(name)
+  })
+
+  it('migrates v14 shopping rows to deterministic Thursday standard lists', async () => {
+    const name = `${NAME}-v14-shopping`
+    await Dexie.delete(name)
+    const legacy = new Dexie(name)
+    legacy.version(14).stores({
+      recipes:
+        'id, &importId, title, updatedAt, *categories, *cuisine, *dishType, effort, *tags, favorite, wantToCook, importUrl',
+      images: 'id, recipeId, [recipeId+position]',
+      mealPlans:
+        'id, date, [date+slot], recipeId, freeDishId, pinned, cooked, cookSessionId, status',
+      mealDays: 'date',
+      settings: 'key',
+      cookSessions: 'id, recipeId, freeDishId, date, status, [recipeId+date]',
+      dayNotes: 'date, updatedAt',
+      freeDishes: 'id, updatedAt',
+      shoppingManualItems: 'id, shoppingDate, weekStart',
+      shoppingChecks: 'id, weekStart, [weekStart+itemKey], itemKey',
+      shoppingPurchases: 'id, shoppingDate, itemKey, createdAt, [itemKey+shoppingDate]',
+      shoppingItemRules: 'key, updatedAt',
+      shoppingQuantityCorrections: 'id, shoppingDate, itemKey, [itemKey+shoppingDate]',
+      cookProgress: 'cookSessionId, updatedAt',
+    })
+    await legacy.open()
+    await legacy.table('recipes').add(recipe)
+    await legacy.table('settings').add({ key: 'weekStartDay', value: 1 })
+    await legacy.table('shoppingManualItems').bulkAdd([
+      {
+        id: 'manual-a',
+        shoppingDate: '2026-11-05',
+        weekStart: '2026-11-05',
+        name: 'Milch',
+        quantityText: '1',
+        unit: 'l',
+        purchaseNote: '',
+        categoryId: 'dairy',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'manual-b',
+        shoppingDate: '2026-11-12',
+        weekStart: '2026-11-12',
+        name: 'Brot',
+        quantityText: '1',
+        unit: 'Laib',
+        purchaseNote: '',
+        categoryId: 'bakery',
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ])
+    await legacy.table('shoppingPurchases').bulkAdd([
+      {
+        id: 'purchase-a',
+        shoppingDate: '2026-11-09',
+        itemKey: 'zwiebel',
+        amounts: [{ dimension: 'count', lower: 2, upper: 2 }],
+        confirmedTotal: [{ dimension: 'count', lower: 2, upper: 2 }],
+        snapshot: [{ dimension: 'count', lower: 3, upper: 3 }],
+        qualitative: false,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'purchase-b',
+        shoppingDate: '2026-11-05',
+        itemKey: 'zwiebel',
+        amounts: [{ dimension: 'count', lower: 1, upper: 1 }],
+        snapshot: [],
+        qualitative: false,
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ])
+    legacy.close()
+
+    const upgraded = new OpenCookDatabase(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBe(15)
+
+    const manualA = await upgraded.shoppingManualItems.get('manual-a')
+    expect(manualA?.listId).toBe(standardShoppingListId('2026-11-05'))
+    expect(manualA?.shoppingDate).toBe('2026-11-05')
+    expect(manualA?.weekStart).toBe('2026-11-05')
+    const manualB = await upgraded.shoppingManualItems.get('manual-b')
+    expect(manualB?.listId).toBe(standardShoppingListId('2026-11-12'))
+
+    const purchaseA = await upgraded.shoppingPurchases.get('purchase-a')
+    expect(purchaseA?.listId).toBe(standardShoppingListId('2026-11-05'))
+    expect(purchaseA?.snapshot).toEqual([{ dimension: 'count', lower: 3, upper: 3 }])
+    expect((await upgraded.shoppingPurchases.get('purchase-b'))?.listId).toBe(
+      standardShoppingListId('2026-11-05'),
+    )
+
+    expect(
+      (await upgraded.shoppingLists.get(standardShoppingListId('2026-11-05')))?.periodStart,
+    ).toBe('2026-11-05')
+    expect(
+      (await upgraded.shoppingLists.get(standardShoppingListId('2026-11-12')))?.periodStart,
+    ).toBe('2026-11-12')
+    expect(await upgraded.shoppingLists.count()).toBe(2)
+    // The configured visual week start and all recipe/date fields stay intact.
+    expect((await upgraded.settings.get('weekStartDay'))?.value).toBe(1)
+    expect(await upgraded.recipes.count()).toBe(1)
+    expect(await upgraded.shoppingManualItems.count()).toBe(2)
+    expect(await upgraded.shoppingPurchases.count()).toBe(2)
+    upgraded.close()
+
+    // Reopening must be idempotent.
+    const reopened = new OpenCookDatabase(name)
+    await reopened.open()
+    expect(await reopened.shoppingLists.count()).toBe(2)
+    expect(await reopened.shoppingManualItems.count()).toBe(2)
+    expect(await reopened.shoppingPurchases.count()).toBe(2)
+    expect((await reopened.shoppingManualItems.get('manual-a'))?.listId).toBe(
+      standardShoppingListId('2026-11-05'),
+    )
+    reopened.close()
     await Dexie.delete(name)
   })
 })

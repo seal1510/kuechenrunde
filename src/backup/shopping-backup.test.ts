@@ -19,6 +19,8 @@ async function clearAll(): Promise<void> {
   await db.shoppingPurchases.clear()
   await db.shoppingItemRules.clear()
   await db.shoppingQuantityCorrections.clear()
+  await db.shoppingLists.clear()
+  await db.shoppingDemandAllocations.clear()
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -89,7 +91,7 @@ describe('shopping data in backups', () => {
     await saveCategoryOrder(['canned', 'produce'])
 
     const { bytes, manifest } = await exportBackup()
-    expect(manifest.version).toBe(9)
+    expect(manifest.version).toBe(10)
     expect(manifest.counts.shoppingPurchases).toBe(1)
     expect(manifest.counts.shoppingChecks).toBe(0)
     expect(manifest.counts.shoppingQuantityCorrections).toBe(1)

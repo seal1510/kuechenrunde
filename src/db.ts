@@ -1,6 +1,11 @@
 import Dexie, { type Table } from 'dexie'
 import { parseIngredientLine, plainIngredientText } from './import/ingredients'
 import { shoppingIdentityMappings } from './domain/shopping'
+import {
+  shoppingPeriod,
+  standardShoppingListId,
+  standardShoppingListRecord,
+} from './domain/shoppingLists'
 import { normalizeInstructionList } from './recipe/references'
 import type {
   CookProgress,
@@ -13,7 +18,9 @@ import type {
   RecipeImage,
   SettingRecord,
   ShoppingCheck,
+  ShoppingDemandAllocation,
   ShoppingItemRule,
+  ShoppingList,
   ShoppingManualItem,
   ShoppingPurchase,
   ShoppingQuantityCorrection,
@@ -30,7 +37,8 @@ import type {
  * appointments (`mealPlans`) and allows several dishes per date+slot; v8 adds
  * free day notes as their own table; v9 adds plan-only free dishes with their
  * own ingredient snapshot; v14 adds explicit instruction ingredient references
- * and the local cook-mode progress table.
+ * and the local cook-mode progress table; v15 adds independent shopping lists
+ * and explicit partial demand allocations.
  * Upgrades only add tables/indexes or backfill/reinterpret new fields; existing
  * recipes, images and plans are not deleted.
  */
@@ -48,6 +56,8 @@ export class OpenCookDatabase extends Dexie {
   shoppingPurchases!: Table<ShoppingPurchase, string>
   shoppingItemRules!: Table<ShoppingItemRule, string>
   shoppingQuantityCorrections!: Table<ShoppingQuantityCorrection, string>
+  shoppingLists!: Table<ShoppingList, string>
+  shoppingDemandAllocations!: Table<ShoppingDemandAllocation, string>
   cookProgress!: Table<CookProgress, string>
 
   constructor(name = 'opencook-web') {
@@ -552,6 +562,100 @@ export class OpenCookDatabase extends Dexie {
             if (!Array.isArray(recipe.instructions)) return
             recipe.instructions = normalizeInstructionList(recipe.instructions)
           })
+      })
+    // v15 adds independent shopping lists and explicit demand allocations.
+    // Existing weekly rows are migrated additively: the original date/week
+    // fields stay untouched, and every row gets the deterministic standard
+    // list of its Thursday–Wednesday period. Older weeks that used another
+    // configured calendar week keep their exact date; their original grouping
+    // is still available to the old aggregate view, so nothing is silently
+    // rebooked. No recipe, plan or cooking event is modified.
+    this.version(15)
+      .stores({
+        recipes:
+          'id, &importId, title, updatedAt, *categories, *cuisine, *dishType, effort, *tags, favorite, wantToCook, importUrl',
+        images: 'id, recipeId, [recipeId+position]',
+        mealPlans:
+          'id, date, [date+slot], recipeId, freeDishId, pinned, cooked, cookSessionId, status',
+        mealDays: 'date',
+        settings: 'key',
+        cookSessions: 'id, recipeId, freeDishId, date, status, [recipeId+date]',
+        dayNotes: 'date, updatedAt',
+        freeDishes: 'id, updatedAt',
+        shoppingManualItems: 'id, shoppingDate, weekStart, listId',
+        shoppingChecks: 'id, weekStart, [weekStart+itemKey], itemKey',
+        shoppingPurchases:
+          'id, shoppingDate, itemKey, createdAt, [itemKey+shoppingDate], listId, manualItemId',
+        shoppingItemRules: 'key, updatedAt',
+        shoppingQuantityCorrections:
+          'id, shoppingDate, itemKey, [itemKey+shoppingDate]',
+        shoppingLists: 'id, kind, periodStart, createdAt',
+        shoppingDemandAllocations:
+          'id, periodStart, itemKey, listId, [periodStart+itemKey]',
+        pantryItems: null,
+        cookProgress: 'cookSessionId, updatedAt',
+      })
+      .upgrade(async (transaction) => {
+        const now = Date.now()
+        const listTable = transaction.table<ShoppingList, string>('shoppingLists')
+        const manualTable = transaction.table<ShoppingManualItem, string>(
+          'shoppingManualItems',
+        )
+        const purchaseTable = transaction.table<ShoppingPurchase, string>(
+          'shoppingPurchases',
+        )
+        const periods = new Set<string>()
+        const standardIdForDate = (date: string): string | null => {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
+          try {
+            const period = shoppingPeriod(date)
+            periods.add(period.start)
+            return standardShoppingListId(period.start)
+          } catch {
+            return null
+          }
+        }
+
+        const manualItems = await manualTable.toArray()
+        const manualUpdates: ShoppingManualItem[] = []
+        for (const item of manualItems) {
+          const date = item.shoppingDate || item.weekStart || ''
+          const target = standardIdForDate(date)
+          if (!target || item.listId) continue
+          manualUpdates.push({ ...item, listId: target })
+        }
+
+        const purchases = await purchaseTable.toArray()
+        const purchaseUpdates: ShoppingPurchase[] = []
+        for (const purchase of purchases) {
+          const target = standardIdForDate(purchase.shoppingDate)
+          if (!target || purchase.listId) continue
+          purchaseUpdates.push({ ...purchase, listId: target })
+        }
+
+        // A partially migrated database may already contain explicit standard
+        // references. Make sure their list rows exist as well.
+        const addStandardReference = (listId: string | undefined): void => {
+          if (!listId?.startsWith('standard:')) return
+          const start = listId.slice('standard:'.length)
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return
+          try {
+            periods.add(shoppingPeriod(start).start)
+          } catch {
+            // Ignore an invalid legacy reference instead of failing the upgrade.
+          }
+        }
+        for (const item of manualItems) addStandardReference(item.listId)
+        for (const purchase of purchases) addStandardReference(purchase.listId)
+
+        const existingLists = await listTable.toArray()
+        const existingIds = new Set(existingLists.map((list) => list.id))
+        const newLists = Array.from(periods)
+          .filter((periodStart) => !existingIds.has(standardShoppingListId(periodStart)))
+          .map((periodStart) => standardShoppingListRecord(periodStart, now))
+        if (newLists.length > 0) await listTable.bulkPut(newLists)
+        if (manualUpdates.length > 0) await manualTable.bulkPut(manualUpdates)
+        if (purchaseUpdates.length > 0) await purchaseTable.bulkPut(purchaseUpdates)
       })
   }
 }
