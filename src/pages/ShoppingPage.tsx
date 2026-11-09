@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
-import { formatDayLabel, todayKey, WEEKDAY_NAMES, weekdayName } from '../domain/dates'
+import { formatDayLabel, todayKey, WEEKDAY_NAMES } from '../domain/dates'
 import {
   categoryLabel,
   categoryOrderWithMove,
@@ -31,16 +31,11 @@ import {
   type ShoppingCategoryId,
   type ShoppingListItem,
 } from '../domain/shopping'
-import {
-  periodStartDayForDate,
-  resolveShoppingPeriodResolution,
-} from '../domain/shoppingLists'
+import { resolveShoppingPeriodResolution } from '../domain/shoppingLists'
 import { buildShoppingPeriodView } from '../shopping/periodView'
 import {
   adjacentShoppingPeriodStart,
-  applyShoppingCycleChange,
-  previewShoppingCycleChange,
-  type ShoppingCycleChangePreview,
+  applyShoppingSettings,
 } from '../shopping/cycle'
 import {
   shoppingSettingsFromRows,
@@ -1657,61 +1652,21 @@ interface SettingsDialogProps {
 }
 
 function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProps) {
-  const today = useMemo(() => todayKey(), [])
-  const activeDay = periodStartDayForDate(settings, today)
-  const [day, setDay] = useState(activeDay)
+  const [day, setDay] = useState(settings.periodStartDay)
   const [name, setName] = useState(settings.standardListName)
-  const [preview, setPreview] = useState<ShoppingCycleChangePreview | null>(null)
-  const [previewPending, setPreviewPending] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const trimmedName = name.replace(/\s+/g, ' ').trim()
-  const dirty =
-    day !== activeDay || trimmedName !== settings.standardListName
+  const dirty = day !== settings.periodStartDay || trimmedName !== settings.standardListName
 
-  async function refreshPreview(
-    nextDay: number,
-    nextName: string,
-    cancelPending = false,
-  ) {
-    setPreviewPending(true)
-    try {
-      setError('')
-      setPreview(
-        await previewShoppingCycleChange(
-          {
-            periodStartDay: nextDay,
-            standardListName: nextName,
-          },
-          today,
-          { cancelPending },
-        ),
-      )
-    } catch (cause) {
-      setError(errorText(cause))
-    } finally {
-      setPreviewPending(false)
-    }
-  }
-
-  useEffect(() => {
-    void refreshPreview(activeDay, settings.standardListName)
-    // The preview only describes the persisted state on open.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  async function save(cancelPending = false, overrideDay = day) {
+  async function save() {
     setBusy(true)
     setError('')
     try {
-      await applyShoppingCycleChange(
-        {
-          periodStartDay: overrideDay,
-          standardListName: name,
-        },
-        today,
-        { cancelPending },
-      )
+      await applyShoppingSettings({
+        periodStartDay: day,
+        standardListName: name,
+      })
       onClose()
     } catch (cause) {
       setError(errorText(cause))
@@ -1726,7 +1681,7 @@ function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProp
         <div>
           <h2>Einstellungen</h2>
           <p className="shopping-panel-subline">
-            Einkaufszyklus, Standardzettel und Kategorien deines Einkaufswegs.
+            Einkaufstag, Name des Wocheneinkaufs und Kategorien.
           </p>
         </div>
         <button type="button" className="shopping-icon-button" aria-label="Schließen" onClick={onClose}>
@@ -1734,46 +1689,14 @@ function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProp
         </button>
       </div>
 
-      {settings.pending ? (
-        <div className="notice" role="status">
-          <p>
-            {settings.pending.effectiveFrom > today ? (
-              <>
-                <strong>Geplante Änderung:</strong>{' '}
-                {weekdayName(settings.pending.periodStartDay)} ab{' '}
-                {formatDayLabel(settings.pending.effectiveFrom)}. Bestehende
-                Perioden bleiben unverändert.
-              </>
-            ) : (
-              <>
-                <strong>Geplante Änderung ist aktiv seit</strong>{' '}
-                {formatDayLabel(settings.pending.effectiveFrom)}.
-              </>
-            )}
-          </p>
-          {settings.pending.effectiveFrom > today ? (
-            <button
-              type="button"
-              className="button quiet"
-              onClick={() => void save(true, activeDay)}
-              disabled={busy}
-            >
-              Geplante Änderung verwerfen
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      <p className="notice shopping-settings-note" role="note">
+        Der Einkaufstag gilt ab sofort für die weitere Planung. Bereits angelegte
+        Einkaufszettel, Käufe und Verteilungen bleiben erhalten.
+      </p>
 
       <label className="shopping-confirm-row">
         <span>Regelmäßiger Einkaufstag</span>
-        <select
-          value={day}
-          onChange={(event) => {
-            const next = Number(event.target.value)
-            setDay(next)
-            void refreshPreview(next, name)
-          }}
-        >
+        <select value={day} onChange={(event) => setDay(Number(event.target.value))}>
           {WEEKDAY_NAMES.map((label, index) => (
             <option key={label} value={index}>
               {label}
@@ -1796,59 +1719,6 @@ function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProp
         <p className="notice danger" role="alert">
           {error}
         </p>
-      ) : null}
-
-      {preview ? (
-        <div className={`notice${preview.blocked ? ' danger' : ''}`} role="status">
-          <p>
-            <strong>Aktueller Zeitraum:</strong> {preview.currentPeriod.label}
-          </p>
-          {preview.mode === 'name' ? (
-            <p>Nur der Anzeigename wird geändert; Perioden und Käufe bleiben unverändert.</p>
-          ) : preview.mode === 'cancel' ? (
-            <p>Die geplante Änderung wird verworfen; die bisherige Periodenzuordnung bleibt.</p>
-          ) : preview.mode === 'materialize' ? (
-            <p>
-              Die bereits aktive geplante Änderung wird jetzt als reguläre Einstellung
-              übernommen.
-            </p>
-          ) : (
-            <p>
-              <strong>
-                {preview.mode === 'scheduled' ? 'Wirksam ab' : 'Neuer Rhythmus ab'}:
-              </strong>{' '}
-              {formatDayLabel(preview.effectiveFrom)}
-            </p>
-          )}
-          {preview.transition ? (
-            <p>
-              <strong>Einmaliger Übergangszeitraum:</strong> {preview.transition.label} (
-              {preview.transition.days.length} Tage). Bereits vorhandene Einkäufe und
-              Verteilungen bleiben ihrem bisherigen Zeitraum zugeordnet.
-            </p>
-          ) : preview.mode === 'name' || preview.mode === 'cancel' ? null : (
-            <p>Kein verkürzter Übergangszeitraum nötig.</p>
-          )}
-          {preview.mode !== 'name' && preview.mode !== 'cancel' ? (
-            <p>
-              <strong>Erster regulärer Zeitraum:</strong>{' '}
-              {preview.firstRegularPeriod.label}
-            </p>
-          ) : null}
-          {preview.bindingFuturePeriods.length > 0 ? (
-            <p>
-              <strong>Verbindliche Zukunftsperioden bleiben erhalten:</strong>{' '}
-              {preview.bindingFuturePeriods.map((period) => period.label).join(', ')}
-            </p>
-          ) : null}
-          {preview.unusedFuturePeriods.length > 0 ? (
-            <p>
-              <strong>Unbenutzte systemseitige Zettel werden entfernt:</strong>{' '}
-              {preview.unusedFuturePeriods.map((period) => period.label).join(', ')}
-            </p>
-          ) : null}
-          {preview.blocked ? <p>{preview.conflict?.message}</p> : null}
-        </div>
       ) : null}
 
       <ol className="shopping-category-order">
@@ -1883,9 +1753,9 @@ function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProp
           type="button"
           className="button primary"
           onClick={() => void save()}
-          disabled={busy || previewPending || !dirty || preview?.blocked === true}
+          disabled={busy || !dirty}
         >
-          {busy ? 'Speichere …' : previewPending ? 'Prüfe …' : 'Einstellungen speichern'}
+          {busy ? 'Speichere …' : 'Einstellungen speichern'}
         </button>
         <button type="button" className="button quiet" onClick={onClose}>
           Fertig

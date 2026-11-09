@@ -17,6 +17,8 @@ import {
 import {
   DEFAULT_SHOPPING_PERIOD_START_DAY,
   DEFAULT_STANDARD_SHOPPING_LIST_NAME,
+  LEGACY_SHOPPING_CYCLE_PENDING_KEY,
+  legacyPendingShoppingCycleDay,
   SHOPPING_PERIOD_START_DAY_KEY,
   STANDARD_SHOPPING_LIST_NAME_KEY,
 } from './settings/shopping'
@@ -54,7 +56,9 @@ import type {
  * and explicit partial demand allocations; v16 marks historical rows with an
  * unreconstructable calendar-week grouping for review; v17 corrects that
  * marking for free lists and uses the shared legacy normalisation so old rows
- * are never treated as an invented Thursday grouping.
+ * are never treated as an invented Thursday grouping; v18 adds the editable
+ * shopping weekday and name; v19 drops the planned rhythm change and promotes
+ * a stored pending weekday to the plain setting.
  * Upgrades only add tables/indexes or backfill/reinterpret new fields; existing
  * recipes, images and plans are not deleted.
  */
@@ -877,11 +881,7 @@ export class OpenCookDatabase extends Dexie {
             list.periodEnd >= list.periodStart
               ? list.periodEnd
               : addDays(list.periodStart, 6)
-          const period = shoppingPeriodFromRange(
-            list.periodStart,
-            rawEnd,
-            list.isTransition === true,
-          )
+          const period = shoppingPeriodFromRange(list.periodStart, rawEnd)
           const name = String(list.name ?? '').startsWith('Donnerstags-Einkauf')
             ? standardShoppingListName(DEFAULT_STANDARD_SHOPPING_LIST_NAME, period)
             : list.name
@@ -889,6 +889,43 @@ export class OpenCookDatabase extends Dexie {
             await listTable.put({ ...list, periodEnd: period.end, name })
           }
         }
+      })
+    // v19 removes the planned shopping-cycle change. A stored pending weekday
+    // is promoted to the normal setting instead of being discarded; all
+    // standard-list boundaries and shopping rows stay untouched.
+    this.version(19)
+      .stores({
+        recipes:
+          'id, &importId, title, updatedAt, *categories, *cuisine, *dishType, effort, *tags, favorite, wantToCook, importUrl',
+        images: 'id, recipeId, [recipeId+position]',
+        mealPlans:
+          'id, date, [date+slot], recipeId, freeDishId, pinned, cooked, cookSessionId, status',
+        mealDays: 'date',
+        settings: 'key',
+        cookSessions: 'id, recipeId, freeDishId, date, status, [recipeId+date]',
+        dayNotes: 'date, updatedAt',
+        freeDishes: 'id, updatedAt',
+        shoppingManualItems: 'id, shoppingDate, weekStart, listId',
+        shoppingChecks: 'id, weekStart, [weekStart+itemKey], itemKey',
+        shoppingPurchases:
+          'id, shoppingDate, itemKey, createdAt, [itemKey+shoppingDate], listId, manualItemId',
+        shoppingItemRules: 'key, updatedAt',
+        shoppingQuantityCorrections:
+          'id, shoppingDate, itemKey, [itemKey+shoppingDate]',
+        shoppingLists: 'id, kind, periodStart, createdAt',
+        shoppingDemandAllocations:
+          'id, periodStart, itemKey, listId, [periodStart+itemKey]',
+        pantryItems: null,
+        cookProgress: 'cookSessionId, updatedAt',
+      })
+      .upgrade(async (transaction) => {
+        const settingsTable = transaction.table<SettingRecord, string>('settings')
+        const pendingRow = await settingsTable.get(LEGACY_SHOPPING_CYCLE_PENDING_KEY)
+        if (!pendingRow) return
+        const day = legacyPendingShoppingCycleDay(pendingRow.value)
+        if (day === null) return
+        await settingsTable.put({ key: SHOPPING_PERIOD_START_DAY_KEY, value: day })
+        await settingsTable.delete(LEGACY_SHOPPING_CYCLE_PENDING_KEY)
       })
   }
 }

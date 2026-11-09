@@ -3,10 +3,10 @@
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Central, persistent shopping-cycle configuration. These settings are stored
- * in the existing `settings` table (so backups keep them) but are deliberately
- * independent from the visual calendar week start. No shopping service may
- * assume a fixed weekday or a fixed standard-list name.
+ * Central, persistent shopping configuration. These settings are stored in the
+ * existing `settings` table (so backups keep them) but are deliberately
+ * independent from the visual calendar week start. The shopping weekday is a
+ * plain setting: it is read on every period resolution and has no schedule.
  */
 
 import { db } from '../db'
@@ -18,7 +18,11 @@ export { DEFAULT_STANDARD_SHOPPING_LIST_NAME }
 
 export const SHOPPING_PERIOD_START_DAY_KEY = 'shoppingPeriodStartDay'
 export const STANDARD_SHOPPING_LIST_NAME_KEY = 'standardShoppingListName'
-export const SHOPPING_CYCLE_PENDING_KEY = 'shoppingCyclePending'
+/**
+ * Obsolete key of the removed "planned rhythm change" setting. It is only read
+ * by the migration helpers below so an existing plan is not silently dropped.
+ */
+export const LEGACY_SHOPPING_CYCLE_PENDING_KEY = 'shoppingCyclePending'
 
 /**
  * Initial value for existing installations: the historical shopping logic
@@ -26,64 +30,17 @@ export const SHOPPING_CYCLE_PENDING_KEY = 'shoppingCyclePending'
  * never be used as a hidden fallback when the user changed it.
  */
 export const DEFAULT_SHOPPING_PERIOD_START_DAY = 3
-/** Re-exported from the pure domain module to keep a single product default. */
 export const MAX_STANDARD_LIST_NAME_LENGTH = 60
 
-export interface PendingShoppingCycleChange {
-  /** 0 = Monday … 6 = Sunday. */
-  periodStartDay: number
-  /** First day the new rhythm applies; persisted and stable. */
-  effectiveFrom: string
-  createdAt: number
-}
-
 export interface ShoppingSettings {
-  /** 0 = Monday … 6 = Sunday; the currently stored base weekday. */
+  /** 0 = Monday … 6 = Sunday. */
   periodStartDay: number
   /** Editable base name of every standard shopping list. */
   standardListName: string
-  /** A stored, possibly future rhythm change. */
-  pending: PendingShoppingCycleChange | null
 }
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-
-export function normalizePendingShoppingCycleChange(
-  value: unknown,
-): PendingShoppingCycleChange | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
-  const record = value as Record<string, unknown>
-  const periodStartDay = record.periodStartDay
-  const effectiveFrom = record.effectiveFrom
-  const createdAt = record.createdAt
-  if (
-    typeof periodStartDay !== 'number' ||
-    !Number.isFinite(periodStartDay) ||
-    typeof effectiveFrom !== 'string' ||
-    !DATE_RE.test(effectiveFrom)
-  ) {
-    return null
-  }
-  return {
-    periodStartDay: normalizeWeekday(periodStartDay),
-    effectiveFrom,
-    createdAt: typeof createdAt === 'number' && Number.isFinite(createdAt) ? createdAt : 0,
-  }
-}
-
-function parsePendingSetting(value: SettingRecord['value'] | undefined): PendingShoppingCycleChange | null {
-  if (typeof value !== 'string' || !value.trim()) return null
-  try {
-    return normalizePendingShoppingCycleChange(JSON.parse(value))
-  } catch {
-    return null
-  }
-}
-
-export function pendingShoppingCycleSettingValue(
-  pending: PendingShoppingCycleChange | null,
-): string | null {
-  return pending ? JSON.stringify(pending) : null
+function numeric(value: SettingRecord['value'] | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 export function normalizeStandardListName(value: unknown): string {
@@ -101,12 +58,7 @@ export function normalizeShoppingSettings(
         ? normalizeWeekday(value.periodStartDay)
         : DEFAULT_SHOPPING_PERIOD_START_DAY,
     standardListName: normalizeStandardListName(value.standardListName),
-    pending: normalizePendingShoppingCycleChange(value.pending),
   }
-}
-
-function numeric(value: SettingRecord['value'] | undefined): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 /** Pure parser shared by live-query consumers, backup import and tests. */
@@ -118,7 +70,6 @@ export function shoppingSettingsFromRows(
   return normalizeShoppingSettings({
     periodStartDay: numeric(byKey.get(SHOPPING_PERIOD_START_DAY_KEY)),
     standardListName: typeof rawName === 'string' ? rawName : undefined,
-    pending: parsePendingSetting(byKey.get(SHOPPING_CYCLE_PENDING_KEY)),
   })
 }
 
@@ -126,7 +77,49 @@ export async function getShoppingSettings(): Promise<ShoppingSettings> {
   const rows = await db.settings.bulkGet([
     SHOPPING_PERIOD_START_DAY_KEY,
     STANDARD_SHOPPING_LIST_NAME_KEY,
-    SHOPPING_CYCLE_PENDING_KEY,
   ])
   return shoppingSettingsFromRows(rows.filter((row): row is SettingRecord => Boolean(row)))
+}
+
+/* ------------------------------------------------------------------ */
+/* Migration-only helpers for the removed planned-change setting        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Read the weekday out of the obsolete pending row. Returns `null` when the
+ * stored value is missing or unusable, so callers can leave it untouched.
+ */
+export function legacyPendingShoppingCycleDay(value: unknown): number | null {
+  if (typeof value !== 'string' || !value.trim()) return null
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+    const day = (parsed as Record<string, unknown>).periodStartDay
+    if (typeof day !== 'number' || !Number.isFinite(day)) return null
+    return normalizeWeekday(day)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Promote an old planned change into the normal setting and drop the obsolete
+ * row. Nothing is scheduled anymore: the user's last chosen weekday simply
+ * becomes the current setting. When the row is unusable it is preserved.
+ */
+export function normalizeLegacyShoppingSettingsRows(
+  rows: readonly SettingRecord[],
+): SettingRecord[] {
+  const pending = rows.find((row) => row.key === LEGACY_SHOPPING_CYCLE_PENDING_KEY)
+  if (!pending) return [...rows]
+  const day = legacyPendingShoppingCycleDay(pending.value)
+  if (day === null) return [...rows]
+  return [
+    ...rows.filter(
+      (row) =>
+        row.key !== LEGACY_SHOPPING_CYCLE_PENDING_KEY &&
+        row.key !== SHOPPING_PERIOD_START_DAY_KEY,
+    ),
+    { key: SHOPPING_PERIOD_START_DAY_KEY, value: day },
+  ]
 }

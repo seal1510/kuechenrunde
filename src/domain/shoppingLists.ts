@@ -14,7 +14,7 @@
  */
 
 import type { ShoppingAllocationMode, ShoppingDemandAllocation, ShoppingList } from '../types'
-import { addDays, dayNumber, formatWeekRange, normalizeWeekday, startOfWeekOn } from './dates'
+import { addDays, dayNumber, formatWeekRange, startOfWeekOn } from './dates'
 import type { ShoppingAmountPosition } from './shopping'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -31,48 +31,12 @@ export interface ShoppingPeriod {
   end: string
   days: string[]
   label: string
-  /** One-time shortened period created while the shopping weekday changes. */
-  isTransition: boolean
-}
-
-/**
- * Structural timing information needed to resolve a period for a date. A
- * pending plan only applies from its effective date onwards, so dates before
- * it keep the old weekday and are never reinterpreted.
- */
-export interface ShoppingCycleTiming {
-  periodStartDay: number
-  pending?: {
-    periodStartDay: number
-    effectiveFrom: string
-  } | null
-}
-
-export function periodStartDayForDate(
-  settings: ShoppingCycleTiming,
-  date: string,
-): number {
-  const pending = settings.pending
-  if (
-    pending &&
-    DATE_RE.test(pending.effectiveFrom) &&
-    DATE_RE.test(date) &&
-    date >= pending.effectiveFrom
-  ) {
-    return normalizeWeekday(pending.periodStartDay)
-  }
-  return normalizeWeekday(settings.periodStartDay)
 }
 
 export interface ShoppingPeriodOverlap {
   firstListId: string
   secondListId: string
   /** Inclusive overlapping date range. */
-  start: string
-  end: string
-}
-
-export interface ShoppingPeriodGap {
   start: string
   end: string
 }
@@ -106,7 +70,6 @@ export function shoppingPeriod(anchor: string, startDay: number): ShoppingPeriod
     end,
     days,
     label: formatWeekRange(start, end),
-    isTransition: false,
   }
 }
 
@@ -118,7 +81,6 @@ export function shoppingPeriod(anchor: string, startDay: number): ShoppingPeriod
 export function shoppingPeriodFromRange(
   start: string,
   end: string,
-  isTransition = false,
 ): ShoppingPeriod {
   const last = dayNumber(end) >= dayNumber(start) ? end : start
   const days: string[] = []
@@ -132,7 +94,6 @@ export function shoppingPeriodFromRange(
     end: last,
     days,
     label: formatWeekRange(start, last),
-    isTransition,
   }
 }
 
@@ -142,7 +103,7 @@ export function shoppingPeriodFromList(list: ShoppingList): ShoppingPeriod {
     throw new Error('A standard shopping list has no persisted period.')
   }
   const end = list.periodEnd ?? addDays(start, 6)
-  return shoppingPeriodFromRange(start, end, list.isTransition === true)
+  return shoppingPeriodFromRange(start, end)
 }
 
 export function periodContainsDate(
@@ -167,13 +128,14 @@ export interface ShoppingPeriodResolution {
 
 /**
  * Resolve the period for [anchor] with an explicit ambiguity result. Persisted
- * periods win; the current/pending configuration is only used when no stored
- * period covers the date. Multiple covering standard lists are a conflict and
- * are never resolved by "latest start wins".
+ * periods win. When no stored period covers the date, the configured weekday
+ * applies, but the period is trimmed at persisted periods so a changed weekday
+ * can never overlap or re-date existing shopping lists. Multiple covering
+ * standard lists are a conflict and are never resolved by "latest start wins".
  */
 export function resolveShoppingPeriodResolution(
   anchor: string,
-  settings: ShoppingCycleTiming,
+  settings: { periodStartDay: number },
   lists: readonly ShoppingList[],
 ): ShoppingPeriodResolution {
   const containing = lists.filter(
@@ -186,7 +148,9 @@ export function resolveShoppingPeriodResolution(
   if (containing.length > 1) {
     const first = containing[0]
     return {
-      period: first ? shoppingPeriodFromList(first) : shoppingPeriod(anchor, periodStartDayForDate(settings, anchor)),
+      period: first
+        ? shoppingPeriodFromList(first)
+        : configuredPeriodWithoutOverlap(anchor, settings, lists),
       conflict: {
         code: 'overlapping-periods',
         date: anchor,
@@ -197,15 +161,42 @@ export function resolveShoppingPeriodResolution(
   const hit = containing[0]
   if (hit) return { period: shoppingPeriodFromList(hit), conflict: null }
   return {
-    period: shoppingPeriod(anchor, periodStartDayForDate(settings, anchor)),
+    period: configuredPeriodWithoutOverlap(anchor, settings, lists),
     conflict: null,
   }
+}
+
+/**
+ * The configured weekly period for an uncovered date, trimmed at any persisted
+ * standard list that overlaps it. This is a stateless resolution rule: no
+ * transition period is stored, scheduled or previewed.
+ */
+function configuredPeriodWithoutOverlap(
+  anchor: string,
+  settings: { periodStartDay: number },
+  lists: readonly ShoppingList[],
+): ShoppingPeriod {
+  const period = shoppingPeriod(anchor, settings.periodStartDay)
+  let start = period.start
+  let end = period.end
+  for (const list of lists) {
+    if (list.kind !== 'standard') continue
+    if (!list.periodStart || !list.periodEnd) continue
+    if (!DATE_RE.test(list.periodStart) || !DATE_RE.test(list.periodEnd)) continue
+    if (list.periodStart > end || list.periodEnd < start) continue
+    if (list.periodEnd < anchor) {
+      if (list.periodEnd >= start) start = addDays(list.periodEnd, 1)
+    } else if (list.periodStart > anchor) {
+      if (list.periodStart <= end) end = addDays(list.periodStart, -1)
+    }
+  }
+  return shoppingPeriodFromRange(start, end)
 }
 
 /** Strict resolver: an ambiguous date throws instead of picking a list. */
 export function resolveShoppingPeriodFromData(
   anchor: string,
-  settings: ShoppingCycleTiming,
+  settings: { periodStartDay: number },
   lists: readonly ShoppingList[],
 ): ShoppingPeriod {
   const resolution = resolveShoppingPeriodResolution(anchor, settings, lists)
@@ -251,39 +242,6 @@ export function findOverlappingStandardPeriods(
   return overlaps
 }
 
-/** Gaps in the coverage of [from]…[to] by the supplied periods. */
-export function findStandardPeriodGaps(
-  periods: readonly ShoppingList[],
-  from: string,
-  to: string,
-): ShoppingPeriodGap[] {
-  if (!DATE_RE.test(from) || !DATE_RE.test(to) || from > to) return []
-  const sorted = periods
-    .filter(
-      (list): list is ShoppingList & { periodStart: string; periodEnd: string } =>
-        list.kind === 'standard' &&
-        typeof list.periodStart === 'string' &&
-        typeof list.periodEnd === 'string' &&
-        DATE_RE.test(list.periodStart) &&
-        DATE_RE.test(list.periodEnd),
-    )
-    .slice()
-    .sort((a, b) => a.periodStart.localeCompare(b.periodStart))
-  const gaps: ShoppingPeriodGap[] = []
-  let cursor = from
-  for (const period of sorted) {
-    if (period.periodEnd < cursor) continue
-    if (period.periodStart > cursor) {
-      gaps.push({ start: cursor, end: addDays(period.periodStart, -1) })
-    }
-    const next = addDays(period.periodEnd, 1)
-    if (next > cursor) cursor = next
-    if (cursor > to) break
-  }
-  if (cursor <= to) gaps.push({ start: cursor, end: to })
-  return gaps
-}
-
 /** Stable, name-independent identity of the standard list for one period. */
 export function standardShoppingListId(periodStart: string): string {
   return `${STANDARD_SHOPPING_LIST_PREFIX}${periodStart}`
@@ -310,12 +268,10 @@ export function standardShoppingListRecord(
     name: standardShoppingListName(baseName, period),
     periodStart: period.start,
     periodEnd: period.end,
-    ...(period.isTransition ? { isTransition: true } : {}),
     createdAt: now,
     updatedAt: now,
   }
 }
-
 
 /** Deterministic allocation identity; repeated writes cannot duplicate rows. */
 export function shoppingAllocationId(

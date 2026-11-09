@@ -360,9 +360,9 @@ export interface ShoppingList {
   /** Last day of the persisted shopping period; `null` for free lists. */
   periodEnd: string | null
   /**
-   * One-time shortened period created while the configured shopping weekday
-   * changes. Its persisted start/end are authoritative and are never
-   * recomputed from the current setting.
+   * Legacy marker from the removed transition-period handling. It is kept only
+   * so older rows survive a backup roundtrip unchanged; period resolution no
+   * longer interprets it.
    */
   isTransition?: boolean
   createdAt: number

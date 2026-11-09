@@ -33,7 +33,7 @@ import {
 import { addDays } from '../domain/dates'
 import {
   DEFAULT_STANDARD_SHOPPING_LIST_NAME,
-  SHOPPING_CYCLE_PENDING_KEY,
+  normalizeLegacyShoppingSettingsRows,
   SHOPPING_PERIOD_START_DAY_KEY,
   STANDARD_SHOPPING_LIST_NAME_KEY,
   shoppingSettingsFromRows,
@@ -360,17 +360,6 @@ export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: Bac
   return { bytes, manifest }
 }
 
-function samePendingCycle(
-  left: { periodStartDay: number; effectiveFrom: string } | null | undefined,
-  right: { periodStartDay: number; effectiveFrom: string } | null | undefined,
-): boolean {
-  if (!left || !right) return !left && !right
-  return (
-    left.periodStartDay === right.periodStartDay &&
-    left.effectiveFrom === right.effectiveFrom
-  )
-}
-
 export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspection> {
   if (buffer.byteLength === 0) throw new BackupError('Die Backup-Datei ist leer.')
   if (buffer.byteLength > MAX_BACKUP_BYTES) {
@@ -486,7 +475,9 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     dayNotes?: unknown
     freeDishes?: unknown
   }>('mealplan.json')
-  const settings = Array.isArray(planFile.settings) ? (planFile.settings as SettingRecord[]) : []
+  const settings = normalizeLegacyShoppingSettingsRows(
+    Array.isArray(planFile.settings) ? (planFile.settings as SettingRecord[]) : [],
+  )
   const householdSetting = settings.find((setting) => setting.key === 'householdSize')
   const householdSize =
     typeof householdSetting?.value === 'number' && householdSetting.value >= 1
@@ -975,14 +966,12 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
   const backupHasShoppingCycle = settings.some(
     (setting) =>
       setting.key === SHOPPING_PERIOD_START_DAY_KEY ||
-      setting.key === STANDARD_SHOPPING_LIST_NAME_KEY ||
-      setting.key === SHOPPING_CYCLE_PENDING_KEY,
+      setting.key === STANDARD_SHOPPING_LIST_NAME_KEY,
   )
   const shoppingCycleConflicts = backupHasShoppingCycle
     ? [
         localShoppingCycle.periodStartDay !== backupSettings.periodStartDay,
         localShoppingCycle.standardListName !== backupSettings.standardListName,
-        !samePendingCycle(localShoppingCycle.pending, backupSettings.pending),
       ].filter(Boolean).length
     : 0
   if (shoppingCycleConflicts > 0) {
@@ -1453,8 +1442,10 @@ function normalizeShoppingList(value: unknown, index: number): ShoppingList | nu
     /^\d{4}-\d{2}-\d{2}$/.test(rawEnd) && rawEnd >= periodStart
       ? rawEnd
       : addDays(periodStart, 6)
+  // The flag is no longer interpreted; it is preserved so old transition
+  // metadata is not silently dropped from a backup roundtrip.
   const isTransition = value.isTransition === true
-  const period = shoppingPeriodFromRange(periodStart, periodEnd, isTransition)
+  const period = shoppingPeriodFromRange(periodStart, periodEnd)
   const rawName = asString(value.name).replace(/\s+/g, ' ').trim()
   // The obsolete generated name is replaced by the neutral default, matching
   // the Dexie v18 migration. A genuinely custom name is preserved.
@@ -1594,19 +1585,6 @@ export async function restoreBackup(
             )
             .join(', ')}. Es wurden keine Daten verändert.`,
         )
-      }
-      if (mode === 'merge') {
-        const localSettings = shoppingSettingsFromRows(await db.settings.toArray())
-        const localPending = localSettings.pending
-        const backupPending = inspection.shoppingCycle.pending
-        if (
-          backupPending &&
-          !samePendingCycle(backupPending, localPending)
-        ) {
-          throw new BackupError(
-            'Das Backup enthält eine geplante Rhythmusänderung, die von der lokalen Planung abweicht. „Zusammenführen“ würde die lokale Einkaufskonfiguration verändern. Bitte „Lokal ersetzen“ verwenden oder das Backup ohne geplante Änderung einspielen. Es wurden keine Daten verändert.',
-          )
-        }
       }
       if (mode === 'replace') {
         await Promise.all([
@@ -1797,9 +1775,6 @@ export async function restoreBackup(
     const existingSettings = new Set((await db.settings.toArray()).map((setting) => setting.key))
     for (const setting of inspection.settings) {
       if (existingSettings.has(setting.key)) continue
-      // Merge never installs a future rhythm change from another installation;
-      // the local shopping configuration always wins. Replace imports it.
-      if (setting.key === SHOPPING_CYCLE_PENDING_KEY) continue
       await db.settings.put(setting)
       existingSettings.add(setting.key)
       result.addedSettings += 1

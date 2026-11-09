@@ -113,8 +113,9 @@ export function shoppingWeek(anchor: string, weekStartDay: number): ShoppingWeek
 }
 
 /**
- * A persisted shopping period can be shorter than seven days (transition while
- * the configured shopping weekday changes). Its boundaries are authoritative.
+ * A persisted shopping period can be shorter than seven days when it fills the
+ * gap left by an existing list under another rhythm. Its boundaries are
+ * authoritative.
  */
 export function shoppingWeekFromRange(start: string, end: string): ShoppingWeek {
   const last = end >= start ? end : start
@@ -1257,8 +1258,8 @@ export interface ShoppingListInput {
   weekStartDay?: number
   /**
    * Persisted period boundaries. When both are supplied they decide the visible
-   * window, including a shortened transition period; `weekStartDay` is then
-   * only a compatibility field and must not move the period.
+   * window, including a shortened gap period; `weekStartDay` is then only a
+   * compatibility field and must not move the period.
    */
   periodStart?: string
   periodEnd?: string
