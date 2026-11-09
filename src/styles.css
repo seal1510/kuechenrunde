@@ -7013,6 +7013,84 @@ body.calendar-dragging * {
   line-height: 1.4;
 }
 
+.shopping-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-soft) 42%, var(--surface));
+}
+
+.shopping-review h2 {
+  margin: 0;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.shopping-review-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.shopping-review-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.35rem 0.6rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.shopping-review-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.shopping-review-text {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.shopping-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.shopping-review-action {
+  min-height: 2.4rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.74rem;
+  font-weight: 600;
+  touch-action: manipulation;
+}
+
+.shopping-review-action:hover,
+.shopping-review-action:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.shopping-review-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .shopping-flash {
   margin: 0;
   padding: 0.45rem 0.65rem;

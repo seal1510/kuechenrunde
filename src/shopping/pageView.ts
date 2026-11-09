@@ -14,7 +14,9 @@
 import { todayKey } from '../domain/dates'
 import {
   buildShoppingList,
+  formatShoppingAmount,
   guessShoppingCategory,
+  resolveCanonicalKey,
   SHOPPING_CATEGORIES,
   shoppingItemKey,
   splitIngredientName,
@@ -23,6 +25,7 @@ import {
   type ShoppingListItem,
 } from '../domain/shopping'
 import {
+  fromAmountMilli,
   periodContainsDate,
   resolveShoppingDistribution,
   resolveShoppingPeriodResolution,
@@ -76,7 +79,24 @@ export interface ShoppingPageList {
   isStandard: boolean
   openCount: number
   doneCount: number
+  reviewCount: number
   requiresReview: boolean
+}
+
+/**
+ * A preserved allocation or purchase that can no longer be applied to the
+ * current demand. It stays visible and removable instead of becoming a warning
+ * without a row.
+ */
+export interface ShoppingPageReviewRow {
+  id: string
+  listId: string
+  itemKey: string
+  name: string
+  allocationIds: string[]
+  purchaseIds: string[]
+  allocationLabels: string[]
+  purchaseLabels: string[]
 }
 
 export interface ShoppingPageRow {
@@ -115,6 +135,7 @@ export interface ShoppingPageView {
   standardListId: string
   lists: ShoppingPageList[]
   rowsByList: Record<string, ShoppingPageRow[]>
+  reviewRowsByList: Record<string, ShoppingPageReviewRow[]>
   warnings: string[]
   requiresReview: boolean
   /** Count of rows that are preserved but not booked as bought. */
@@ -453,6 +474,162 @@ function sortRows(
   })
 }
 
+function buildItemNameMap(input: ShoppingPageViewInput): Map<string, string> {
+  const rules = input.rules
+  const names = new Map<string, string>()
+  for (const rule of rules) {
+    const display = rule.displayName.trim()
+    if (!display) continue
+    const key = resolveCanonicalKey(rule.key, rules)
+    if (!names.has(key)) names.set(key, display)
+  }
+  const addName = (rawName: string) => {
+    const split = splitIngredientName(rawName)
+    const rawKey = shoppingItemKey(split.identityName)
+    if (!rawKey) return
+    const key = resolveCanonicalKey(rawKey, rules)
+    const label = split.name.trim() || rawName.trim()
+    if (label && !names.has(key)) names.set(key, label)
+  }
+  for (const recipe of input.recipes) {
+    for (const ingredient of recipe.ingredients) addName(ingredient.name)
+  }
+  for (const freeDish of input.freeDishes) {
+    for (const ingredient of freeDish.ingredients) addName(ingredient.name)
+  }
+  for (const manual of input.manualItems) addName(manual.name)
+  return names
+}
+
+function allocationLabel(allocation: ShoppingDemandAllocation): string {
+  if (allocation.mode === 'full') {
+    return allocation.dimension === '*' ? 'Gesamte Zutat' : 'Gesamte Menge'
+  }
+  const amount = fromAmountMilli(allocation.quantityMilli ?? 0)
+  return formatShoppingAmount({
+    dimension: allocation.dimension,
+    unit: allocation.dimension === 'count' ? 'Stück' : null,
+    lower: amount,
+    upper: amount,
+    qualifier: '',
+  })
+}
+
+function purchaseLabel(purchase: ShoppingPurchase): string {
+  if (purchase.amounts.length === 0) return 'ohne Mengenangabe'
+  return purchase.amounts
+    .map((amount) =>
+      formatShoppingAmount({
+        dimension: amount.dimension,
+        unit: amount.dimension === 'count' ? 'Stück' : null,
+        lower: amount.lower,
+        upper: amount.upper,
+        qualifier: '',
+      }),
+    )
+    .join(' · ')
+}
+
+interface MutableReviewRow {
+  listId: string
+  itemKey: string
+  allocationIds: Set<string>
+  purchaseIds: Set<string>
+  allocationLabels: Set<string>
+  purchaseLabels: Set<string>
+}
+
+function buildReviewRows(
+  input: ShoppingPageViewInput,
+  distribution: ShoppingDistributionResult,
+  serviceConflicts: readonly ShoppingListServiceConflict[],
+  itemNames: ReadonlyMap<string, string>,
+): Record<string, ShoppingPageReviewRow[]> {
+  const standardId = standardShoppingListId(distribution.period.start)
+  const listIds = new Set<string>([
+    ...input.lists.map((list) => list.id),
+    standardId,
+  ])
+  const rows = new Map<string, MutableReviewRow>()
+  const seenAllocations = new Set<string>()
+  const ensure = (listId: string, itemKey: string): MutableReviewRow => {
+    const key = `${listId}\u0000${itemKey}`
+    const existing = rows.get(key)
+    if (existing) return existing
+    const created: MutableReviewRow = {
+      listId,
+      itemKey,
+      allocationIds: new Set(),
+      purchaseIds: new Set(),
+      allocationLabels: new Set(),
+      purchaseLabels: new Set(),
+    }
+    rows.set(key, created)
+    return created
+  }
+  const addAllocation = (allocation: ShoppingDemandAllocation) => {
+    if (seenAllocations.has(allocation.id)) return
+    seenAllocations.add(allocation.id)
+    const reviewListId = listIds.has(allocation.listId)
+      ? allocation.listId
+      : standardId
+    const entry = ensure(reviewListId, allocation.itemKey)
+    entry.allocationIds.add(allocation.id)
+    entry.allocationLabels.add(allocationLabel(allocation))
+  }
+
+  for (const allocation of distribution.orphanedAllocations) {
+    addAllocation(allocation)
+  }
+  for (const position of distribution.positions) {
+    for (const resolved of position.allocations) {
+      if (!resolved.allocation.listId) continue
+      const notApplied =
+        resolved.blocked ||
+        (resolved.effectiveLower <= 0 && resolved.effectiveUpper <= 0)
+      if (notApplied) addAllocation(resolved.allocation)
+    }
+  }
+  for (const conflict of serviceConflicts) {
+    if (conflict.code !== 'unmatched-purchase') continue
+    if (!conflict.purchaseId) continue
+    const purchase = input.purchases.find(
+      (entry) => entry.id === conflict.purchaseId,
+    )
+    if (!purchase) continue
+    const reviewListId =
+      conflict.listId && listIds.has(conflict.listId)
+        ? conflict.listId
+        : standardId
+    const itemKey = resolveCanonicalKey(purchase.itemKey, input.rules)
+    const entry = ensure(reviewListId, itemKey)
+    entry.purchaseIds.add(purchase.id)
+    entry.purchaseLabels.add(purchaseLabel(purchase))
+  }
+
+  const byList: Record<string, ShoppingPageReviewRow[]> = {}
+  for (const entry of rows.values()) {
+    if (entry.allocationIds.size === 0 && entry.purchaseIds.size === 0) continue
+    const row: ShoppingPageReviewRow = {
+      id: `review:${entry.listId}:${entry.itemKey}`,
+      listId: entry.listId,
+      itemKey: entry.itemKey,
+      name: itemNames.get(entry.itemKey) ?? entry.itemKey,
+      allocationIds: Array.from(entry.allocationIds).sort(),
+      purchaseIds: Array.from(entry.purchaseIds).sort(),
+      allocationLabels: Array.from(entry.allocationLabels),
+      purchaseLabels: Array.from(entry.purchaseLabels),
+    }
+    const list = byList[entry.listId] ?? []
+    list.push(row)
+    byList[entry.listId] = list
+  }
+  for (const list of Object.values(byList)) {
+    list.sort((left, right) => left.name.localeCompare(right.name, 'de'))
+  }
+  return byList
+}
+
 export function buildShoppingPageView(input: ShoppingPageViewInput): ShoppingPageView {
   const today = input.today ?? todayKey()
   const settings = shoppingSettingsFromRows(input.settingsRows)
@@ -486,6 +663,7 @@ export function buildShoppingPageView(input: ShoppingPageViewInput): ShoppingPag
         isStandard: list.kind === 'standard',
         openCount: 0,
         doneCount: 0,
+        reviewCount: 0,
         requiresReview: true,
       }))
     return {
@@ -498,6 +676,7 @@ export function buildShoppingPageView(input: ShoppingPageViewInput): ShoppingPag
       standardListId: standardListIdValue,
       lists: overview,
       rowsByList: {},
+      reviewRowsByList: {},
       warnings: [],
       requiresReview: true,
       serviceConflicts: [],
@@ -575,6 +754,13 @@ export function buildShoppingPageView(input: ShoppingPageViewInput): ShoppingPag
     rowsByList[listId] = sortRows(rows, categoryOrder)
   }
 
+  const itemNames = buildItemNameMap(input)
+  const reviewRowsByList = buildReviewRows(
+    input,
+    distribution,
+    openDemand.serviceConflicts,
+    itemNames,
+  )
   const summaryById = new Map(
     openDemand.lists.map((summary) => [summary.listId, summary]),
   )
@@ -582,6 +768,7 @@ export function buildShoppingPageView(input: ShoppingPageViewInput): ShoppingPag
     .filter((list, index, all) => all.findIndex((entry) => entry.id === list.id) === index)
     .map((list) => {
       const rows = rowsByList[list.id] ?? []
+      const reviewCount = reviewRowsByList[list.id]?.length ?? 0
       return {
         id: list.id,
         kind: list.kind,
@@ -592,7 +779,9 @@ export function buildShoppingPageView(input: ShoppingPageViewInput): ShoppingPag
         isStandard: list.kind === 'standard',
         openCount: rows.filter((row) => row.status === 'open').length,
         doneCount: rows.filter((row) => row.status === 'done').length,
-        requiresReview: summaryById.get(list.id)?.requiresReview ?? false,
+        reviewCount,
+        requiresReview:
+          (summaryById.get(list.id)?.requiresReview ?? false) || reviewCount > 0,
       }
     })
 
@@ -606,11 +795,19 @@ export function buildShoppingPageView(input: ShoppingPageViewInput): ShoppingPag
             return manualById.get(conflict.manualItemId)?.name ?? ''
           }
           if (!conflict.itemKey) return ''
-          return richByKey.get(conflict.itemKey)?.name ?? conflict.itemKey
+          return (
+            richByKey.get(conflict.itemKey)?.name ??
+            itemNames.get(conflict.itemKey) ??
+            conflict.itemKey
+          )
         }),
         ...openDemand.conflicts.map((conflict) => {
           if (!conflict.itemKey) return ''
-          return richByKey.get(conflict.itemKey)?.name ?? conflict.itemKey
+          return (
+            richByKey.get(conflict.itemKey)?.name ??
+            itemNames.get(conflict.itemKey) ??
+            conflict.itemKey
+          )
         }),
       ]
         .map((label) => label.trim())
@@ -628,6 +825,7 @@ export function buildShoppingPageView(input: ShoppingPageViewInput): ShoppingPag
     standardListId: standardListIdValue,
     lists,
     rowsByList,
+    reviewRowsByList,
     warnings: richList.warnings,
     requiresReview: openDemand.requiresReview,
     serviceConflicts: openDemand.serviceConflicts,

@@ -72,6 +72,7 @@ import {
 import {
   buildShoppingPageView,
   type ShoppingPageList,
+  type ShoppingPageReviewRow,
   type ShoppingPageRow,
   type ShoppingPageView,
 } from '../shopping/pageView'
@@ -178,6 +179,7 @@ export function ShoppingPage() {
   const [distributingItemKey, setDistributingItemKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [flash, setFlash] = useState<string | null>(null)
+  const [reviewBusyId, setReviewBusyId] = useState<string | null>(null)
   const [undoItem, setUndoItem] = useState<{
     item: ShoppingManualItem
     purchases: ShoppingPurchase[]
@@ -252,6 +254,9 @@ export function ShoppingPage() {
     ? standardListDisplayName
     : (selectedList?.name ?? '')
   const selectedRows = selectedList ? (view?.rowsByList[selectedList.id] ?? []) : []
+  const reviewRows = selectedList
+    ? (view?.reviewRowsByList[selectedList.id] ?? [])
+    : []
   const openRows = selectedRows.filter((row) => row.status === 'open')
   const doneRows = selectedRows.filter((row) => row.status === 'done')
   const distributionLists = useMemo(
@@ -546,6 +551,36 @@ export function ShoppingPage() {
     })
   }
 
+  async function removeReviewAllocations(row: ShoppingPageReviewRow) {
+    if (reviewBusyId) return
+    setReviewBusyId(row.id)
+    try {
+      const success = await run(async () => {
+        for (const id of row.allocationIds) {
+          await removeShoppingAllocation(id)
+        }
+      })
+      if (success) setFlash(`Zuordnung für „${row.name}“ entfernt.`)
+    } finally {
+      setReviewBusyId(null)
+    }
+  }
+
+  async function removeReviewPurchases(row: ShoppingPageReviewRow) {
+    if (reviewBusyId) return
+    setReviewBusyId(row.id)
+    try {
+      const success = await run(async () => {
+        for (const id of row.purchaseIds) {
+          await removeShoppingPurchase(id)
+        }
+      })
+      if (success) setFlash(`Kauf für „${row.name}“ entfernt.`)
+    } finally {
+      setReviewBusyId(null)
+    }
+  }
+
   function moveCategory(id: ShoppingCategoryId, direction: -1 | 1) {
     if (!view) return
     void run(async () => {
@@ -763,7 +798,11 @@ export function ShoppingPage() {
                     </span>
                     <span className="shopping-list-option-meta">
                       {list.openCount} offen · {list.doneCount} erledigt
-                      {list.requiresReview ? ' · prüfen' : ''}
+                      {list.reviewCount > 0
+                        ? ` · ${list.reviewCount} prüfen`
+                        : list.requiresReview
+                          ? ' · prüfen'
+                          : ''}
                     </span>
                   </button>
                 )
@@ -817,6 +856,11 @@ export function ShoppingPage() {
                   <span className="shopping-active-count">
                     {openRows.length} offen
                     {doneRows.length > 0 ? ` · ${doneRows.length} erledigt` : ''}
+                    {reviewRows.length > 0
+                      ? ` · ${reviewRows.length} prüfen`
+                      : selectedList.requiresReview
+                        ? ' · prüfen'
+                        : ''}
                   </span>
                 </div>
               </div>
@@ -864,7 +908,7 @@ export function ShoppingPage() {
               />
             ) : null}
 
-            {!view.conflict && selectedRows.length === 0 ? (
+            {!view.conflict && selectedRows.length === 0 && reviewRows.length === 0 ? (
               <div className="empty-state shopping-empty">
                 <h2>
                   {selectedList.isStandard ? 'Noch nichts zu kaufen' : 'Dieser Zettel ist leer'}
@@ -875,6 +919,23 @@ export function ShoppingPage() {
                     : 'Trage Artikel direkt ein – unabhängig von der Einkaufswoche.'}
                 </p>
               </div>
+            ) : null}
+
+            {!view.conflict && reviewRows.length > 0 ? (
+              <section className="shopping-review" aria-labelledby="shopping-review-title">
+                <h2 id="shopping-review-title">Zu prüfen</h2>
+                <ul className="shopping-review-list">
+                  {reviewRows.map((row) => (
+                    <ShoppingReviewRow
+                      key={row.id}
+                      row={row}
+                      busy={reviewBusyId === row.id}
+                      onRemoveAllocations={() => void removeReviewAllocations(row)}
+                      onRemovePurchases={() => void removeReviewPurchases(row)}
+                    />
+                  ))}
+                </ul>
+              </section>
             ) : null}
 
             {!view.conflict && openGroups.length > 0 ? (
@@ -1197,6 +1258,58 @@ function ShoppingRow({
         <div className="shopping-row-main">{content}</div>
       )}
       <RowActionsMenu label={`${accessibleName} weitere Aktionen`} actions={actions} />
+    </li>
+  )
+}
+
+export function ShoppingReviewRow({
+  row,
+  busy,
+  onRemoveAllocations,
+  onRemovePurchases,
+}: {
+  row: ShoppingPageReviewRow
+  busy: boolean
+  onRemoveAllocations: () => void
+  onRemovePurchases: () => void
+}) {
+  return (
+    <li className="shopping-review-row">
+      <div className="shopping-review-text">
+        <span className="shopping-row-name">{row.name}</span>
+        {row.allocationLabels.length > 0 ? (
+          <span className="shopping-row-note">
+            Nicht angewendete Zuordnung: {row.allocationLabels.join(' · ')}
+          </span>
+        ) : null}
+        {row.purchaseLabels.length > 0 ? (
+          <span className="shopping-row-note">
+            Kauf ohne passenden Bedarf: {row.purchaseLabels.join(' · ')}
+          </span>
+        ) : null}
+      </div>
+      <div className="shopping-review-actions">
+        {row.allocationIds.length > 0 ? (
+          <button
+            type="button"
+            className="shopping-review-action"
+            disabled={busy}
+            onClick={onRemoveAllocations}
+          >
+            Zuordnung entfernen
+          </button>
+        ) : null}
+        {row.purchaseIds.length > 0 ? (
+          <button
+            type="button"
+            className="shopping-review-action"
+            disabled={busy}
+            onClick={onRemovePurchases}
+          >
+            Kauf entfernen
+          </button>
+        ) : null}
+      </div>
     </li>
   )
 }

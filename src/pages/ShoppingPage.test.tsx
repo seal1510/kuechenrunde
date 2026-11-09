@@ -1,16 +1,25 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ShoppingDistributionPosition } from '../domain/shoppingLists'
-import type { ShoppingPageList } from '../shopping/pageView'
+import type {
+  ShoppingPageList,
+  ShoppingPageReviewRow,
+} from '../shopping/pageView'
 import type {
   CookSession,
   Ingredient,
   Recipe,
+  ShoppingDemandAllocation,
   ShoppingList,
   ShoppingManualItem,
   ShoppingPurchase,
 } from '../types'
-import { DistributionDialog, RowActionsMenu, ShoppingPage } from './ShoppingPage'
+import {
+  DistributionDialog,
+  RowActionsMenu,
+  ShoppingPage,
+  ShoppingReviewRow,
+} from './ShoppingPage'
 
 const live = vi.hoisted(() => {
   let call = 0
@@ -138,6 +147,7 @@ function standardPageList(): ShoppingPageList {
     isStandard: true,
     openCount: 1,
     doneCount: 0,
+    reviewCount: 0,
     requiresReview: false,
   }
 }
@@ -153,6 +163,7 @@ function marketPageList(): ShoppingPageList {
     isStandard: false,
     openCount: 1,
     doneCount: 0,
+    reviewCount: 0,
     requiresReview: false,
   }
 }
@@ -251,6 +262,72 @@ describe('shopping page', () => {
     expect(html).toContain('0 offen · 0 erledigt')
     expect(html).toContain('Woche')
     expect(html).not.toContain('Standardzettel')
+  })
+
+  it('shows stale allocations as review items in the overview', () => {
+    const dienstag = freeList({ id: 'free-dienstag', name: 'Dienstag' })
+    const allocation: ShoppingDemandAllocation = {
+      id: 'alloc-hackfleisch',
+      periodStart: '2026-05-07',
+      itemKey: 'hackfleisch gemischt',
+      dimension: 'mass',
+      listId: dienstag.id,
+      mode: 'partial',
+      quantityMilli: 200000,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    live.reset(
+      baseValues({
+        recipes: [
+          recipe({
+            ingredients: [
+              ingredient({
+                name: 'Hackfleisch (gemischt)',
+                raw: '400 g Hackfleisch (gemischt)',
+                quantity: 400,
+                quantityText: '400',
+                unit: 'g',
+              }),
+            ],
+          }),
+        ],
+        shoppingLists: [dienstag],
+        allocations: [allocation],
+      }),
+    )
+    const html = renderToStaticMarkup(<ShoppingPage />)
+
+    expect(html).toContain('0 offen · 0 erledigt · 1 prüfen')
+    expect(html).toContain('Einkaufszuordnung prüfen.')
+    expect(html).toContain('Hackfleisch')
+  })
+
+  it('renders reachable correction actions for stale rows', () => {
+    const row: ShoppingPageReviewRow = {
+      id: 'review:free-dienstag:hackfleisch gemischt',
+      listId: 'free-dienstag',
+      itemKey: 'hackfleisch gemischt',
+      name: 'Hackfleisch',
+      allocationIds: ['alloc-hackfleisch'],
+      purchaseIds: ['purchase-hackfleisch'],
+      allocationLabels: ['200 g'],
+      purchaseLabels: ['200 g'],
+    }
+    const html = renderToStaticMarkup(
+      <ShoppingReviewRow
+        row={row}
+        busy={false}
+        onRemoveAllocations={() => undefined}
+        onRemovePurchases={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('Hackfleisch')
+    expect(html).toContain('Nicht angewendete Zuordnung: 200 g')
+    expect(html).toContain('Kauf ohne passenden Bedarf: 200 g')
+    expect(html).toContain('Zuordnung entfernen')
+    expect(html).toContain('Kauf entfernen')
   })
 
   it('renders a compact move/split dialog with existing shares', () => {

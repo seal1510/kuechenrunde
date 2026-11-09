@@ -136,6 +136,22 @@ async function setTomatoDemand(quantity: number): Promise<void> {
   )
 }
 
+async function setHackfleischDemand(grams: number): Promise<void> {
+  await db.recipes.put(
+    recipe({
+      ingredients: [
+        ingredient({
+          name: 'Hackfleisch (gemischt)',
+          raw: `${grams} g Hackfleisch (gemischt)`,
+          quantity: grams,
+          quantityText: String(grams),
+          unit: 'g',
+        }),
+      ],
+    }),
+  )
+}
+
 async function loadView(anchor = PERIOD) {
   const [
     settingsRows,
@@ -871,5 +887,133 @@ describe('moving and splitting recipe ingredients', () => {
       rowsFor(view, list.id).find((row) => row.name === 'Zahnpasta')
         ?.purchasedPositions[0],
     ).toMatchObject({ lower: 1, upper: 1 })
+  })
+})
+
+describe('stale allocations and purchases', () => {
+  const hackfleischKey = shoppingItemKey('Hackfleisch gemischt')
+
+  it('keeps a stale fixed subset reachable when demand disappears and returns', async () => {
+    await setHackfleischDemand(400)
+    await db.cookSessions.put(session())
+    const dienstag = await createFreeShoppingList({ name: 'Dienstag' })
+    await assignShoppingSubquantity({
+      periodStart: PERIOD,
+      itemKey: hackfleischKey,
+      dimension: 'mass',
+      targetListId: dienstag.id,
+      quantity: 200,
+    })
+
+    let view = await loadView()
+    let row = rowsFor(view, dienstag.id).find((entry) => entry.name === 'Hackfleisch')
+    expect(row?.openPositions[0]).toMatchObject({ lower: 200, upper: 200 })
+    expect(
+      rowsFor(view, view.standardListId).find((entry) => entry.name === 'Hackfleisch')
+        ?.openPositions[0],
+    ).toMatchObject({ lower: 200, upper: 200 })
+    expect(view.reviewRowsByList[dienstag.id] ?? []).toHaveLength(0)
+
+    // A fixed subset larger than the reduced demand must be reported and the
+    // still-applied row must stay editable.
+    await setHackfleischDemand(150)
+    view = await loadView()
+    row = rowsFor(view, dienstag.id).find((entry) => entry.name === 'Hackfleisch')
+    expect(row?.openPositions[0]).toMatchObject({ lower: 150, upper: 150 })
+    expect(
+      view.distribution?.conflicts.some(
+        (conflict) => conflict.code === 'over-allocated',
+      ),
+    ).toBe(true)
+    expect(view.conflictLabels).toContain('Hackfleisch')
+
+    await addShoppingPurchase({
+      shoppingDate: PERIOD,
+      itemKey: hackfleischKey,
+      listId: dienstag.id,
+      amounts: [{ dimension: 'mass', lower: 200, upper: 200 }],
+      snapshot: row?.requiredPositions ?? [],
+    })
+
+    // Removing the planned cooking event leaves both rows preserved but
+    // without a demand row. They must become visible review rows, not vanish.
+    await db.cookSessions.clear()
+    view = await loadView()
+    const stale = view.reviewRowsByList[dienstag.id]?.[0]
+    expect(stale?.name).toBe('Hackfleisch')
+    expect(stale?.allocationIds).toHaveLength(1)
+    expect(stale?.purchaseIds).toHaveLength(1)
+    expect(stale?.allocationLabels).toEqual(['200 g'])
+    expect(stale?.purchaseLabels).toEqual(['200 g'])
+    expect(rowsFor(view, dienstag.id)).toHaveLength(0)
+    expect(view.lists.find((entry) => entry.id === dienstag.id)).toMatchObject({
+      openCount: 0,
+      doneCount: 0,
+      reviewCount: 1,
+      requiresReview: true,
+    })
+    expect(view.conflictLabels).toContain('Hackfleisch')
+
+    // If the demand returns, the stored decision applies again.
+    await db.cookSessions.put(session())
+    view = await loadView()
+    expect(view.reviewRowsByList[dienstag.id] ?? []).toHaveLength(0)
+    expect(
+      rowsFor(view, dienstag.id).find((entry) => entry.name === 'Hackfleisch')
+        ?.purchasedPositions[0],
+    ).toMatchObject({ lower: 200, upper: 200 })
+
+    // Removing the demand again exposes the same rows; the user can now
+    // explicitly remove the stale allocation and the unmatched purchase.
+    await db.cookSessions.clear()
+    view = await loadView()
+    const removable = view.reviewRowsByList[dienstag.id]?.[0]
+    expect(removable).toBeTruthy()
+    await removeShoppingAllocation(removable!.allocationIds[0]!)
+    view = await loadView()
+    expect(view.reviewRowsByList[dienstag.id]?.[0]?.allocationIds).toHaveLength(0)
+    expect(view.reviewRowsByList[dienstag.id]?.[0]?.purchaseIds).toHaveLength(1)
+    await removeShoppingPurchase(removable!.purchaseIds[0]!)
+    view = await loadView()
+    expect(view.reviewRowsByList[dienstag.id] ?? []).toHaveLength(0)
+  })
+
+  it('surfaces a zero-effective share on a second list after demand shrinks', async () => {
+    await setHackfleischDemand(400)
+    await db.cookSessions.put(session())
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const bioladen = await createFreeShoppingList({ name: 'Bioladen' })
+    await assignShoppingSubquantity({
+      periodStart: PERIOD,
+      itemKey: hackfleischKey,
+      dimension: 'mass',
+      targetListId: market.id,
+      quantity: 200,
+    })
+    await assignShoppingSubquantity({
+      periodStart: PERIOD,
+      itemKey: hackfleischKey,
+      dimension: 'mass',
+      targetListId: bioladen.id,
+      quantity: 200,
+    })
+
+    await setHackfleischDemand(150)
+    const view = await loadView()
+    const emptyList = [market, bioladen].find(
+      (list) => rowsFor(view, list.id).length === 0,
+    )
+    expect(emptyList).toBeTruthy()
+    const review = view.reviewRowsByList[emptyList!.id]?.[0]
+    expect(review?.name).toBe('Hackfleisch')
+    expect(review?.allocationIds).toHaveLength(1)
+    expect(review?.allocationLabels).toEqual(['200 g'])
+    expect(view.lists.find((entry) => entry.id === emptyList!.id)).toMatchObject({
+      openCount: 0,
+      doneCount: 0,
+      reviewCount: 1,
+      requiresReview: true,
+    })
+    expect(view.conflictLabels).toContain('Hackfleisch')
   })
 })
