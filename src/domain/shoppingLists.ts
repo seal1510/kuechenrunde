@@ -946,6 +946,8 @@ export interface ShoppingOpenPosition {
   openLower: number
   openUpper: number
   done: boolean
+  /** Purchase rows that contributed to this assigned amount. */
+  purchaseIds: string[]
 }
 
 export type ShoppingUnmatchedPurchaseReason = 'no-demand' | 'non-numeric'
@@ -978,17 +980,25 @@ export function resolveOpenShoppingAmounts(
   distribution: Pick<ShoppingDistributionResult, 'positions'>,
   purchases: readonly ShoppingPurchaseContribution[],
 ): ShoppingOpenResult {
-  const purchased = new Map<string, { lower: number; upper: number }>()
+  const purchased = new Map<
+    string,
+    { lower: number; upper: number; purchaseIds: string[] }
+  >()
   for (const purchase of purchases) {
     if (!purchase.dimension) continue
     const key = purchaseKey(purchase.listId, purchase.itemKey, purchase.dimension)
-    const existing = purchased.get(key) ?? { lower: 0, upper: 0 }
+    const existing = purchased.get(key) ?? {
+      lower: 0,
+      upper: 0,
+      purchaseIds: [],
+    }
     existing.lower = fromAmountMilli(
       toAmountMilli(existing.lower) + toAmountMilli(Math.max(0, purchase.lower)),
     )
     existing.upper = fromAmountMilli(
       toAmountMilli(existing.upper) + toAmountMilli(Math.max(0, purchase.upper)),
     )
+    if (!existing.purchaseIds.includes(purchase.id)) existing.purchaseIds.push(purchase.id)
     purchased.set(key, existing)
   }
 
@@ -999,7 +1009,11 @@ export function resolveOpenShoppingAmounts(
       if (amount.lower <= 0 && amount.upper <= 0) continue
       const key = purchaseKey(amount.listId, position.itemKey, position.dimension)
       matched.add(key)
-      const bought = purchased.get(key) ?? { lower: 0, upper: 0 }
+      const bought = purchased.get(key) ?? {
+        lower: 0,
+        upper: 0,
+        purchaseIds: [],
+      }
       const openLower = Math.max(
         0,
         fromAmountMilli(toAmountMilli(amount.lower) - toAmountMilli(bought.lower)),
@@ -1021,6 +1035,7 @@ export function resolveOpenShoppingAmounts(
         openLower,
         openUpper,
         done: openLower === 0 && openUpper === 0,
+        purchaseIds: [...bought.purchaseIds],
       })
     }
   }

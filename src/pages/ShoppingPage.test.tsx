@@ -4,6 +4,7 @@ import type {
   CookSession,
   Ingredient,
   Recipe,
+  ShoppingList,
   ShoppingManualItem,
   ShoppingPurchase,
 } from '../types'
@@ -19,8 +20,8 @@ const live = vi.hoisted(() => {
     },
     next: () => {
       // recipes, freeDishes, cookSessions, manualItems, purchases, rules,
-      // quantityCorrections, settings, shoppingLists
-      const index = call % 9
+      // quantityCorrections, settings, shoppingLists, allocations
+      const index = call % 10
       call += 1
       return values[index]
     },
@@ -111,6 +112,19 @@ function manual(overrides: Partial<ShoppingManualItem> = {}): ShoppingManualItem
   }
 }
 
+function freeList(overrides: Partial<ShoppingList> = {}): ShoppingList {
+  return {
+    id: 'free-drogerie',
+    kind: 'free',
+    name: 'Drogerie',
+    periodStart: null,
+    periodEnd: null,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  }
+}
+
 function baseValues(overrides: Partial<Record<string, unknown>> = {}): unknown[] {
   return [
     overrides.recipes ?? [],
@@ -122,6 +136,7 @@ function baseValues(overrides: Partial<Record<string, unknown>> = {}): unknown[]
     overrides.quantityCorrections ?? [],
     overrides.settings ?? [],
     overrides.shoppingLists ?? [],
+    overrides.allocations ?? [],
   ]
 }
 
@@ -147,6 +162,17 @@ describe('shopping page', () => {
     expect(html).not.toContain('placeholder="z. B. Milch"')
     expect(html).not.toContain('Vorrat')
     expect(html).not.toContain('Trotzdem kaufen')
+  })
+
+  it('shows the standard list and free lists in the overview', () => {
+    live.reset(baseValues({ shoppingLists: [freeList()] }))
+    const html = renderToStaticMarkup(<ShoppingPage />)
+
+    expect(html).toContain('Einkaufszettel')
+    expect(html).toContain('Drogerie')
+    expect(html).toContain('0 offen · 0 erledigt')
+    expect(html).toContain('Woche')
+    expect(html).toContain('Standardzettel')
   })
 
   it('derives recipe demand from the planned cooking event', () => {

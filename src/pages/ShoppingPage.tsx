@@ -3,14 +3,20 @@
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * The shopping list is a calm, compact checklist. Recipe demand is recomputed
- * from the actual cooking events on every Dexie change. Manual articles,
- * purchase actions, learned corrections and the category order are the only
- * stored shopping data. The discontinued pantry feature has no UI and no
- * persistence here.
+ * The shopping page is a calm, compact checklist for several independent
+ * shopping lists. Recipe demand is still derived exactly once by
+ * `buildShoppingList`; the page only presents the distribution and writes
+ * purchase/manual actions through the existing services.
  */
 
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
 import { formatDayLabel, todayKey, WEEKDAY_NAMES } from '../domain/dates'
@@ -19,31 +25,23 @@ import {
   categoryOrderWithMove,
   editableShoppingAmount,
   formatShoppingAmount,
-  groupOpenItems,
   parsePurchaseAmountInput,
   parseShoppingQuantityPosition,
   quantityDimensionLabel,
   SHOPPING_CATEGORIES,
   shoppingIdentityMappings,
-  shoppingItemKey,
   shoppingPositionSignature,
-  splitIngredientName,
+  type ShoppingAmountPosition,
   type ShoppingCategoryId,
   type ShoppingListItem,
 } from '../domain/shopping'
-import { resolveShoppingPeriodResolution } from '../domain/shoppingLists'
-import { buildShoppingPeriodView } from '../shopping/periodView'
 import {
   adjacentShoppingPeriodStart,
   applyShoppingSettings,
 } from '../shopping/cycle'
-import {
-  shoppingSettingsFromRows,
-  type ShoppingSettings,
-} from '../settings/shopping'
+import type { ShoppingSettings } from '../settings/shopping'
 import {
   addShoppingPurchase,
-  categoryOrderFromRows,
   clearLegacyQuantity,
   mergeShoppingProducts,
   removeQuantityCorrection,
@@ -54,14 +52,24 @@ import {
   saveItemRule,
   saveQuantityCorrection,
   splitShoppingProduct,
-  updateManualItem,
   type ItemRuleInput,
 } from '../shopping/service'
 import {
+  createFreeShoppingList,
   createManualListItem,
+  deleteFreeShoppingList,
   ensureStandardShoppingList,
   removeManualListItem,
+  renameShoppingList,
+  setManualItemPurchased,
+  updateManualListItem,
 } from '../shopping/listService'
+import {
+  buildShoppingPageView,
+  type ShoppingPageList,
+  type ShoppingPageRow,
+  type ShoppingPageView,
+} from '../shopping/pageView'
 import type {
   ShoppingItemRule,
   ShoppingManualItem,
@@ -72,17 +80,19 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : 'Die Aktion konnte nicht ausgeführt werden.'
 }
 
-function formatAmounts(positions: ShoppingListItem['positions']): string {
+function formatAmounts(positions: readonly ShoppingAmountPosition[]): string {
   return positions.map((position) => formatShoppingAmount(position)).join(' · ')
 }
 
-function amountSummary(item: ShoppingListItem): string {
-  if (item.unparsedAmounts.length > 0) {
-    return [...item.unparsedAmounts, ...item.positions.map(formatShoppingAmount)]
-      .filter(Boolean)
-      .join(' · ')
+function rowAmountSummary(row: ShoppingPageRow, done = false): string {
+  if (done) {
+    const purchased = formatAmounts(row.purchasedPositions)
+    if (purchased) return purchased
+    return row.unparsedAmounts.join(' · ')
   }
-  return formatAmounts(item.positions)
+  return [...row.unparsedAmounts, ...row.openPositions.map(formatShoppingAmount)]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 function Modal({
@@ -144,10 +154,22 @@ function CloseIcon() {
 export function ShoppingPage() {
   const today = useMemo(() => todayKey(), [])
   const [periodAnchor, setPeriodAnchor] = useState(today)
+  const [selectedListId, setSelectedListId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [editingKey, setEditingKey] = useState<string | null>(null)
-  const [confirmingKey, setConfirmingKey] = useState<string | null>(null)
+  const [creatingList, setCreatingList] = useState(false)
+  const [newListName, setNewListName] = useState('')
+  const [listBusy, setListBusy] = useState(false)
+  const [renamingListId, setRenamingListId] = useState<string | null>(null)
+  const [deletingListId, setDeletingListId] = useState<string | null>(null)
+  const [editingManualId, setEditingManualId] = useState<string | null>(null)
+  const [editingAuto, setEditingAuto] = useState<{ listId: string; itemKey: string } | null>(
+    null,
+  )
+  const [confirmingAuto, setConfirmingAuto] = useState<{
+    listId: string
+    itemKey: string
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [undoItem, setUndoItem] = useState<ShoppingManualItem | null>(null)
   const addTriggerRef = useRef<HTMLButtonElement>(null)
@@ -165,70 +187,71 @@ export function ShoppingPage() {
   )
   const settingsRows = useLiveQuery(() => db.settings.toArray(), [])
   const shoppingLists = useLiveQuery(() => db.shoppingLists.toArray(), [])
+  const allocations = useLiveQuery(() => db.shoppingDemandAllocations.toArray(), [])
 
-  const categoryOrder = useMemo(
-    () => categoryOrderFromRows(settingsRows ?? []),
-    [settingsRows],
-  )
-  const shoppingSettings = useMemo(
-    () => shoppingSettingsFromRows(settingsRows ?? []),
-    [settingsRows],
-  )
-  const periodResolution = useMemo(
-    () =>
-      resolveShoppingPeriodResolution(
-        periodAnchor,
-        shoppingSettings,
-        shoppingLists ?? [],
-      ),
-    [periodAnchor, shoppingSettings, shoppingLists],
-  )
-  const period = periodResolution.period
-  const periodConflict = periodResolution.conflict
-  const view = useMemo(
-    () =>
-      buildShoppingPeriodView({
-        period,
-        recipes: periodConflict ? [] : recipes ?? [],
-        freeDishes: periodConflict ? [] : freeDishes ?? [],
-        cookSessions: periodConflict ? [] : cookSessions ?? [],
-        manualItems: periodConflict ? [] : manualItems ?? [],
-        purchases: periodConflict ? [] : purchases ?? [],
-        lists: shoppingLists ?? [],
-        rules: rules ?? [],
-        quantityCorrections: quantityCorrections ?? [],
-        today,
-      }),
-    [
-      period,
-      periodConflict,
-      recipes,
-      freeDishes,
-      cookSessions,
-      manualItems,
-      purchases,
-      shoppingLists,
-      rules,
-      quantityCorrections,
+  const loading =
+    recipes === undefined ||
+    freeDishes === undefined ||
+    cookSessions === undefined ||
+    manualItems === undefined ||
+    purchases === undefined ||
+    rules === undefined ||
+    quantityCorrections === undefined ||
+    settingsRows === undefined ||
+    shoppingLists === undefined ||
+    allocations === undefined
+
+  const view = useMemo<ShoppingPageView | null>(() => {
+    if (loading) return null
+    return buildShoppingPageView({
+      anchor: periodAnchor,
       today,
-    ],
-  )
-  const list = view.list
-  const conflicts = view.conflicts
-  const conflictLabels = useMemo(() => {
-    const labels = [
-      ...conflicts.manualItems.map((item) => item.name),
-      ...conflicts.purchases.map((purchase) => purchase.itemKey),
-    ]
-    return Array.from(new Set(labels))
-  }, [conflicts])
+      settingsRows: settingsRows ?? [],
+      lists: shoppingLists ?? [],
+      recipes: recipes ?? [],
+      freeDishes: freeDishes ?? [],
+      cookSessions: cookSessions ?? [],
+      manualItems: manualItems ?? [],
+      purchases: purchases ?? [],
+      rules: rules ?? [],
+      quantityCorrections: quantityCorrections ?? [],
+      allocations: allocations ?? [],
+    })
+  }, [
+    loading,
+    periodAnchor,
+    today,
+    settingsRows,
+    shoppingLists,
+    recipes,
+    freeDishes,
+    cookSessions,
+    manualItems,
+    purchases,
+    rules,
+    quantityCorrections,
+    allocations,
+  ])
 
+  const selectedList =
+    view?.lists.find((list) => list.id === selectedListId) ??
+    view?.lists.find((list) => list.id === view.standardListId) ??
+    null
+  const selectedRows = selectedList ? (view?.rowsByList[selectedList.id] ?? []) : []
+  const openRows = selectedRows.filter((row) => row.status === 'open')
+  const doneRows = selectedRows.filter((row) => row.status === 'done')
   const openGroups = useMemo(
-    () => groupOpenItems(list.items, categoryOrder),
-    [list.items, categoryOrder],
+    () =>
+      (view?.categoryOrder ?? [])
+        .map((categoryId) => ({
+          categoryId,
+          label: categoryLabel(categoryId),
+          rows: openRows.filter((row) => row.categoryId === categoryId),
+        }))
+        .filter((group) => group.rows.length > 0),
+    [view, openRows],
   )
-  const doneItems = list.items.filter((item) => item.status === 'done')
-  const editingItem = list.items.find((item) => item.key === editingKey) ?? null
+
   const ambiguousRuleTargets = useMemo(() => {
     const names: string[] = []
     for (const recipe of recipes ?? []) {
@@ -240,6 +263,40 @@ export function ShoppingPage() {
     for (const manual of manualItems ?? []) names.push(manual.name)
     return shoppingIdentityMappings(names)
   }, [recipes, freeDishes, manualItems])
+
+  const editingAutoRow = useMemo(() => {
+    if (!view || !editingAuto) return null
+    return (
+      (view.rowsByList[editingAuto.listId] ?? []).find(
+        (row) => row.kind === 'automatic' && row.itemKey === editingAuto.itemKey,
+      ) ?? null
+    )
+  }, [view, editingAuto])
+  const editingItem = editingAutoRow?.richItem ?? null
+
+  const editingManualRow = useMemo(() => {
+    if (!view || !editingManualId) return null
+    for (const rows of Object.values(view.rowsByList)) {
+      const row = rows.find((entry) => entry.manualItem?.id === editingManualId)
+      if (row) return row
+    }
+    return null
+  }, [view, editingManualId])
+
+  const confirmingRow = useMemo(() => {
+    if (!view || !confirmingAuto) return null
+    return (
+      (view.rowsByList[confirmingAuto.listId] ?? []).find(
+        (row) => row.kind === 'automatic' && row.itemKey === confirmingAuto.itemKey,
+      ) ?? null
+    )
+  }, [view, confirmingAuto])
+
+  const renamingList =
+    view?.lists.find((list) => list.id === renamingListId) ?? null
+  const deletingList =
+    view?.lists.find((list) => list.id === deletingListId) ?? null
+
   const ambiguousRulesForEditing = useMemo(
     () =>
       editingItem
@@ -251,48 +308,11 @@ export function ShoppingPage() {
         : [],
     [editingItem, rules, ambiguousRuleTargets],
   )
-  const confirmingItem = list.items.find((item) => item.key === confirmingKey) ?? null
 
-  const loading =
-    recipes === undefined ||
-    freeDishes === undefined ||
-    cookSessions === undefined ||
-    manualItems === undefined ||
-    purchases === undefined ||
-    rules === undefined ||
-    quantityCorrections === undefined ||
-    settingsRows === undefined ||
-    shoppingLists === undefined
-
-  async function run(action: () => Promise<unknown>) {
+  async function run(action: () => Promise<unknown>): Promise<boolean> {
     try {
       setError(null)
       await action()
-    } catch (caught) {
-      setError(errorText(caught))
-    }
-  }
-
-  async function addArticle(input: {
-    name: string
-    quantityText: string
-    unit: string
-    purchaseNote: string
-    categoryId: string | null
-  }): Promise<boolean> {
-    try {
-      setError(null)
-      const list = await ensureStandardShoppingList(period.start)
-      await createManualListItem({
-        listId: list.id,
-        shoppingDate: period.start,
-        name: input.name,
-        quantityText: input.quantityText,
-        unit: input.unit,
-        purchaseNote: input.purchaseNote,
-        categoryId: input.categoryId,
-      })
-      closeAdd(true)
       return true
     } catch (caught) {
       setError(errorText(caught))
@@ -310,37 +330,144 @@ export function ShoppingPage() {
     })
   }
 
-  async function toggleItem(item: ShoppingListItem) {
-    if (item.status === 'done') {
-      const latest = item.purchases[0]
-      if (!latest) return
-      await run(() => removeShoppingPurchase(latest.id))
-      return
+  function changePeriod(direction: -1 | 1) {
+    if (!view || view.conflict || !shoppingLists) return
+    setPeriodAnchor(
+      adjacentShoppingPeriodStart(
+        view.period.start,
+        direction,
+        view.settings,
+        shoppingLists,
+      ),
+    )
+    setSelectedListId(null)
+    setAddOpen(false)
+  }
+
+  function goToday() {
+    setPeriodAnchor(today)
+    setSelectedListId(null)
+    setAddOpen(false)
+  }
+
+  function selectList(id: string) {
+    setSelectedListId(id)
+    setAddOpen(false)
+  }
+
+  async function addArticle(input: {
+    name: string
+    quantityText: string
+    unit: string
+    purchaseNote: string
+    categoryId: string | null
+  }): Promise<boolean> {
+    if (!view || !selectedList) return false
+    try {
+      setError(null)
+      if (selectedList.kind === 'standard') {
+        const list = await ensureStandardShoppingList(view.period.start)
+        await createManualListItem({
+          listId: list.id,
+          shoppingDate: view.period.start,
+          name: input.name,
+          quantityText: input.quantityText,
+          unit: input.unit,
+          purchaseNote: input.purchaseNote,
+          categoryId: input.categoryId,
+        })
+      } else {
+        // Free lists are deliberately independent from the shopping week. The
+        // service stores the article without inventing a period date.
+        await createManualListItem({
+          listId: selectedList.id,
+          name: input.name,
+          quantityText: input.quantityText,
+          unit: input.unit,
+          purchaseNote: input.purchaseNote,
+          categoryId: input.categoryId,
+        })
+      }
+      closeAdd(true)
+      return true
+    } catch (caught) {
+      setError(errorText(caught))
+      return false
     }
-    const hasRange = item.positions.some((position) => position.lower !== position.upper)
-    if (hasRange) {
-      setConfirmingKey(item.key)
-      return
+  }
+
+  async function createList(event: FormEvent) {
+    event.preventDefault()
+    if (!newListName.trim() || listBusy) return
+    setListBusy(true)
+    try {
+      setError(null)
+      const list = await createFreeShoppingList({ name: newListName })
+      setNewListName('')
+      setCreatingList(false)
+      setSelectedListId(list.id)
+    } catch (caught) {
+      setError(errorText(caught))
+    } finally {
+      setListBusy(false)
     }
-    await run(async () => {
-      const amounts = item.positions.map((position) => ({
+  }
+
+  async function toggleManual(row: ShoppingPageRow) {
+    const item = row.manualItem
+    if (!item) return
+    await run(() => setManualItemPurchased(item.id, row.status !== 'done'))
+  }
+
+  async function addAutomaticPurchase(
+    row: ShoppingPageRow,
+    positions: readonly { dimension: string; lower: number; upper: number }[],
+    qualitative = false,
+  ) {
+    if (!view) throw new Error('Die Einkaufsliste ist noch nicht geladen.')
+    await addShoppingPurchase({
+      shoppingDate: view.period.start,
+      itemKey: row.itemKey,
+      listId: row.listId,
+      periodStart: view.period.start,
+      amounts: positions.map((position) => ({
         dimension: position.dimension,
         lower: position.lower,
         upper: position.upper,
-      }))
-      await addShoppingPurchase({
-        shoppingDate: period.start,
-        itemKey: item.key,
-        amounts,
-        snapshot: item.requiredPositions,
-        confirmedTotal: [...item.purchased, ...amounts],
-        qualitative: item.positions.length === 0,
-      })
+      })),
+      snapshot: row.requiredPositions,
+      qualitative,
     })
   }
 
-  async function confirmRange(item: ShoppingListItem, values: Map<string, string>) {
-    const amounts = item.positions.map((position) => {
+  async function toggleAutomatic(row: ShoppingPageRow) {
+    if (row.status === 'done') {
+      if (row.purchaseIds.length === 0) return
+      await run(async () => {
+        for (const purchaseId of row.purchaseIds) {
+          await removeShoppingPurchase(purchaseId)
+        }
+      })
+      return
+    }
+    if (row.openPositions.length > 0) {
+      const hasRange = row.openPositions.some(
+        (position) => position.lower !== position.upper,
+      )
+      if (hasRange) {
+        setConfirmingAuto({ listId: row.listId, itemKey: row.itemKey })
+        return
+      }
+      await run(() => addAutomaticPurchase(row, row.openPositions))
+      return
+    }
+    if (row.unparsedAmounts.length > 0 || row.missingQuantity) {
+      await run(() => addAutomaticPurchase(row, [], true))
+    }
+  }
+
+  async function confirmRange(row: ShoppingPageRow, values: Map<string, string>) {
+    const amounts = row.openPositions.map((position) => {
       if (position.lower === position.upper) {
         return {
           dimension: position.dimension,
@@ -361,28 +488,20 @@ export function ShoppingPage() {
       (entry): entry is { dimension: string; lower: number; upper: number } => entry !== null,
     )
     await run(async () => {
-      await addShoppingPurchase({
-        shoppingDate: period.start,
-        itemKey: item.key,
-        amounts: confirmed,
-        snapshot: item.requiredPositions,
-        confirmedTotal: [...item.purchased, ...confirmed],
-        qualitative: false,
-      })
-      setConfirmingKey(null)
+      await addAutomaticPurchase(row, confirmed)
+      setConfirmingAuto(null)
     })
   }
 
-  async function removeManual(item: ShoppingManualItem) {
-    await run(async () => {
-      await removeManualListItem(item.id)
-      setUndoItem(item)
-    })
+  async function deleteManual(item: ShoppingManualItem) {
+    await removeManualListItem(item.id)
+    setUndoItem(item)
   }
 
   function moveCategory(id: ShoppingCategoryId, direction: -1 | 1) {
+    if (!view) return
     void run(async () => {
-      await saveCategoryOrder(categoryOrderWithMove(categoryOrder, id, direction))
+      await saveCategoryOrder(categoryOrderWithMove(view.categoryOrder, id, direction))
     })
   }
 
@@ -395,8 +514,18 @@ export function ShoppingPage() {
     if (!confirmed) return
     void run(async () => {
       await splitShoppingProduct(aliasKey)
-      setEditingKey(null)
+      setEditingAuto(null)
     })
+  }
+
+  function editRow(row: ShoppingPageRow) {
+    if (row.kind === 'manual' && row.manualItem) {
+      setEditingManualId(row.manualItem.id)
+      return
+    }
+    if (row.richItem) {
+      setEditingAuto({ listId: row.listId, itemKey: row.itemKey })
+    }
   }
 
   return (
@@ -404,15 +533,17 @@ export function ShoppingPage() {
       <header className="shopping-head">
         <div>
           <h1>Einkaufsliste</h1>
-          {!loading ? (
+          {!loading && selectedList ? (
             <p className="shopping-subline">
-              {list.items.length === 0
-                ? 'Noch nichts eingetragen'
-                : list.counts.open === 0
-                  ? 'Alles erledigt'
-                  : `${list.counts.open} Artikel offen${
-                      doneItems.length > 0 ? ` · ${doneItems.length} erledigt` : ''
-                    }`}
+              {selectedList.name}
+              {' · '}
+              {openRows.length === 0
+                ? doneRows.length === 0
+                  ? 'Noch nichts eingetragen'
+                  : 'Alles erledigt'
+                : `${openRows.length} Artikel offen${
+                    doneRows.length > 0 ? ` · ${doneRows.length} erledigt` : ''
+                  }`}
             </p>
           ) : null}
         </div>
@@ -425,6 +556,7 @@ export function ShoppingPage() {
             setAddOpen((open) => !open)
           }}
           aria-expanded={addOpen}
+          disabled={!view || Boolean(view.conflict)}
         >
           <span aria-hidden="true">+</span> Artikel hinzufügen
         </button>
@@ -436,48 +568,26 @@ export function ShoppingPage() {
             type="button"
             className="shopping-nav-button"
             aria-label="Vorherige Einkaufsperiode"
-            onClick={() => {
-              if (periodConflict) return
-              setPeriodAnchor(
-                adjacentShoppingPeriodStart(
-                  period.start,
-                  -1,
-                  shoppingSettings,
-                  shoppingLists ?? [],
-                ),
-              )
-            }}
+            disabled={!view || Boolean(view.conflict)}
+            onClick={() => changePeriod(-1)}
           >
             ‹
           </button>
           <span className="shopping-week-label" aria-live="polite">
-            {period.label}
+            {view?.period.label ?? 'Einkaufszeitraum'}
           </span>
           <button
             type="button"
             className="shopping-nav-button"
             aria-label="Nächste Einkaufsperiode"
-            onClick={() => {
-              if (periodConflict) return
-              setPeriodAnchor(
-                adjacentShoppingPeriodStart(
-                  period.start,
-                  1,
-                  shoppingSettings,
-                  shoppingLists ?? [],
-                ),
-              )
-            }}
+            disabled={!view || Boolean(view.conflict)}
+            onClick={() => changePeriod(1)}
           >
             ›
           </button>
         </div>
         <div className="shopping-toolbar-end">
-          <button
-            type="button"
-            className="shopping-today"
-            onClick={() => setPeriodAnchor(today)}
-          >
+          <button type="button" className="shopping-today" onClick={goToday}>
             Heute
           </button>
           <button
@@ -497,45 +607,41 @@ export function ShoppingPage() {
         </p>
       ) : null}
 
-      {periodConflict ? (
+      {view?.conflict ? (
         <div className="notice danger shopping-notice" role="alert">
           <strong>Einkaufsperioden überlappen sich.</strong> Für{' '}
-          {formatDayLabel(periodConflict.date)} sind mehrere Standardzettel
-          zugeordnet ({periodConflict.listIds.join(', ')}). Die Einkaufsliste wird
+          {formatDayLabel(view.conflict.date)} sind mehrere Standardzettel
+          zugeordnet ({view.conflict.listIds.join(', ')}). Die Einkaufsliste wird
           bis zur eindeutigen Zuordnung nicht berechnet.
         </div>
       ) : null}
 
-      {conflicts.total > 0 ? (
+      {view && view.serviceConflicts.length > 0 ? (
         <div className="notice shopping-notice shopping-conflict-note" role="status">
           <strong>Einkaufszuordnung unklar.</strong>{' '}
-          {conflicts.total === 1
+          {view.serviceConflicts.length === 1
             ? '1 Eintrag wird nicht als gekauft gewertet.'
-            : `${conflicts.total} Einträge werden nicht als gekauft gewertet.`}{' '}
-          {conflictLabels.length > 0
-            ? `Betroffen: ${conflictLabels.slice(0, 4).join(', ')}${
-                conflictLabels.length > 4 ? ' …' : ''
+            : `${view.serviceConflicts.length} Einträge werden nicht als gekauft gewertet.`}{' '}
+          {view.conflictLabels.length > 0
+            ? `Betroffen: ${view.conflictLabels.slice(0, 4).join(', ')}${
+                view.conflictLabels.length > 4 ? ' …' : ''
               }. `
             : ''}
           Bitte die Zuordnung prüfen.
         </div>
       ) : null}
 
-      {list.warnings.length > 0 ? (
+      {view && view.warnings.length > 0 ? (
         <div className="notice shopping-notice shopping-warnings">
           <ul>
-            {list.warnings.slice(0, 3).map((warning) => (
+            {view.warnings.slice(0, 3).map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
-            {list.warnings.length > 3 ? (
-              <li>Weitere {list.warnings.length - 3} Hinweis(e).</li>
+            {view.warnings.length > 3 ? (
+              <li>Weitere {view.warnings.length - 3} Hinweis(e).</li>
             ) : null}
           </ul>
         </div>
-      ) : null}
-
-      {addOpen ? (
-        <AddArticleForm onAdd={addArticle} onClose={() => closeAdd(false)} />
       ) : null}
 
       {undoItem ? (
@@ -566,90 +672,276 @@ export function ShoppingPage() {
 
       {loading ? <p className="muted">Einkaufsliste wird geladen …</p> : null}
 
-      {!loading && list.items.length === 0 ? (
-        <div className="empty-state shopping-empty">
-          <h2>Noch nichts zu kaufen</h2>
-          <p>
-            Geplante Gerichte erscheinen hier automatisch. Artikel kannst du auch direkt
-            eintragen.
-          </p>
-        </div>
-      ) : null}
+      {view && selectedList ? (
+        <div className="shopping-layout">
+          <aside className="shopping-lists-panel" aria-label="Einkaufszettel">
+            <div className="shopping-lists-head">
+              <h2>Einkaufszettel</h2>
+              <button
+                type="button"
+                className="shopping-list-new"
+                onClick={() => {
+                  setError(null)
+                  setCreatingList((open) => !open)
+                }}
+                aria-expanded={creatingList}
+              >
+                + Neu
+              </button>
+            </div>
 
-      {openGroups.length > 0 ? (
-        <div className="shopping-groups" ref={listRef}>
-          {openGroups.map((group) => (
-            <section className="shopping-group" key={group.category.id}>
-              <h2 className="shopping-group-title">
-                <span>{group.category.label}</span>
-                <span className="shopping-group-count" aria-hidden="true">
-                  {group.items.length}
-                </span>
-              </h2>
-              <ul className="shopping-list">
-                {group.items.map((item) => (
-                  <ShoppingRow
-                    key={item.key}
-                    item={item}
-                    onToggle={() => void toggleItem(item)}
-                    onEdit={() => setEditingKey(item.key)}
+            {creatingList ? (
+              <form className="shopping-list-create" onSubmit={(event) => void createList(event)}>
+                <label className="shopping-field">
+                  <span>Name des neuen Zettels</span>
+                  <input
+                    value={newListName}
+                    onChange={(event) => setNewListName(event.target.value)}
+                    placeholder="z. B. Drogerie"
+                    maxLength={60}
+                    autoFocus
+                    disabled={listBusy}
                   />
+                </label>
+                <div className="shopping-list-create-actions">
+                  <button
+                    type="submit"
+                    className="button primary"
+                    disabled={listBusy || !newListName.trim()}
+                  >
+                    Anlegen
+                  </button>
+                  <button
+                    type="button"
+                    className="button quiet"
+                    disabled={listBusy}
+                    onClick={() => {
+                      setCreatingList(false)
+                      setNewListName('')
+                    }}
+                  >
+                    Abbrechen
+                  </button>
+                </div>
+              </form>
+            ) : null}
+
+            <div className="shopping-list-options" aria-label="Zettel auswählen">
+              {view.lists.map((list) => {
+                const selected = list.id === selectedList.id
+                return (
+                  <button
+                    key={list.id}
+                    type="button"
+                    className={`shopping-list-option${selected ? ' is-selected' : ''}`}
+                    aria-pressed={selected}
+                    onClick={() => selectList(list.id)}
+                  >
+                    <span className="shopping-list-option-top">
+                      <span className="shopping-list-option-name">{list.name}</span>
+                      {list.isStandard ? (
+                        <span className="shopping-list-badge">Woche</span>
+                      ) : null}
+                    </span>
+                    <span className="shopping-list-option-meta">
+                      {list.openCount} offen · {list.doneCount} erledigt
+                      {list.requiresReview ? ' · prüfen' : ''}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </aside>
+
+          <section className="shopping-list-content" aria-labelledby="shopping-active-list">
+            <div className="shopping-list-titlebar">
+              <div>
+                <h2 id="shopping-active-list">{selectedList.name}</h2>
+                <p className="shopping-list-meta">
+                  {selectedList.isStandard
+                    ? `${view.period.label} · automatischer Wocheneinkauf`
+                    : 'Eigener Zettel · unabhängig von der Einkaufswoche'}
+                </p>
+              </div>
+              <div className="shopping-list-actions">
+                {selectedList.isStandard ? (
+                  <span className="shopping-list-lock">Standardzettel</span>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="shopping-text-action"
+                      onClick={() => setRenamingListId(selectedList.id)}
+                    >
+                      Umbenennen
+                    </button>
+                    <button
+                      type="button"
+                      className="shopping-text-action danger"
+                      onClick={() => setDeletingListId(selectedList.id)}
+                    >
+                      Löschen
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {!view.conflict && addOpen ? (
+              <AddArticleForm
+                listName={selectedList.name}
+                isFree={!selectedList.isStandard}
+                onAdd={addArticle}
+                onClose={() => closeAdd(false)}
+              />
+            ) : null}
+
+            {!view.conflict && selectedRows.length === 0 ? (
+              <div className="empty-state shopping-empty">
+                <h2>
+                  {selectedList.isStandard ? 'Noch nichts zu kaufen' : 'Dieser Zettel ist leer'}
+                </h2>
+                <p>
+                  {selectedList.isStandard
+                    ? 'Geplante Gerichte erscheinen hier automatisch. Artikel kannst du auch direkt eintragen.'
+                    : 'Trage Artikel direkt ein – unabhängig von der Einkaufswoche.'}
+                </p>
+              </div>
+            ) : null}
+
+            {!view.conflict && openGroups.length > 0 ? (
+              <div className="shopping-groups" ref={listRef}>
+                {openGroups.map((group) => (
+                  <section className="shopping-group" key={group.categoryId}>
+                    <h2 className="shopping-group-title">
+                      <span>{group.label}</span>
+                      <span className="shopping-group-count" aria-hidden="true">
+                        {group.rows.length}
+                      </span>
+                    </h2>
+                    <ul className="shopping-list">
+                      {group.rows.map((row) => (
+                        <ShoppingRow
+                          key={row.id}
+                          row={row}
+                          onToggle={() =>
+                            void (row.kind === 'manual'
+                              ? toggleManual(row)
+                              : toggleAutomatic(row))
+                          }
+                          onEdit={
+                            row.kind === 'manual' || row.richItem
+                              ? () => editRow(row)
+                              : undefined
+                          }
+                        />
+                      ))}
+                    </ul>
+                  </section>
                 ))}
-              </ul>
-            </section>
-          ))}
+              </div>
+            ) : null}
+
+            {!view.conflict && doneRows.length > 0 ? (
+              <details className="shopping-done">
+                <summary>
+                  <span>Erledigt</span>
+                  <span className="shopping-done-count">{doneRows.length}</span>
+                </summary>
+                <ul className="shopping-list shopping-done-list">
+                  {doneRows.map((row) => (
+                    <ShoppingRow
+                      key={row.id}
+                      row={row}
+                      done
+                      onToggle={() =>
+                        void (row.kind === 'manual'
+                          ? toggleManual(row)
+                          : toggleAutomatic(row))
+                      }
+                      onEdit={
+                        row.kind === 'manual' || row.richItem
+                          ? () => editRow(row)
+                          : undefined
+                      }
+                    />
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </section>
         </div>
       ) : null}
 
-      {!loading && doneItems.length > 0 ? (
-        <details className="shopping-done">
-          <summary>
-            <span>Erledigt</span>
-            <span className="shopping-done-count">{doneItems.length}</span>
-          </summary>
-          <ul className="shopping-list shopping-done-list">
-            {doneItems.map((item) => (
-              <ShoppingRow
-                key={item.key}
-                item={item}
-                done
-                onToggle={() => void toggleItem(item)}
-                onEdit={() => setEditingKey(item.key)}
-              />
-            ))}
-          </ul>
-        </details>
+      {editingManualRow?.manualItem ? (
+        <ManualItemDialog
+          key={editingManualRow.manualItem.id}
+          item={editingManualRow.manualItem}
+          onSave={async (input) => {
+            await updateManualListItem(editingManualRow.manualItem!.id, {
+              name: input.name,
+              quantityText: input.quantityText,
+              unit: input.unit,
+              purchaseNote: input.purchaseNote,
+              categoryId: input.categoryId,
+            })
+          }}
+          onDelete={async () => {
+            await deleteManual(editingManualRow.manualItem!)
+          }}
+          onClose={() => setEditingManualId(null)}
+        />
       ) : null}
 
-      {editingItem ? (
+      {editingItem && editingAutoRow ? (
         <ItemEditorDialog
           key={editingItem.key}
           item={editingItem}
-          allItems={list.items}
-          shoppingDate={period.start}
+          allItems={view?.richItems ?? []}
+          shoppingDate={view?.period.start ?? today}
           ambiguousRules={ambiguousRulesForEditing}
-          onClose={() => setEditingKey(null)}
-          onRemoveManual={removeManual}
+          onClose={() => setEditingAuto(null)}
+          onRemoveManual={async () => undefined}
           onSplit={splitAlias}
           onError={setError}
         />
       ) : null}
 
-      {confirmingItem ? (
+      {confirmingRow ? (
         <PurchaseConfirmDialog
-          key={confirmingItem.key}
-          item={confirmingItem}
-          onCancel={() => setConfirmingKey(null)}
-          onConfirm={(values) => void confirmRange(confirmingItem, values)}
+          key={confirmingRow.id}
+          name={confirmingRow.name}
+          positions={confirmingRow.openPositions}
+          onCancel={() => setConfirmingAuto(null)}
+          onConfirm={(values) => void confirmRange(confirmingRow, values)}
         />
       ) : null}
 
-      {settingsOpen ? (
+      {settingsOpen && view ? (
         <SettingsDialog
-          order={categoryOrder}
-          settings={shoppingSettings}
+          order={view.categoryOrder}
+          settings={view.settings}
           onMove={moveCategory}
           onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
+
+      {renamingList ? (
+        <ListNameDialog
+          list={renamingList}
+          onSave={(name) => renameShoppingList(renamingList.id, name)}
+          onClose={() => setRenamingListId(null)}
+        />
+      ) : null}
+
+      {deletingList ? (
+        <DeleteListDialog
+          list={deletingList}
+          onDelete={async () => {
+            await deleteFreeShoppingList(deletingList.id, { confirmManualItems: true })
+            if (selectedListId === deletingList.id) setSelectedListId(null)
+          }}
+          onClose={() => setDeletingListId(null)}
         />
       ) : null}
     </div>
@@ -657,28 +949,41 @@ export function ShoppingPage() {
 }
 
 interface ShoppingRowProps {
-  item: ShoppingListItem
+  row: ShoppingPageRow
   done?: boolean
   onToggle: () => void
-  onEdit: () => void
+  onEdit?: () => void
 }
 
-function ShoppingRow({ item, done = false, onToggle, onEdit }: ShoppingRowProps) {
-  const openAmount = amountSummary(item)
-  const purchasedAmount = formatAmounts(item.purchased)
-  const amount = done ? purchasedAmount || openAmount : openAmount
-  const notes = item.purchaseNotes
+function ShoppingRow({ row, done = false, onToggle, onEdit }: ShoppingRowProps) {
+  const openAmount = rowAmountSummary(row)
+  const purchasedAmount = formatAmounts(row.purchasedPositions)
+  const amount = done ? rowAmountSummary(row, true) : openAmount
   const partialText =
-    !done && item.purchased.length > 0 && purchasedAmount
-      ? `bereits gekauft: ${purchasedAmount}`
-      : ''
+    !done && purchasedAmount ? `bereits gekauft: ${purchasedAmount}` : ''
   const secondary = [
-    item.variant ? `Variante: ${item.variant}` : '',
-    ...notes,
+    row.variant ? `Variante: ${row.variant}` : '',
+    ...row.notes,
     partialText,
   ].filter(Boolean)
-  const hasNote = secondary.length > 0
-  const accessibleName = item.variant ? `${item.name}, ${item.variant}` : item.name
+  const accessibleName = row.variant ? `${row.name}, ${row.variant}` : row.name
+  const editLabel = `${accessibleName}${amount ? `, ${amount}` : ''} bearbeiten`
+  const content = (
+    <>
+      <span className="shopping-row-text">
+        <span className="shopping-row-name">{row.name}</span>
+        {secondary.length > 0 ? (
+          <span className="shopping-row-note">{secondary.join(' · ')}</span>
+        ) : null}
+      </span>
+      {amount ? <span className="shopping-row-amount">{amount}</span> : null}
+      {onEdit ? (
+        <span className="shopping-row-edit" aria-hidden="true">
+          <span className="shopping-row-edit-icon">✎</span>
+        </span>
+      ) : null}
+    </>
+  )
 
   return (
     <li className={`shopping-row${done ? ' is-done' : ''}`}>
@@ -691,28 +996,25 @@ function ShoppingRow({ item, done = false, onToggle, onEdit }: ShoppingRowProps)
         />
         <span className="shopping-check-box" aria-hidden="true" />
       </label>
-      <button
-        type="button"
-        className="shopping-row-main"
-        onClick={onEdit}
-        aria-label={`${accessibleName}${amount ? `, ${amount}` : ''} bearbeiten`}
-      >
-        <span className="shopping-row-text">
-          <span className="shopping-row-name">{item.name}</span>
-          {hasNote ? (
-            <span className="shopping-row-note">{secondary.join(' · ')}</span>
-          ) : null}
-        </span>
-        {amount ? <span className="shopping-row-amount">{amount}</span> : null}
-        <span className="shopping-row-edit" aria-hidden="true">
-          <span className="shopping-row-edit-icon">✎</span>
-        </span>
-      </button>
+      {onEdit ? (
+        <button
+          type="button"
+          className="shopping-row-main"
+          onClick={onEdit}
+          aria-label={editLabel}
+        >
+          {content}
+        </button>
+      ) : (
+        <div className="shopping-row-main">{content}</div>
+      )}
     </li>
   )
 }
 
 interface AddArticleFormProps {
+  listName: string
+  isFree: boolean
   onAdd: (input: {
     name: string
     quantityText: string
@@ -723,7 +1025,7 @@ interface AddArticleFormProps {
   onClose: () => void
 }
 
-function AddArticleForm({ onAdd, onClose }: AddArticleFormProps) {
+function AddArticleForm({ listName, isFree, onAdd, onClose }: AddArticleFormProps) {
   const [name, setName] = useState('')
   const [quantityText, setQuantityText] = useState('')
   const [unit, setUnit] = useState('')
@@ -750,7 +1052,11 @@ function AddArticleForm({ onAdd, onClose }: AddArticleFormProps) {
       <div className="shopping-panel-head">
         <div>
           <h2>Artikel hinzufügen</h2>
-          <p className="shopping-panel-subline">Nur für diese Einkaufswoche.</p>
+          <p className="shopping-panel-subline">
+            {isFree
+              ? `Für „${listName}“ · unabhängig von der Einkaufswoche.`
+              : `Für den Wocheneinkauf „${listName}“.`}
+          </p>
         </div>
         <button type="button" className="shopping-icon-button" aria-label="Schließen" onClick={onClose}>
           <CloseIcon />
@@ -816,6 +1122,298 @@ function AddArticleForm({ onAdd, onClose }: AddArticleFormProps) {
         </button>
       </div>
     </form>
+  )
+}
+
+interface ManualItemDialogProps {
+  item: ShoppingManualItem
+  onSave: (input: {
+    name: string
+    quantityText: string
+    unit: string
+    purchaseNote: string
+    categoryId: ShoppingCategoryId | null
+  }) => Promise<unknown>
+  onDelete: () => Promise<unknown>
+  onClose: () => void
+}
+
+function ManualItemDialog({
+  item,
+  onSave,
+  onDelete,
+  onClose,
+}: ManualItemDialogProps) {
+  const initialCategory = SHOPPING_CATEGORIES.some(
+    (category) => category.id === item.categoryId,
+  )
+    ? (item.categoryId as ShoppingCategoryId)
+    : ('' as const)
+  const [name, setName] = useState(item.name)
+  const [quantityText, setQuantityText] = useState(item.quantityText ?? '')
+  const [unit, setUnit] = useState(item.unit ?? '')
+  const [purchaseNote, setPurchaseNote] = useState(item.purchaseNote)
+  const [category, setCategory] = useState<'' | ShoppingCategoryId>(initialCategory)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    if (!name.trim() || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await onSave({
+        name,
+        quantityText,
+        unit,
+        purchaseNote,
+        categoryId: category || null,
+      })
+      onClose()
+    } catch (caught) {
+      setError(errorText(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function remove() {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await onDelete()
+      onClose()
+    } catch (caught) {
+      setError(errorText(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal label={`${item.name} bearbeiten`} onClose={onClose}>
+      <div className="shopping-panel-head">
+        <div>
+          <h2>Artikel bearbeiten</h2>
+          <p className="shopping-panel-subline">Manueller Artikel</p>
+        </div>
+        <button type="button" className="shopping-icon-button" aria-label="Schließen" onClick={onClose}>
+          <CloseIcon />
+        </button>
+      </div>
+
+      <form className="shopping-edit-form" onSubmit={(event) => void save(event)}>
+        <label className="shopping-field">
+          <span>Artikelname</span>
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            required
+            autoFocus
+          />
+        </label>
+        <div className="shopping-edit-row">
+          <label className="shopping-field">
+            <span>Menge</span>
+            <input
+              value={quantityText}
+              onChange={(event) => setQuantityText(event.target.value)}
+              placeholder="optional"
+              inputMode="decimal"
+            />
+          </label>
+          <label className="shopping-field">
+            <span>Einheit</span>
+            <input
+              value={unit}
+              onChange={(event) => setUnit(event.target.value)}
+              placeholder="optional"
+            />
+          </label>
+        </div>
+        <label className="shopping-field">
+          <span>Kategorie</span>
+          <select
+            value={category}
+            onChange={(event) =>
+              setCategory(event.target.value as '' | ShoppingCategoryId)
+            }
+          >
+            <option value="">Automatisch</option>
+            {SHOPPING_CATEGORIES.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="shopping-field">
+          <span>Einkaufshinweis</span>
+          <input
+            value={purchaseNote}
+            onChange={(event) => setPurchaseNote(event.target.value)}
+            placeholder="optional"
+          />
+        </label>
+
+        {error ? (
+          <p className="notice danger" role="alert">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="shopping-panel-actions">
+          <button type="submit" className="button primary" disabled={busy || !name.trim()}>
+            Speichern
+          </button>
+          <button type="button" className="button quiet" onClick={onClose} disabled={busy}>
+            Abbrechen
+          </button>
+          <button
+            type="button"
+            className="shopping-text-action danger shopping-manual-delete"
+            disabled={busy}
+            onClick={() => void remove()}
+          >
+            Artikel löschen
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+interface ListNameDialogProps {
+  list: ShoppingPageList
+  onSave: (name: string) => Promise<unknown>
+  onClose: () => void
+}
+
+function ListNameDialog({ list, onSave, onClose }: ListNameDialogProps) {
+  const [name, setName] = useState(list.name)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    if (!name.trim() || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await onSave(name)
+      onClose()
+    } catch (caught) {
+      setError(errorText(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal label={`${list.name} umbenennen`} onClose={onClose}>
+      <div className="shopping-panel-head">
+        <div>
+          <h2>Einkaufszettel umbenennen</h2>
+          <p className="shopping-panel-subline">Der Name gilt nur für diesen Zettel.</p>
+        </div>
+        <button type="button" className="shopping-icon-button" aria-label="Schließen" onClick={onClose}>
+          <CloseIcon />
+        </button>
+      </div>
+      <form onSubmit={(event) => void save(event)}>
+        <label className="shopping-field">
+          <span>Name</span>
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            maxLength={60}
+            required
+            autoFocus
+          />
+        </label>
+        {error ? (
+          <p className="notice danger" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <div className="shopping-panel-actions">
+          <button type="submit" className="button primary" disabled={busy || !name.trim()}>
+            Speichern
+          </button>
+          <button type="button" className="button quiet" onClick={onClose} disabled={busy}>
+            Abbrechen
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+interface DeleteListDialogProps {
+  list: ShoppingPageList
+  onDelete: () => Promise<unknown>
+  onClose: () => void
+}
+
+function DeleteListDialog({ list, onDelete, onClose }: DeleteListDialogProps) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function remove() {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await onDelete()
+      onClose()
+    } catch (caught) {
+      setError(errorText(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal
+      label={`${list.name} löschen`}
+      className="shopping-confirm-modal"
+      onClose={onClose}
+    >
+      <div className="shopping-panel-head">
+        <div>
+          <h2>Einkaufszettel löschen?</h2>
+          <p className="shopping-panel-subline">„{list.name}“ wird dauerhaft entfernt.</p>
+        </div>
+        <button type="button" className="shopping-icon-button" aria-label="Schließen" onClick={onClose}>
+          <CloseIcon />
+        </button>
+      </div>
+      <div className="shopping-delete-note">
+        <p>
+          Automatische Rezeptzutaten wandern zurück auf den Wocheneinkauf ihres
+          Einkaufszeitraums. Bereits gekaufte Mengen bleiben dabei erhalten.
+        </p>
+        <p>
+          Manuelle Artikel dieses Zettels und ihre zugehörigen Käufe werden
+          gelöscht. Diese Bestätigung ist deshalb erforderlich.
+        </p>
+      </div>
+      {error ? (
+        <p className="notice danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="shopping-panel-actions">
+        <button type="button" className="button danger" disabled={busy} onClick={() => void remove()}>
+          {busy ? 'Lösche …' : 'Zettel löschen'}
+        </button>
+        <button type="button" className="button quiet" onClick={onClose} disabled={busy}>
+          Abbrechen
+        </button>
+      </div>
+    </Modal>
   )
 }
 
@@ -989,7 +1587,7 @@ function ItemEditorDialog({
       if (manualItem) {
         // A single manual article is corrected at its source, so its name and
         // amount stay editable without inventing a product rule.
-        await updateManualItem(manualItem.id, {
+        await updateManualListItem(manualItem.id, {
           name: displayName,
           quantityText,
           unit,
@@ -1292,7 +1890,7 @@ function ItemEditorDialog({
                   {correction?.status === 'stale' ? (
                     <p className="shopping-field-hint">
                       Der Bedarf hat sich geändert. Die alte Korrektur „
-                      {correction.quantityText} {correction.unit ?? ''}“ wird nicht angewendet.
+                      {correction.quantityText} {correction.unit ?? ''} wird nicht angewendet.
                     </p>
                   ) : null}
                 </div>
@@ -1582,16 +2180,21 @@ function ItemEditorDialog({
 }
 
 interface PurchaseConfirmDialogProps {
-  item: ShoppingListItem
+  name: string
+  positions: readonly ShoppingAmountPosition[]
   onCancel: () => void
   onConfirm: (values: Map<string, string>) => void
 }
 
-function PurchaseConfirmDialog({ item, onCancel, onConfirm }: PurchaseConfirmDialogProps) {
+function PurchaseConfirmDialog({
+  name,
+  positions,
+  onCancel,
+  onConfirm,
+}: PurchaseConfirmDialogProps) {
   const [values, setValues] = useState<Record<string, string>>({})
-  const positions = item.positions
   return (
-    <Modal label={`Einkauf für ${item.name} bestätigen`} className="shopping-confirm-modal" onClose={onCancel}>
+    <Modal label={`Einkauf für ${name} bestätigen`} className="shopping-confirm-modal" onClose={onCancel}>
       <div className="shopping-panel-head">
         <div>
           <h2>Tatsächlich gekauft</h2>
@@ -1622,7 +2225,7 @@ function PurchaseConfirmDialog({ item, onCancel, onConfirm }: PurchaseConfirmDia
                 }
                 placeholder="gekaufte Menge"
                 inputMode="decimal"
-                aria-label={`Gekaufte Menge für ${item.name}`}
+                aria-label={`Gekaufte Menge für ${name}`}
               />
             )}
           </label>

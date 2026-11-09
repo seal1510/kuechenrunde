@@ -32,6 +32,7 @@ import {
   standardShoppingListRecord,
   toAmountMilli,
   type ShoppingDistributionConflict,
+  type ShoppingDistributionResult,
   type ShoppingOpenPosition,
   type ShoppingPeriod,
   type ShoppingPurchaseContribution,
@@ -884,6 +885,8 @@ export interface ShoppingOpenDemandResult {
   positions: ShoppingOpenPosition[]
   manualItems: ShoppingManualOpenItem[]
   unquantified: ShoppingUnquantifiedPlacement[]
+  /** Only recipe demand; manual unquantified rows stay in `manualItems`. */
+  automaticUnquantified: ShoppingUnquantifiedPlacement[]
   lists: ShoppingListSummary[]
   conflicts: ShoppingDistributionConflict[]
   serviceConflicts: ShoppingListServiceConflict[]
@@ -909,26 +912,39 @@ function sumPurchased(
   }
 }
 
+export interface ShoppingOpenDemandSource {
+  period: ShoppingPeriod
+  standardListId: string
+  standardList: ShoppingList
+  /** Every persisted list; free lists are always part of the view. */
+  lists: readonly ShoppingList[]
+  distribution: ShoppingDistributionResult
+  purchases: readonly ShoppingPurchase[]
+  rules: readonly ShoppingItemRule[]
+  manualItems: readonly ShoppingManualItem[]
+}
+
 /**
- * Complete per-list view: distribution, purchases, manual articles and the
- * current open amounts. Read-only.
+ * Pure core of the per-list view. It applies the already resolved distribution
+ * and the persisted purchase/manual rows; it never derives recipe demand on its
+ * own. The UI and the async service therefore share exactly one implementation.
  */
-export async function getOpenDemandByList(
-  anchor: string,
-): Promise<ShoppingOpenDemandResult> {
-  const distribution = await getShoppingDistribution(anchor)
-  const period = distribution.period
-  const standardId = distribution.standardListId
-  const listById = new Map(distribution.lists.map((list) => [list.id, list]))
-  const standardList = distribution.standardList
+export function buildShoppingOpenDemand(
+  input: ShoppingOpenDemandSource,
+): ShoppingOpenDemandResult {
+  const {
+    period,
+    standardListId: standardId,
+    standardList,
+    lists,
+    distribution,
+    purchases: allPurchases,
+    rules,
+    manualItems: allManualItems,
+  } = input
+  const listById = new Map(lists.map((list) => [list.id, list]))
   listById.set(standardList.id, standardList)
   const serviceConflicts: ShoppingListServiceConflict[] = []
-
-  const [allPurchases, rules, allManualItems] = await Promise.all([
-    db.shoppingPurchases.toArray(),
-    db.shoppingItemRules.toArray(),
-    db.shoppingManualItems.toArray(),
-  ])
 
   // An explicit reference to this standard list with a date outside its stored
   // period is an inconsistency; report it instead of silently hiding the row.
@@ -1204,7 +1220,7 @@ export async function getOpenDemandByList(
   }
 
   const summaries = new Map<string, ShoppingListSummary>()
-  for (const list of [standardList, ...distribution.lists]) {
+  for (const list of [standardList, ...lists]) {
     if (summaries.has(list.id)) continue
     summaries.set(list.id, {
       listId: list.id,
@@ -1236,12 +1252,39 @@ export async function getOpenDemandByList(
     positions: openResult.positions,
     manualItems,
     unquantified: [...distribution.unquantified, ...manualUnquantified],
+    automaticUnquantified: [...distribution.unquantified],
     lists: Array.from(summaries.values()),
     conflicts: distribution.conflicts,
     serviceConflicts,
     requiresReview:
       distribution.requiresReview || serviceConflicts.length > 0,
   }
+}
+
+/**
+ * Complete per-list view: distribution, purchases, manual articles and the
+ * current open amounts. Read-only. All rule logic lives in the pure function
+ * above so the UI can build the same view from its own live query.
+ */
+export async function getOpenDemandByList(
+  anchor: string,
+): Promise<ShoppingOpenDemandResult> {
+  const distribution = await getShoppingDistribution(anchor)
+  const [allPurchases, rules, allManualItems] = await Promise.all([
+    db.shoppingPurchases.toArray(),
+    db.shoppingItemRules.toArray(),
+    db.shoppingManualItems.toArray(),
+  ])
+  return buildShoppingOpenDemand({
+    period: distribution.period,
+    standardListId: distribution.standardListId,
+    standardList: distribution.standardList,
+    lists: distribution.lists,
+    distribution,
+    purchases: allPurchases,
+    rules,
+    manualItems: allManualItems,
+  })
 }
 
 /* ------------------------------------------------------------------ */
