@@ -177,6 +177,7 @@ export function ShoppingPage() {
   } | null>(null)
   const [distributingItemKey, setDistributingItemKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [flash, setFlash] = useState<string | null>(null)
   const [undoItem, setUndoItem] = useState<{
     item: ShoppingManualItem
     purchases: ShoppingPurchase[]
@@ -246,9 +247,20 @@ export function ShoppingPage() {
     view?.lists.find((list) => list.id === selectedListId) ??
     view?.lists.find((list) => list.id === view.standardListId) ??
     null
+  const standardListDisplayName = view?.settings.standardListName ?? ''
+  const selectedListName = selectedList?.isStandard
+    ? standardListDisplayName
+    : (selectedList?.name ?? '')
   const selectedRows = selectedList ? (view?.rowsByList[selectedList.id] ?? []) : []
   const openRows = selectedRows.filter((row) => row.status === 'open')
   const doneRows = selectedRows.filter((row) => row.status === 'done')
+  const distributionLists = useMemo(
+    () =>
+      view?.lists.map((list) =>
+        list.isStandard ? { ...list, name: standardListDisplayName } : list,
+      ) ?? [],
+    [view, standardListDisplayName],
+  )
   const openGroups = useMemo(
     () =>
       (view?.categoryOrder ?? [])
@@ -329,6 +341,12 @@ export function ShoppingPage() {
         : [],
     [editingItem, rules, ambiguousRuleTargets],
   )
+
+  useEffect(() => {
+    if (!flash) return
+    const timer = window.setTimeout(() => setFlash(null), 4000)
+    return () => window.clearTimeout(timer)
+  }, [flash])
 
   async function run(action: () => Promise<unknown>): Promise<boolean> {
     try {
@@ -561,75 +579,16 @@ export function ShoppingPage() {
   return (
     <div className="page shopping-page">
       <header className="shopping-head">
-        <div>
-          <h1>Einkaufsliste</h1>
-          {!loading && selectedList ? (
-            <p className="shopping-subline">
-              {selectedList.name}
-              {' · '}
-              {openRows.length === 0
-                ? doneRows.length === 0
-                  ? 'Noch nichts eingetragen'
-                  : 'Alles erledigt'
-                : `${openRows.length} Artikel offen${
-                    doneRows.length > 0 ? ` · ${doneRows.length} erledigt` : ''
-                  }`}
-            </p>
-          ) : null}
-        </div>
+        <h1>Einkaufsliste</h1>
         <button
           type="button"
-          className="shopping-add-trigger"
-          ref={addTriggerRef}
-          onClick={() => {
-            setError(null)
-            setAddOpen((open) => !open)
-          }}
-          aria-expanded={addOpen}
-          disabled={!view || Boolean(view.conflict)}
+          className="shopping-icon-button"
+          aria-label="Einstellungen"
+          onClick={() => setSettingsOpen(true)}
         >
-          <span aria-hidden="true">+</span> Artikel hinzufügen
+          <GearIcon />
         </button>
       </header>
-
-      <div className="shopping-toolbar">
-        <div className="shopping-weeknav" role="group" aria-label="Einkaufsperiode wechseln">
-          <button
-            type="button"
-            className="shopping-nav-button"
-            aria-label="Vorherige Einkaufsperiode"
-            disabled={!view || Boolean(view.conflict)}
-            onClick={() => changePeriod(-1)}
-          >
-            ‹
-          </button>
-          <span className="shopping-week-label" aria-live="polite">
-            {view?.period.label ?? 'Einkaufszeitraum'}
-          </span>
-          <button
-            type="button"
-            className="shopping-nav-button"
-            aria-label="Nächste Einkaufsperiode"
-            disabled={!view || Boolean(view.conflict)}
-            onClick={() => changePeriod(1)}
-          >
-            ›
-          </button>
-        </div>
-        <div className="shopping-toolbar-end">
-          <button type="button" className="shopping-today" onClick={goToday}>
-            Heute
-          </button>
-          <button
-            type="button"
-            className="shopping-icon-button"
-            aria-label="Einstellungen"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <GearIcon />
-          </button>
-        </div>
-      </div>
 
       {error ? (
         <p className="notice danger shopping-notice" role="alert">
@@ -672,21 +631,27 @@ export function ShoppingPage() {
                 view.conflictLabels.length > 4 ? ' …' : ''
               }.`
             : ''}{' '}
-          Passe die Verteilung über „Verteilen“ an oder setze sie zurück.
+          Passe die Verteilung über „Verschieben / aufteilen“ an oder setze sie
+          zurück.
         </div>
       ) : null}
 
       {view && view.warnings.length > 0 ? (
-        <div className="notice shopping-notice shopping-warnings">
+        <details className="shopping-hint">
+          <summary>
+            <span className="shopping-hint-icon" aria-hidden="true">
+              i
+            </span>
+            {view.warnings.length === 1
+              ? '1 Hinweis'
+              : `${view.warnings.length} Hinweise`}
+          </summary>
           <ul>
-            {view.warnings.slice(0, 3).map((warning) => (
+            {view.warnings.map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
-            {view.warnings.length > 3 ? (
-              <li>Weitere {view.warnings.length - 3} Hinweis(e).</li>
-            ) : null}
           </ul>
-        </div>
+        </details>
       ) : null}
 
       {undoItem ? (
@@ -713,6 +678,12 @@ export function ShoppingPage() {
             <CloseIcon />
           </button>
         </div>
+      ) : null}
+
+      {flash ? (
+        <p className="shopping-flash" role="status">
+          {flash}
+        </p>
       ) : null}
 
       {loading ? <p className="muted">Einkaufsliste wird geladen …</p> : null}
@@ -783,7 +754,9 @@ export function ShoppingPage() {
                     onClick={() => selectList(list.id)}
                   >
                     <span className="shopping-list-option-top">
-                      <span className="shopping-list-option-name">{list.name}</span>
+                      <span className="shopping-list-option-name">
+                        {list.isStandard ? standardListDisplayName : list.name}
+                      </span>
                       {list.isStandard ? (
                         <span className="shopping-list-badge">Woche</span>
                       ) : null}
@@ -799,19 +772,56 @@ export function ShoppingPage() {
           </aside>
 
           <section className="shopping-list-content" aria-labelledby="shopping-active-list">
-            <div className="shopping-list-titlebar">
-              <div>
-                <h2 id="shopping-active-list">{selectedList.name}</h2>
-                <p className="shopping-list-meta">
-                  {selectedList.isStandard
-                    ? `${view.period.label} · automatischer Wocheneinkauf`
-                    : 'Eigener Zettel · unabhängig von der Einkaufswoche'}
-                </p>
+            <div className="shopping-active-head">
+              <div className="shopping-active-title">
+                <h2 id="shopping-active-list">{selectedListName}</h2>
+                <div className="shopping-active-meta">
+                  {selectedList.isStandard ? (
+                    <div
+                      className="shopping-active-period"
+                      role="group"
+                      aria-label="Einkaufsperiode wechseln"
+                    >
+                      <button
+                        type="button"
+                        className="shopping-period-button"
+                        aria-label="Vorherige Einkaufsperiode"
+                        disabled={Boolean(view.conflict)}
+                        onClick={() => changePeriod(-1)}
+                      >
+                        ‹
+                      </button>
+                      <span className="shopping-period-label" aria-live="polite">
+                        {view.period.label}
+                      </span>
+                      <button
+                        type="button"
+                        className="shopping-period-button"
+                        aria-label="Nächste Einkaufsperiode"
+                        disabled={Boolean(view.conflict)}
+                        onClick={() => changePeriod(1)}
+                      >
+                        ›
+                      </button>
+                      <button
+                        type="button"
+                        className="shopping-period-today"
+                        onClick={goToday}
+                      >
+                        Heute
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="shopping-active-kind">Eigener Zettel</span>
+                  )}
+                  <span className="shopping-active-count">
+                    {openRows.length} offen
+                    {doneRows.length > 0 ? ` · ${doneRows.length} erledigt` : ''}
+                  </span>
+                </div>
               </div>
-              <div className="shopping-list-actions">
-                {selectedList.isStandard ? (
-                  <span className="shopping-list-lock">Standardzettel</span>
-                ) : (
+              <div className="shopping-active-actions">
+                {selectedList.isStandard ? null : (
                   <>
                     <button
                       type="button"
@@ -829,12 +839,25 @@ export function ShoppingPage() {
                     </button>
                   </>
                 )}
+                <button
+                  type="button"
+                  className="shopping-add-trigger"
+                  ref={addTriggerRef}
+                  onClick={() => {
+                    setError(null)
+                    setAddOpen((open) => !open)
+                  }}
+                  aria-expanded={addOpen}
+                  disabled={Boolean(view.conflict)}
+                >
+                  <span aria-hidden="true">+</span> Artikel hinzufügen
+                </button>
               </div>
             </div>
 
             {!view.conflict && addOpen ? (
               <AddArticleForm
-                listName={selectedList.name}
+                listName={selectedListName}
                 isFree={!selectedList.isStandard}
                 onAdd={addArticle}
                 onClose={() => closeAdd(false)}
@@ -855,7 +878,7 @@ export function ShoppingPage() {
             ) : null}
 
             {!view.conflict && openGroups.length > 0 ? (
-              <div className="shopping-groups" ref={listRef}>
+              <div className="shopping-groups shopping-list-surface" ref={listRef}>
                 {openGroups.map((group) => (
                   <section className="shopping-group" key={group.categoryId}>
                     <h2 className="shopping-group-title">
@@ -896,7 +919,7 @@ export function ShoppingPage() {
               <details className="shopping-done">
                 <summary>
                   <span>Erledigt</span>
-                  <span className="shopping-done-count">{doneRows.length}</span>
+                  <span className="shopping-done-count">({doneRows.length})</span>
                 </summary>
                 <ul className="shopping-list shopping-done-list">
                   {doneRows.map((row) => (
@@ -981,7 +1004,11 @@ export function ShoppingPage() {
           standardListId={view.standardListId}
           currentListId={selectedList?.id}
           positions={distributingPositions}
-          lists={view.lists}
+          lists={distributionLists}
+          onDone={(message) => {
+            setDistributingItemKey(null)
+            setFlash(message)
+          }}
           onClose={() => setDistributingItemKey(null)}
         />
       ) : null}
@@ -1017,6 +1044,87 @@ export function ShoppingPage() {
   )
 }
 
+interface RowAction {
+  label: string
+  onSelect: () => void
+}
+
+export function RowActionsMenu({
+  label,
+  actions,
+  defaultOpen = false,
+}: {
+  label: string
+  actions: readonly RowAction[]
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const firstItemRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    firstItemRef.current?.focus()
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      setOpen(false)
+      buttonRef.current?.focus()
+    }
+    function onPointerDown(event: PointerEvent) {
+      if (containerRef.current?.contains(event.target as Node)) return
+      setOpen(false)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('pointerdown', onPointerDown)
+    }
+  }, [open])
+
+  if (actions.length === 0) return null
+
+  return (
+    <div className="shopping-row-actions" ref={containerRef}>
+      <button
+        type="button"
+        className="shopping-row-menu-button"
+        ref={buttonRef}
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span aria-hidden="true">⋯</span>
+      </button>
+      {open ? (
+        <div className="shopping-row-menu" role="menu" aria-label={label}>
+          {actions.map((action, index) => (
+            <button
+              key={action.label}
+              type="button"
+              role="menuitem"
+              className="shopping-row-menu-item"
+              ref={index === 0 ? firstItemRef : undefined}
+              onClick={() => {
+                setOpen(false)
+                action.onSelect()
+              }}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 interface ShoppingRowProps {
   row: ShoppingPageRow
   done?: boolean
@@ -1038,7 +1146,7 @@ function ShoppingRow({
   const partialText =
     !done && purchasedAmount ? `bereits gekauft: ${purchasedAmount}` : ''
   const secondary = [
-    row.variant ? `Variante: ${row.variant}` : '',
+    row.variant,
     ...row.notes,
     row.distributionListNames.length > 1
       ? `Verteilt auf: ${row.distributionListNames.join(', ')}`
@@ -1047,6 +1155,12 @@ function ShoppingRow({
   ].filter(Boolean)
   const accessibleName = row.variant ? `${row.name}, ${row.variant}` : row.name
   const editLabel = `${accessibleName}${amount ? `, ${amount}` : ''} bearbeiten`
+  const actions: RowAction[] = onDistribute
+    ? [
+        { label: 'Verschieben / aufteilen', onSelect: onDistribute },
+        ...(onEdit ? [{ label: 'Bearbeiten', onSelect: onEdit }] : []),
+      ]
+    : []
   const content = (
     <>
       <span className="shopping-row-text">
@@ -1056,11 +1170,6 @@ function ShoppingRow({
         ) : null}
       </span>
       {amount ? <span className="shopping-row-amount">{amount}</span> : null}
-      {onEdit ? (
-        <span className="shopping-row-edit" aria-hidden="true">
-          <span className="shopping-row-edit-icon">✎</span>
-        </span>
-      ) : null}
     </>
   )
 
@@ -1087,16 +1196,7 @@ function ShoppingRow({
       ) : (
         <div className="shopping-row-main">{content}</div>
       )}
-      {onDistribute ? (
-        <button
-          type="button"
-          className="shopping-row-distribute"
-          onClick={onDistribute}
-          aria-label={`${accessibleName} verschieben oder aufteilen`}
-        >
-          Verteilen
-        </button>
-      ) : null}
+      <RowActionsMenu label={`${accessibleName} weitere Aktionen`} actions={actions} />
     </li>
   )
 }
@@ -1514,6 +1614,8 @@ interface DistributionDialogProps {
   currentListId?: string
   positions: readonly ShoppingDistributionPosition[]
   lists: readonly ShoppingPageList[]
+  initialMode?: 'full' | 'partial'
+  onDone: (message: string) => void
   onClose: () => void
 }
 
@@ -1563,6 +1665,8 @@ export function DistributionDialog({
   currentListId,
   positions,
   lists,
+  initialMode = 'full',
+  onDone,
   onClose,
 }: DistributionDialogProps) {
   const firstFree = lists.find((list) => !list.isStandard)
@@ -1576,14 +1680,13 @@ export function DistributionDialog({
     ''
   const initialDimension = positions[0]?.dimension ?? ''
   const initialDraft = draftFor(positions, initialDimension, initialTarget)
-  const [mode, setMode] = useState<'full' | 'partial'>('full')
+  const [mode, setMode] = useState<'full' | 'partial'>(initialMode)
   const [targetListId, setTargetListId] = useState(initialTarget)
   const [dimension, setDimension] = useState(initialDimension)
   const [quantityText, setQuantityText] = useState(initialDraft.quantityText)
   const [unit, setUnit] = useState(initialDraft.unit)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [status, setStatus] = useState('')
 
   const listNameById = new Map(lists.map((list) => [list.id, list.name]))
   const targetName = listNameById.get(targetListId) ?? targetListId
@@ -1593,8 +1696,7 @@ export function DistributionDialog({
     null
   const hasFullAllocation = positions.some((position) =>
     position.allocations.some(
-      (resolved) =>
-        !resolved.blocked && resolved.allocation.mode === 'full',
+      (resolved) => !resolved.blocked && resolved.allocation.mode === 'full',
     ),
   )
   const isRange =
@@ -1602,10 +1704,23 @@ export function DistributionDialog({
     selectedPosition.totalLower !== selectedPosition.totalUpper
   const partialAllowed =
     positions.length > 0 && !hasFullAllocation && !isRange
-  const hasNumericDemand = positions.length > 0
   const hasAnyAllocation = positions.some(
     (position) => position.allocations.length > 0,
   )
+  const needText =
+    positions.length > 0
+      ? positions
+          .map((position) =>
+            formatShoppingAmount({
+              dimension: position.dimension,
+              unit: position.unit,
+              lower: position.totalLower,
+              upper: position.totalUpper,
+              qualifier: position.qualifier,
+            }),
+          )
+          .join(' · ')
+      : 'ohne Mengenangabe'
 
   useEffect(() => {
     if (
@@ -1626,37 +1741,61 @@ export function DistributionDialog({
     if (!partialAllowed && mode === 'partial') setMode('full')
   }, [partialAllowed, mode])
 
-  const assignments: Array<{ id: string; label: string }> = []
-  const seenAssignments = new Set<string>()
-  for (const position of positions) {
-    for (const resolved of position.allocations) {
-      if (resolved.blocked || seenAssignments.has(resolved.allocation.id)) continue
-      const listName = listNameById.get(resolved.listId) ?? resolved.listId
-      if (resolved.allocation.mode === 'full') {
-        assignments.push({
-          id: resolved.allocation.id,
-          label:
-            resolved.allocation.dimension === '*'
-              ? `Alles auf ${listName}`
-              : `Gesamte Menge ${quantityDimensionLabel(position.dimension)} auf ${listName}`,
-        })
-        seenAssignments.add(resolved.allocation.id)
-        continue
+  const parsed =
+    mode === 'partial' && selectedPosition
+      ? parseShoppingQuantityPosition(quantityText, unit)
+      : null
+  const previewPosition =
+    parsed &&
+    selectedPosition &&
+    parsed.dimension === selectedPosition.dimension &&
+    parsed.lower === parsed.upper &&
+    parsed.lower > 0
+      ? parsed
+      : null
+  const previewAmount = previewPosition
+    ? formatShoppingAmount(previewPosition)
+    : ''
+  const actionLabel =
+    mode === 'full'
+      ? 'Alles verschieben'
+      : previewAmount
+        ? `${previewAmount} zuweisen`
+        : 'Teilmenge zuweisen'
+
+  const shares = lists
+    .map((list) => {
+      const parts: string[] = []
+      const allocationIds = new Set<string>()
+      for (const position of positions) {
+        const amount = position.amounts.find(
+          (entry) => entry.listId === list.id && (entry.lower > 0 || entry.upper > 0),
+        )
+        if (amount) {
+          parts.push(
+            formatShoppingAmount({
+              dimension: position.dimension,
+              unit: position.unit,
+              lower: amount.lower,
+              upper: amount.upper,
+              qualifier: position.qualifier,
+            }),
+          )
+        }
+        for (const resolved of position.allocations) {
+          if (resolved.listId !== list.id || resolved.blocked) continue
+          if (resolved.effectiveLower <= 0 && resolved.effectiveUpper <= 0) continue
+          allocationIds.add(resolved.allocation.id)
+        }
       }
-      if (resolved.effectiveLower <= 0 && resolved.effectiveUpper <= 0) continue
-      assignments.push({
-        id: resolved.allocation.id,
-        label: `${quantityDimensionLabel(position.dimension)}: ${formatShoppingAmount({
-          dimension: position.dimension,
-          unit: position.unit,
-          lower: resolved.effectiveLower,
-          upper: resolved.effectiveUpper,
-          qualifier: position.qualifier,
-        })} auf ${listName}`,
-      })
-      seenAssignments.add(resolved.allocation.id)
-    }
-  }
+      return {
+        listId: list.id,
+        name: list.name,
+        amountText: parts.join(' · '),
+        allocationIds: Array.from(allocationIds),
+      }
+    })
+    .filter((share) => share.amountText)
 
   async function ensureStandardList() {
     if (targetListId === standardListId) {
@@ -1668,13 +1807,12 @@ export function DistributionDialog({
     if (busy) return
     setBusy(true)
     setError('')
-    setStatus('')
     try {
       if (!targetListId) throw new Error('Bitte einen Zielzettel auswählen.')
       await ensureStandardList()
       if (mode === 'full') {
         await moveShoppingItem({ periodStart, itemKey, targetListId })
-        setStatus(`„${name}“ wurde vollständig auf „${targetName}“ verschoben.`)
+        onDone(`„${name}“ wurde auf „${targetName}“ verschoben.`)
       } else {
         if (!selectedPosition) {
           throw new Error('Bitte eine Mengenart auswählen.')
@@ -1682,7 +1820,6 @@ export function DistributionDialog({
         if (selectedPosition.totalLower !== selectedPosition.totalUpper) {
           throw new Error('Ein Mengenbereich kann nicht als feste Teilmenge zugewiesen werden.')
         }
-        const parsed = parseShoppingQuantityPosition(quantityText, unit)
         if (!parsed) {
           throw new Error('Bitte eine gültige Menge mit Einheit angeben.')
         }
@@ -1702,14 +1839,7 @@ export function DistributionDialog({
           targetListId,
           quantity: parsed.lower,
         })
-        const assignedLabel = formatShoppingAmount({
-          dimension: selectedPosition.dimension,
-          unit: selectedPosition.unit,
-          lower: parsed.lower,
-          upper: parsed.upper,
-          qualifier: selectedPosition.qualifier,
-        })
-        setStatus(`${assignedLabel} wurden „${targetName}“ zugewiesen.`)
+        onDone(`${formatShoppingAmount(parsed)} auf „${targetName}“ verteilt.`)
       }
     } catch (caught) {
       setError(errorText(caught))
@@ -1718,14 +1848,17 @@ export function DistributionDialog({
     }
   }
 
-  async function removeAssignment(id: string) {
-    if (busy) return
+  async function removeShare(
+    share: (typeof shares)[number],
+  ) {
+    if (busy || share.allocationIds.length === 0) return
     setBusy(true)
     setError('')
-    setStatus('')
     try {
-      await removeShoppingAllocation(id)
-      setStatus('Die Zuordnung wurde entfernt.')
+      for (const id of share.allocationIds) {
+        await removeShoppingAllocation(id)
+      }
+      onDone(`Zuordnung zu „${share.name}“ entfernt.`)
     } catch (caught) {
       setError(errorText(caught))
     } finally {
@@ -1737,10 +1870,9 @@ export function DistributionDialog({
     if (busy) return
     setBusy(true)
     setError('')
-    setStatus('')
     try {
       await resetShoppingAllocations({ periodStart, itemKey })
-      setStatus('Alle eigenen Zuordnungen wurden zurückgesetzt.')
+      onDone('Verteilung zurückgesetzt.')
     } catch (caught) {
       setError(errorText(caught))
     } finally {
@@ -1749,145 +1881,19 @@ export function DistributionDialog({
   }
 
   return (
-    <Modal label={`${name} verschieben oder aufteilen`} className="shopping-distribution-modal" onClose={onClose}>
-      <div className="shopping-panel-head">
+    <Modal label={`${name} verteilen`} className="shopping-distribute-dialog" onClose={onClose}>
+      <div className="shopping-distribute-head">
         <div>
-          <h2>Zutat verschieben / aufteilen</h2>
-          <p className="shopping-panel-subline">
-            {name} · Gesamtbedarf:{' '}
-            {positions.length > 0
-              ? positions
-                  .map((position) =>
-                    formatShoppingAmount({
-                      dimension: position.dimension,
-                      unit: position.unit,
-                      lower: position.totalLower,
-                      upper: position.totalUpper,
-                      qualifier: position.qualifier,
-                    }),
-                  )
-                  .join(' · ')
-              : 'ohne teilbare Mengenangabe'}
-          </p>
+          <h2>{name} verteilen</h2>
+          <p className="shopping-distribute-need">Benötigt: {needText}</p>
         </div>
         <button type="button" className="shopping-icon-button" aria-label="Schließen" onClick={onClose}>
           <CloseIcon />
         </button>
       </div>
 
-      <div className="shopping-distribution-current">
-        <span className="shopping-field-label">Aktuelle Verteilung</span>
-        {hasNumericDemand ? (
-          positions.map((position) => (
-            <div className="shopping-distribution-block" key={position.dimension}>
-              <div className="shopping-distribution-total">
-                <span>{quantityDimensionLabel(position.dimension)}</span>
-                <strong>
-                  {formatShoppingAmount({
-                    dimension: position.dimension,
-                    unit: position.unit,
-                    lower: position.totalLower,
-                    upper: position.totalUpper,
-                    qualifier: position.qualifier,
-                  })}
-                </strong>
-              </div>
-              <ul className="shopping-distribution-list">
-                {position.amounts
-                  .filter((amount) => amount.lower > 0 || amount.upper > 0)
-                  .map((amount) => (
-                    <li key={amount.listId}>
-                      <span>{listNameById.get(amount.listId) ?? amount.listId}</span>
-                      <span>
-                        {formatShoppingAmount({
-                          dimension: position.dimension,
-                          unit: position.unit,
-                          lower: amount.lower,
-                          upper: amount.upper,
-                          qualifier: position.qualifier,
-                        })}
-                      </span>
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          ))
-        ) : (
-          <p className="shopping-field-hint">
-            Diese Zutat hat keine eindeutig teilbare Mengenangabe. Du kannst sie
-            nur vollständig verschieben.
-          </p>
-        )}
-
-        {assignments.length > 0 ? (
-          <div className="shopping-distribution-assignments">
-            <span className="shopping-field-label">Eigene Zuordnungen</span>
-            <ul className="shopping-plain-list">
-              {assignments.map((assignment) => (
-                <li key={assignment.id}>
-                  <span>{assignment.label}</span>
-                  <button
-                    type="button"
-                    className="shopping-text-action danger"
-                    disabled={busy}
-                    onClick={() => void removeAssignment(assignment.id)}
-                  >
-                    Entfernen
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        {hasAnyAllocation ? (
-          <button
-            type="button"
-            className="shopping-text-action danger"
-            disabled={busy}
-            onClick={() => void resetAssignments()}
-          >
-            Alle eigenen Zuordnungen zurücksetzen
-          </button>
-        ) : null}
-      </div>
-
-      <fieldset className="shopping-distribution-mode">
-        <legend>Änderung</legend>
-        <label className={mode === 'full' ? 'is-active' : undefined}>
-          <input
-            type="radio"
-            name="shopping-distribution-mode"
-            checked={mode === 'full'}
-            disabled={busy}
-            onChange={() => setMode('full')}
-          />
-          <span>Alles verschieben</span>
-        </label>
-        <label className={mode === 'partial' ? 'is-active' : undefined}>
-          <input
-            type="radio"
-            name="shopping-distribution-mode"
-            checked={mode === 'partial'}
-            disabled={busy || !partialAllowed}
-            onChange={() => setMode('partial')}
-          />
-          <span>Teilmenge zuweisen</span>
-        </label>
-      </fieldset>
-      {hasFullAllocation ? (
-        <p className="shopping-field-hint">
-          Für eine Teilmenge bitte zuerst die vollständige Verschiebung
-          entfernen oder alle Zuordnungen zurücksetzen.
-        </p>
-      ) : null}
-      {isRange ? (
-        <p className="shopping-field-hint">
-          Ein Mengenbereich kann nicht als feste Teilmenge aufgeteilt werden.
-        </p>
-      ) : null}
-
-      <label className="shopping-field">
-        <span>Zielzettel</span>
+      <label className="shopping-distribute-field">
+        <span>Wohin?</span>
         <select
           value={targetListId}
           onChange={(event) => setTargetListId(event.target.value)}
@@ -1901,70 +1907,136 @@ export function DistributionDialog({
         </select>
       </label>
 
-      {mode === 'full' ? (
-        <p className="shopping-field-hint">
-          Der gesamte Bedarf folgt dem Zielzettel, auch wenn sich die benötigte
-          Menge später ändert.
+      <fieldset className="shopping-distribute-modes">
+        <legend>Wie viel?</legend>
+        <label className={mode === 'full' ? 'is-active' : undefined}>
+          <input
+            type="radio"
+            name="shopping-distribution-mode"
+            checked={mode === 'full'}
+            disabled={busy}
+            onChange={() => setMode('full')}
+          />
+          <span>Alles</span>
+        </label>
+        <label className={mode === 'partial' ? 'is-active' : undefined}>
+          <input
+            type="radio"
+            name="shopping-distribution-mode"
+            checked={mode === 'partial'}
+            disabled={busy || !partialAllowed}
+            onChange={() => setMode('partial')}
+          />
+          <span>Teilmenge</span>
+        </label>
+      </fieldset>
+
+      {mode === 'partial' ? (
+        <div className="shopping-distribute-partial">
+          {positions.length > 1 ? (
+            <label className="shopping-distribute-field">
+              <span>Welche Menge?</span>
+              <select
+                value={dimension}
+                onChange={(event) => setDimension(event.target.value)}
+                disabled={busy}
+              >
+                {positions.map((position) => (
+                  <option key={position.dimension} value={position.dimension}>
+                    {formatShoppingAmount({
+                      dimension: position.dimension,
+                      unit: position.unit,
+                      lower: position.totalLower,
+                      upper: position.totalUpper,
+                      qualifier: position.qualifier,
+                    })}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <div className="shopping-distribute-quantity">
+            <label className="shopping-distribute-field">
+              <span>Menge</span>
+              <input
+                value={quantityText}
+                onChange={(event) => setQuantityText(event.target.value)}
+                placeholder="z. B. 5"
+                inputMode="decimal"
+                disabled={busy || !partialAllowed}
+                aria-label="Teilmenge"
+              />
+            </label>
+            <label className="shopping-distribute-field">
+              <span>Einheit</span>
+              <input
+                value={unit}
+                onChange={(event) => setUnit(event.target.value)}
+                placeholder="z. B. Stück"
+                disabled={busy || !partialAllowed}
+                aria-label="Einheit der Teilmenge"
+              />
+            </label>
+          </div>
+          <p className="shopping-distribute-hint">
+            Der Rest bleibt auf dem Wocheneinkauf.
+          </p>
+        </div>
+      ) : null}
+
+      {hasFullAllocation ? (
+        <p className="shopping-distribute-hint">
+          Für eine Teilmenge zuerst die vollständige Verschiebung entfernen.
         </p>
       ) : null}
-      <div className="shopping-distribution-partial" hidden={mode !== 'partial'}>
-        {positions.length > 1 ? (
-          <label className="shopping-field">
-            <span>Mengenart</span>
-            <select
-              value={dimension}
-              onChange={(event) => setDimension(event.target.value)}
-              disabled={busy}
-            >
-              {positions.map((position) => (
-                <option key={position.dimension} value={position.dimension}>
-                  {quantityDimensionLabel(position.dimension)}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        <div className="shopping-distribution-quantity">
-          <label className="shopping-field">
-            <span>Menge</span>
-            <input
-              value={quantityText}
-              onChange={(event) => setQuantityText(event.target.value)}
-              placeholder="z. B. 5"
-              inputMode="decimal"
-              disabled={busy || !partialAllowed}
-              aria-label="Teilmenge"
-            />
-          </label>
-          <label className="shopping-field">
-            <span>Einheit</span>
-            <input
-              value={unit}
-              onChange={(event) => setUnit(event.target.value)}
-              placeholder="z. B. Stück"
-              disabled={busy || !partialAllowed}
-              aria-label="Einheit der Teilmenge"
-            />
-          </label>
-        </div>
-        <p className="shopping-field-hint">
-          Feste Teilmenge: Der Rest bleibt auf dem Wocheneinkauf und folgt
-          späteren Bedarfsänderungen.
+      {isRange ? (
+        <p className="shopping-distribute-hint">
+          Ein Mengenbereich kann nicht als feste Teilmenge aufgeteilt werden.
         </p>
-      </div>
+      ) : null}
+
+      {shares.length > 0 ? (
+        <div className="shopping-distribute-shares">
+          <h3>Bereits verteilt</h3>
+          <ul>
+            {shares.map((share) => (
+              <li key={share.listId}>
+                <span>
+                  {share.name}: <strong>{share.amountText}</strong>
+                </span>
+                {share.allocationIds.length > 0 ? (
+                  <button
+                    type="button"
+                    className="shopping-text-action"
+                    disabled={busy}
+                    onClick={() => void removeShare(share)}
+                  >
+                    Entfernen
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          {hasAnyAllocation ? (
+            <button
+              type="button"
+              className="shopping-text-action"
+              disabled={busy}
+              onClick={() => void resetAssignments()}
+            >
+              Verteilung zurücksetzen
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {error ? (
         <p className="notice danger" role="alert">
           {error}
         </p>
       ) : null}
-      {status ? (
-        <p className="notice shopping-distribution-status" role="status">
-          {status}
-        </p>
-      ) : null}
 
-      <div className="shopping-panel-actions">
+      <div className="shopping-distribute-actions">
         <button
           type="button"
           className="button primary"
@@ -1975,7 +2047,7 @@ export function DistributionDialog({
           }
           onClick={() => void save()}
         >
-          {busy ? 'Speichere …' : 'Speichern'}
+          {busy ? 'Speichere …' : actionLabel}
         </button>
         <button type="button" className="button quiet" onClick={onClose} disabled={busy}>
           Abbrechen

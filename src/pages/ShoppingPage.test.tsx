@@ -10,7 +10,7 @@ import type {
   ShoppingManualItem,
   ShoppingPurchase,
 } from '../types'
-import { DistributionDialog, ShoppingPage } from './ShoppingPage'
+import { DistributionDialog, RowActionsMenu, ShoppingPage } from './ShoppingPage'
 
 const live = vi.hoisted(() => {
   let call = 0
@@ -127,6 +127,82 @@ function freeList(overrides: Partial<ShoppingList> = {}): ShoppingList {
   }
 }
 
+function standardPageList(): ShoppingPageList {
+  return {
+    id: 'standard:2026-05-07',
+    kind: 'standard',
+    name: 'Wocheneinkauf · 7.–13. Mai',
+    periodStart: '2026-05-07',
+    periodEnd: '2026-05-13',
+    createdAt: 1,
+    isStandard: true,
+    openCount: 1,
+    doneCount: 0,
+    requiresReview: false,
+  }
+}
+
+function marketPageList(): ShoppingPageList {
+  return {
+    id: 'free-markt',
+    kind: 'free',
+    name: 'Markt',
+    periodStart: null,
+    periodEnd: null,
+    createdAt: 2,
+    isStandard: false,
+    openCount: 1,
+    doneCount: 0,
+    requiresReview: false,
+  }
+}
+
+function tomatoDistribution(
+  standard: ShoppingPageList,
+  market: ShoppingPageList,
+): ShoppingDistributionPosition[] {
+  return [
+    {
+      itemKey: 'tomate',
+      name: 'Tomaten',
+      dimension: 'count',
+      unit: 'Stück',
+      qualifier: '',
+      totalLower: 8,
+      totalUpper: 8,
+      standardLower: 3,
+      standardUpper: 3,
+      amounts: [
+        { listId: market.id, lower: 5, upper: 5, explicit: true },
+        { listId: standard.id, lower: 3, upper: 3, explicit: false },
+      ],
+      allocations: [
+        {
+          allocation: {
+            id: 'alloc-market',
+            periodStart: '2026-05-07',
+            itemKey: 'tomate',
+            dimension: 'count',
+            listId: market.id,
+            mode: 'partial',
+            quantityMilli: 5000,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          listId: market.id,
+          requestedMilli: 5000,
+          effectiveLower: 5,
+          effectiveUpper: 5,
+          clamped: false,
+          orphaned: false,
+          shadowed: false,
+          blocked: false,
+        },
+      ],
+    },
+  ]
+}
+
 function baseValues(overrides: Partial<Record<string, unknown>> = {}): unknown[] {
   return [
     overrides.recipes ?? [],
@@ -174,102 +250,87 @@ describe('shopping page', () => {
     expect(html).toContain('Drogerie')
     expect(html).toContain('0 offen · 0 erledigt')
     expect(html).toContain('Woche')
-    expect(html).toContain('Standardzettel')
+    expect(html).not.toContain('Standardzettel')
   })
 
-  it('renders a touch-friendly move/split dialog with the current distribution', () => {
-    const standard: ShoppingPageList = {
-      id: 'standard:2026-05-07',
-      kind: 'standard',
-      name: 'Wocheneinkauf · 7.–13. Mai',
-      periodStart: '2026-05-07',
-      periodEnd: '2026-05-13',
-      createdAt: 1,
-      isStandard: true,
-      openCount: 1,
-      doneCount: 0,
-      requiresReview: false,
-    }
-    const market: ShoppingPageList = {
-      id: 'free-markt',
-      kind: 'free',
-      name: 'Markt',
-      periodStart: null,
-      periodEnd: null,
-      createdAt: 2,
-      isStandard: false,
-      openCount: 1,
-      doneCount: 0,
-      requiresReview: false,
-    }
-    const positions: ShoppingDistributionPosition[] = [
-      {
-        itemKey: 'tomate',
-        name: 'Tomaten',
-        dimension: 'count',
-        unit: 'Stück',
-        qualifier: '',
-        totalLower: 8,
-        totalUpper: 8,
-        standardLower: 3,
-        standardUpper: 3,
-        amounts: [
-          { listId: market.id, lower: 5, upper: 5, explicit: true },
-          { listId: standard.id, lower: 3, upper: 3, explicit: false },
-        ],
-        allocations: [
-          {
-            allocation: {
-              id: 'alloc-market',
-              periodStart: '2026-05-07',
-              itemKey: 'tomate',
-              dimension: 'count',
-              listId: market.id,
-              mode: 'partial',
-              quantityMilli: 5000,
-              createdAt: 1,
-              updatedAt: 1,
-            },
-            listId: market.id,
-            requestedMilli: 5000,
-            effectiveLower: 5,
-            effectiveUpper: 5,
-            clamped: false,
-            orphaned: false,
-            shadowed: false,
-            blocked: false,
-          },
-        ],
-      },
-    ]
+  it('renders a compact move/split dialog with existing shares', () => {
+    const standard = standardPageList()
+    const market = marketPageList()
     const html = renderToStaticMarkup(
       <DistributionDialog
         itemKey="tomate"
         name="Tomaten"
         periodStart="2026-05-07"
         standardListId={standard.id}
-        positions={positions}
+        currentListId={market.id}
+        positions={tomatoDistribution(standard, market)}
         lists={[standard, market]}
+        onDone={() => undefined}
         onClose={() => undefined}
       />,
     )
 
-    expect(html).toContain('Zutat verschieben / aufteilen')
-    expect(html).toContain('Aktuelle Verteilung')
-    expect(html).toContain('Wocheneinkauf')
-    expect(html).toContain('Markt')
+    expect(html).toContain('Tomaten verteilen')
+    expect(html).toContain('Benötigt: 8 Stück')
+    expect(html).toContain('Wohin?')
+    expect(html).toContain('Wie viel?')
+    expect(html).toContain('>Alles<')
+    expect(html).toContain('>Teilmenge<')
+    expect(html).toContain('Bereits verteilt')
+    expect(html).toContain('Markt:')
     expect(html).toContain('5 Stück')
     expect(html).toContain('3 Stück')
     expect(html).toContain('Alles verschieben')
-    expect(html).toContain('Teilmenge zuweisen')
-    expect(html).toContain('Zielzettel')
-    expect(html).toContain('aria-label="Teilmenge"')
-    expect(html).toContain('shopping-distribution-quantity')
-    expect(html).toContain('Eigene Zuordnungen')
     expect(html).toContain('Entfernen')
-    expect(html).toContain('Alle eigenen Zuordnungen zurücksetzen')
-    expect(html).toContain('Speichern')
+    expect(html).toContain('Verteilung zurücksetzen')
     expect(html).toContain('Abbrechen')
+    expect(html).not.toContain('Aktuelle Verteilung')
+    expect(html).not.toContain('Eigene Zuordnungen')
+    expect(html).not.toContain('Gewicht')
+  })
+
+  it('renders the partial quantity fields and a specific action label', () => {
+    const standard = standardPageList()
+    const market = marketPageList()
+    const html = renderToStaticMarkup(
+      <DistributionDialog
+        itemKey="tomate"
+        name="Tomaten"
+        periodStart="2026-05-07"
+        standardListId={standard.id}
+        currentListId={market.id}
+        positions={tomatoDistribution(standard, market)}
+        lists={[standard, market]}
+        initialMode="partial"
+        onDone={() => undefined}
+        onClose={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('shopping-distribute-quantity')
+    expect(html).toContain('aria-label="Teilmenge"')
+    expect(html).toContain('aria-label="Einheit der Teilmenge"')
+    expect(html).toContain('Der Rest bleibt auf dem Wocheneinkauf.')
+    expect(html).toContain('5 Stück zuweisen')
+  })
+
+  it('exposes distribution through an accessible row action menu', () => {
+    const html = renderToStaticMarkup(
+      <RowActionsMenu
+        label="Tomaten weitere Aktionen"
+        defaultOpen
+        actions={[
+          { label: 'Verschieben / aufteilen', onSelect: () => undefined },
+          { label: 'Bearbeiten', onSelect: () => undefined },
+        ]}
+      />,
+    )
+
+    expect(html).toContain('aria-haspopup="menu"')
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('role="menu"')
+    expect(html).toContain('Verschieben / aufteilen')
+    expect(html).toContain('Bearbeiten')
   })
 
   it('derives recipe demand from the planned cooking event', () => {
@@ -279,8 +340,9 @@ describe('shopping page', () => {
     expect(html).toContain('Zwiebeln')
     expect(html).toContain('2 Stück')
     expect(html).toContain('Obst &amp; Gemüse')
-    expect(html).toContain('>Verteilen<')
-    expect(html).toContain('Zwiebeln verschieben oder aufteilen')
+    expect(html).not.toContain('>Verteilen<')
+    expect(html).toContain('Zwiebeln weitere Aktionen')
+    expect(html).toContain('aria-haspopup="menu"')
     expect(html).not.toContain('Noch nichts zu kaufen')
   })
 
@@ -435,8 +497,8 @@ describe('shopping page', () => {
     )
     const html = renderToStaticMarkup(<ShoppingPage />)
     expect(html.match(/>Pesto</g)?.length).toBe(2)
-    expect(html).toContain('Variante: grün')
-    expect(html).toContain('Variante: rot')
+    expect(html).toContain('shopping-row-note">grün</span>')
+    expect(html).toContain('shopping-row-note">rot</span>')
   })
 
   it('applies a week-scoped quantity correction to the visible row', () => {
