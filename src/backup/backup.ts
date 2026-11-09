@@ -20,6 +20,7 @@ import {
   shoppingItemKey,
 } from '../domain/shopping'
 import {
+  findOverlappingStandardPeriods,
   periodContainsDate,
   shoppingAllocationId,
   shoppingPeriod,
@@ -32,6 +33,7 @@ import {
 import { addDays } from '../domain/dates'
 import {
   DEFAULT_STANDARD_SHOPPING_LIST_NAME,
+  SHOPPING_CYCLE_PENDING_KEY,
   SHOPPING_PERIOD_START_DAY_KEY,
   STANDARD_SHOPPING_LIST_NAME_KEY,
   shoppingSettingsFromRows,
@@ -67,13 +69,15 @@ export const BACKUP_FORMAT = 'opencook-web-backup'
  * structured instruction steps with explicit ingredient references, v10 adds
  * independent shopping lists and partial demand allocations, v11 persists and
  * normalises the legacy-week review flag, v12 adds the persistent shopping
- * cycle configuration. Older v1–v11 backups remain importable; their pantry
+ * cycle configuration, v13 adds a persisted future effective date for a cycle
+ * change and rejects overlapping standard periods. Older v1–v12 backups remain
+ * importable; their pantry
  * section is ignored, v5 checks are converted exactly once, old rows keep their
  * persisted period boundaries (or the historical Thursday format when no list
  * existed), and rows whose historical week cannot be reconstructed are marked
  * for review rather than treated as certain.
  */
-export const BACKUP_VERSION = 12
+export const BACKUP_VERSION = 13
 export const MAX_BACKUP_BYTES = 200 * 1024 * 1024
 export const MAX_BACKUP_ENTRIES = 5_000
 export const MAX_BACKUP_ENTRY_BYTES = 20 * 1024 * 1024
@@ -153,6 +157,8 @@ export interface BackupConflicts {
   orphanedManualPurchaseReferences: number
   /** Shopping-cycle settings that differ from the local installation. */
   shoppingCycle: number
+  /** Overlapping standard periods contained in the backup. */
+  overlappingStandardPeriods: number
 }
 
 export interface BackupInspection {
@@ -352,6 +358,17 @@ export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: Bac
     )
   }
   return { bytes, manifest }
+}
+
+function samePendingCycle(
+  left: { periodStartDay: number; effectiveFrom: string } | null | undefined,
+  right: { periodStartDay: number; effectiveFrom: string } | null | undefined,
+): boolean {
+  if (!left || !right) return !left && !right
+  return (
+    left.periodStartDay === right.periodStartDay &&
+    left.effectiveFrom === right.effectiveFrom
+  )
 }
 
 export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspection> {
@@ -601,6 +618,18 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
       seenListIds.add(list.id)
       shoppingLists.push(list)
     })
+  }
+
+  const backupOverlaps = findOverlappingStandardPeriods(shoppingLists)
+  if (backupOverlaps.length > 0) {
+    warnings.push(
+      `Das Backup enthält ${backupOverlaps.length} überlappende Standardperiode(n): ${backupOverlaps
+        .map(
+          (overlap) =>
+            `${overlap.firstListId}/${overlap.secondListId} (${overlap.start}–${overlap.end})`,
+        )
+        .join(', ')}. Ein Merge/Replace wird abgelehnt, bis die Perioden eindeutig sind.`,
+    )
   }
 
   const shoppingManualItems: ShoppingManualItem[] = []
@@ -946,12 +975,14 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
   const backupHasShoppingCycle = settings.some(
     (setting) =>
       setting.key === SHOPPING_PERIOD_START_DAY_KEY ||
-      setting.key === STANDARD_SHOPPING_LIST_NAME_KEY,
+      setting.key === STANDARD_SHOPPING_LIST_NAME_KEY ||
+      setting.key === SHOPPING_CYCLE_PENDING_KEY,
   )
   const shoppingCycleConflicts = backupHasShoppingCycle
     ? [
         localShoppingCycle.periodStartDay !== backupSettings.periodStartDay,
         localShoppingCycle.standardListName !== backupSettings.standardListName,
+        !samePendingCycle(localShoppingCycle.pending, backupSettings.pending),
       ].filter(Boolean).length
     : 0
   if (shoppingCycleConflicts > 0) {
@@ -994,6 +1025,7 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     ).length,
     orphanedManualPurchaseReferences: orphanedManualPurchaseIds.length,
     shoppingCycle: shoppingCycleConflicts,
+    overlappingStandardPeriods: findOverlappingStandardPeriods(shoppingLists).length,
   }
 
   // The same normalisation as the Dexie v17 migration. Older backups without
@@ -1543,6 +1575,39 @@ export async function restoreBackup(
       db.shoppingDemandAllocations,
     ],
     async () => {
+      const localLists = await db.shoppingLists.toArray()
+      const localIds = new Set(localLists.map((list) => list.id))
+      const standardUnion =
+        mode === 'replace'
+          ? inspection.shoppingLists
+          : [
+              ...localLists,
+              ...inspection.shoppingLists.filter((list) => !localIds.has(list.id)),
+            ]
+      const overlaps = findOverlappingStandardPeriods(standardUnion)
+      if (overlaps.length > 0) {
+        throw new BackupError(
+          `Die Wiederherstellung würde überlappende Standardperioden erzeugen: ${overlaps
+            .map(
+              (overlap) =>
+                `${overlap.firstListId}/${overlap.secondListId} (${overlap.start}–${overlap.end})`,
+            )
+            .join(', ')}. Es wurden keine Daten verändert.`,
+        )
+      }
+      if (mode === 'merge') {
+        const localSettings = shoppingSettingsFromRows(await db.settings.toArray())
+        const localPending = localSettings.pending
+        const backupPending = inspection.shoppingCycle.pending
+        if (
+          backupPending &&
+          !samePendingCycle(backupPending, localPending)
+        ) {
+          throw new BackupError(
+            'Das Backup enthält eine geplante Rhythmusänderung, die von der lokalen Planung abweicht. „Zusammenführen“ würde die lokale Einkaufskonfiguration verändern. Bitte „Lokal ersetzen“ verwenden oder das Backup ohne geplante Änderung einspielen. Es wurden keine Daten verändert.',
+          )
+        }
+      }
       if (mode === 'replace') {
         await Promise.all([
           db.recipes.clear(),
@@ -1732,6 +1797,9 @@ export async function restoreBackup(
     const existingSettings = new Set((await db.settings.toArray()).map((setting) => setting.key))
     for (const setting of inspection.settings) {
       if (existingSettings.has(setting.key)) continue
+      // Merge never installs a future rhythm change from another installation;
+      // the local shopping configuration always wins. Replace imports it.
+      if (setting.key === SHOPPING_CYCLE_PENDING_KEY) continue
       await db.settings.put(setting)
       existingSettings.add(setting.key)
       result.addedSettings += 1

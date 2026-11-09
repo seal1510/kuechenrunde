@@ -94,18 +94,18 @@ export function startOfWeekOn(key: string, weekStartDay: number): string {
 }
 
 /** Monday of the week containing [key]; kept for existing Monday-based callers. */
-export function startOfWeek(key: string): string {
-  return startOfWeekOn(key, 0)
+export function startOfWeek(key: string, weekStartDay: number): string {
+  return startOfWeekOn(key, weekStartDay)
 }
 
 /** Seven days starting at [weekStartDay] for the week containing [today]. */
-export function currentWeek(today: string = todayKey(), weekStartDay = 0): string[] {
+export function currentWeek(today: string = todayKey(), weekStartDay: number): string[] {
   const start = startOfWeekOn(today, weekStartDay)
   return Array.from({ length: 7 }, (_, index) => addDays(start, index))
 }
 
 /** Today and the remaining days of the configured week. */
-export function planningDays(today: string = todayKey(), weekStartDay = 0): string[] {
+export function planningDays(today: string = todayKey(), weekStartDay: number): string[] {
   const days = currentWeek(today, weekStartDay)
   return days.filter((day) => daysBetween(today, day) >= 0)
 }

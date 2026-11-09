@@ -8,7 +8,7 @@ import {
   mealEntryStatus,
   sortMealEntries,
 } from '../domain/mealplan'
-import { planningDays, todayKey } from '../domain/dates'
+import { todayKey } from '../domain/dates'
 import { DEFAULT_PLAN_SLOT } from '../domain/dishplan'
 import {
   generateWeekBest,
@@ -18,6 +18,8 @@ import {
   type ReasonContribution,
 } from '../domain/planner'
 import { randomId } from '../lib/id'
+import { getShoppingSettings } from '../settings/shopping'
+import { planningDatesForToday } from '../shopping/cycle'
 import {
   DEFAULT_HOUSEHOLD_SIZE,
   type CookSession,
@@ -481,7 +483,11 @@ export interface GenerateOutcome {
  */
 export async function generatePlan(options: GenerateOptions = {}): Promise<GenerateOutcome> {
   const today = options.today ?? todayKey()
-  const dates = planningDays(today)
+  const [settings, lists] = await Promise.all([
+    getShoppingSettings(),
+    db.shoppingLists.toArray(),
+  ])
+  const dates = planningDatesForToday(today, settings, lists)
   const recipes = await db.recipes.toArray()
   if (recipes.length === 0) {
     throw new Error('Keine Rezepte in der Bibliothek. Bitte zuerst Rezepte importieren.')

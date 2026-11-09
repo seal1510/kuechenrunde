@@ -393,7 +393,7 @@ describe('shopping page', () => {
       }),
     )
     const html = renderToStaticMarkup(<ShoppingPage />)
-    expect(html).toContain('Historische Wochenzuordnung unklar')
+    expect(html).toContain('Einkaufszuordnung unklar')
     expect(html).toContain('1 Eintrag wird nicht als gekauft gewertet')
     expect(html).toContain('Milch')
   })

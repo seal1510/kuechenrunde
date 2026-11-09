@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
-import { formatDayLabel, todayKey, WEEKDAY_NAMES } from '../domain/dates'
+import { formatDayLabel, todayKey, WEEKDAY_NAMES, weekdayName } from '../domain/dates'
 import {
   categoryLabel,
   categoryOrderWithMove,
@@ -31,7 +31,10 @@ import {
   type ShoppingCategoryId,
   type ShoppingListItem,
 } from '../domain/shopping'
-import { resolveShoppingPeriodFromData } from '../domain/shoppingLists'
+import {
+  periodStartDayForDate,
+  resolveShoppingPeriodResolution,
+} from '../domain/shoppingLists'
 import { buildShoppingPeriodView } from '../shopping/periodView'
 import {
   adjacentShoppingPeriodStart,
@@ -44,7 +47,6 @@ import {
   type ShoppingSettings,
 } from '../settings/shopping'
 import {
-  addManualItem,
   addShoppingPurchase,
   categoryOrderFromRows,
   clearLegacyQuantity,
@@ -60,7 +62,11 @@ import {
   updateManualItem,
   type ItemRuleInput,
 } from '../shopping/service'
-import { removeManualListItem } from '../shopping/listService'
+import {
+  createManualListItem,
+  ensureStandardShoppingList,
+  removeManualListItem,
+} from '../shopping/listService'
 import type {
   ShoppingItemRule,
   ShoppingManualItem,
@@ -173,35 +179,40 @@ export function ShoppingPage() {
     () => shoppingSettingsFromRows(settingsRows ?? []),
     [settingsRows],
   )
-  const period = useMemo(
+  const periodResolution = useMemo(
     () =>
-      resolveShoppingPeriodFromData(
+      resolveShoppingPeriodResolution(
         periodAnchor,
         shoppingSettings,
         shoppingLists ?? [],
       ),
     [periodAnchor, shoppingSettings, shoppingLists],
   )
+  const period = periodResolution.period
+  const periodConflict = periodResolution.conflict
   const view = useMemo(
     () =>
       buildShoppingPeriodView({
         period,
-        recipes: recipes ?? [],
-        freeDishes: freeDishes ?? [],
-        cookSessions: cookSessions ?? [],
-        manualItems: manualItems ?? [],
-        purchases: purchases ?? [],
+        recipes: periodConflict ? [] : recipes ?? [],
+        freeDishes: periodConflict ? [] : freeDishes ?? [],
+        cookSessions: periodConflict ? [] : cookSessions ?? [],
+        manualItems: periodConflict ? [] : manualItems ?? [],
+        purchases: periodConflict ? [] : purchases ?? [],
+        lists: shoppingLists ?? [],
         rules: rules ?? [],
         quantityCorrections: quantityCorrections ?? [],
         today,
       }),
     [
       period,
+      periodConflict,
       recipes,
       freeDishes,
       cookSessions,
       manualItems,
       purchases,
+      shoppingLists,
       rules,
       quantityCorrections,
       today,
@@ -276,7 +287,9 @@ export function ShoppingPage() {
   }): Promise<boolean> {
     try {
       setError(null)
-      await addManualItem({
+      const list = await ensureStandardShoppingList(period.start)
+      await createManualListItem({
+        listId: list.id,
         shoppingDate: period.start,
         name: input.name,
         quantityText: input.quantityText,
@@ -428,7 +441,8 @@ export function ShoppingPage() {
             type="button"
             className="shopping-nav-button"
             aria-label="Vorherige Einkaufsperiode"
-            onClick={() =>
+            onClick={() => {
+              if (periodConflict) return
               setPeriodAnchor(
                 adjacentShoppingPeriodStart(
                   period.start,
@@ -437,7 +451,7 @@ export function ShoppingPage() {
                   shoppingLists ?? [],
                 ),
               )
-            }
+            }}
           >
             ‹
           </button>
@@ -448,7 +462,8 @@ export function ShoppingPage() {
             type="button"
             className="shopping-nav-button"
             aria-label="Nächste Einkaufsperiode"
-            onClick={() =>
+            onClick={() => {
+              if (periodConflict) return
               setPeriodAnchor(
                 adjacentShoppingPeriodStart(
                   period.start,
@@ -457,7 +472,7 @@ export function ShoppingPage() {
                   shoppingLists ?? [],
                 ),
               )
-            }
+            }}
           >
             ›
           </button>
@@ -487,9 +502,18 @@ export function ShoppingPage() {
         </p>
       ) : null}
 
+      {periodConflict ? (
+        <div className="notice danger shopping-notice" role="alert">
+          <strong>Einkaufsperioden überlappen sich.</strong> Für{' '}
+          {formatDayLabel(periodConflict.date)} sind mehrere Standardzettel
+          zugeordnet ({periodConflict.listIds.join(', ')}). Die Einkaufsliste wird
+          bis zur eindeutigen Zuordnung nicht berechnet.
+        </div>
+      ) : null}
+
       {conflicts.total > 0 ? (
         <div className="notice shopping-notice shopping-conflict-note" role="status">
-          <strong>Historische Wochenzuordnung unklar.</strong>{' '}
+          <strong>Einkaufszuordnung unklar.</strong>{' '}
           {conflicts.total === 1
             ? '1 Eintrag wird nicht als gekauft gewertet.'
             : `${conflicts.total} Einträge werden nicht als gekauft gewertet.`}{' '}
@@ -498,7 +522,7 @@ export function ShoppingPage() {
                 conflictLabels.length > 4 ? ' …' : ''
               }. `
             : ''}
-          Die Auflösung folgt in 14B.
+          Bitte die Zuordnung prüfen.
         </div>
       ) : null}
 
@@ -1633,7 +1657,9 @@ interface SettingsDialogProps {
 }
 
 function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProps) {
-  const [day, setDay] = useState(settings.periodStartDay)
+  const today = useMemo(() => todayKey(), [])
+  const activeDay = periodStartDayForDate(settings, today)
+  const [day, setDay] = useState(activeDay)
   const [name, setName] = useState(settings.standardListName)
   const [preview, setPreview] = useState<ShoppingCycleChangePreview | null>(null)
   const [previewPending, setPreviewPending] = useState(false)
@@ -1641,17 +1667,25 @@ function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProp
   const [error, setError] = useState('')
   const trimmedName = name.replace(/\s+/g, ' ').trim()
   const dirty =
-    day !== settings.periodStartDay || trimmedName !== settings.standardListName
+    day !== activeDay || trimmedName !== settings.standardListName
 
-  async function refreshPreview(nextDay: number, nextName: string) {
+  async function refreshPreview(
+    nextDay: number,
+    nextName: string,
+    cancelPending = false,
+  ) {
     setPreviewPending(true)
     try {
       setError('')
       setPreview(
-        await previewShoppingCycleChange({
-          periodStartDay: nextDay,
-          standardListName: nextName,
-        }),
+        await previewShoppingCycleChange(
+          {
+            periodStartDay: nextDay,
+            standardListName: nextName,
+          },
+          today,
+          { cancelPending },
+        ),
       )
     } catch (cause) {
       setError(errorText(cause))
@@ -1661,19 +1695,23 @@ function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProp
   }
 
   useEffect(() => {
-    void refreshPreview(settings.periodStartDay, settings.standardListName)
+    void refreshPreview(activeDay, settings.standardListName)
     // The preview only describes the persisted state on open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function save() {
+  async function save(cancelPending = false, overrideDay = day) {
     setBusy(true)
     setError('')
     try {
-      await applyShoppingCycleChange({
-        periodStartDay: day,
-        standardListName: name,
-      })
+      await applyShoppingCycleChange(
+        {
+          periodStartDay: overrideDay,
+          standardListName: name,
+        },
+        today,
+        { cancelPending },
+      )
       onClose()
     } catch (cause) {
       setError(errorText(cause))
@@ -1695,6 +1733,36 @@ function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProp
           <CloseIcon />
         </button>
       </div>
+
+      {settings.pending ? (
+        <div className="notice" role="status">
+          <p>
+            {settings.pending.effectiveFrom > today ? (
+              <>
+                <strong>Geplante Änderung:</strong>{' '}
+                {weekdayName(settings.pending.periodStartDay)} ab{' '}
+                {formatDayLabel(settings.pending.effectiveFrom)}. Bestehende
+                Perioden bleiben unverändert.
+              </>
+            ) : (
+              <>
+                <strong>Geplante Änderung ist aktiv seit</strong>{' '}
+                {formatDayLabel(settings.pending.effectiveFrom)}.
+              </>
+            )}
+          </p>
+          {settings.pending.effectiveFrom > today ? (
+            <button
+              type="button"
+              className="button quiet"
+              onClick={() => void save(true, activeDay)}
+              disabled={busy}
+            >
+              Geplante Änderung verwerfen
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <label className="shopping-confirm-row">
         <span>Regelmäßiger Einkaufstag</span>
@@ -1735,18 +1803,50 @@ function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProp
           <p>
             <strong>Aktueller Zeitraum:</strong> {preview.currentPeriod.label}
           </p>
+          {preview.mode === 'name' ? (
+            <p>Nur der Anzeigename wird geändert; Perioden und Käufe bleiben unverändert.</p>
+          ) : preview.mode === 'cancel' ? (
+            <p>Die geplante Änderung wird verworfen; die bisherige Periodenzuordnung bleibt.</p>
+          ) : preview.mode === 'materialize' ? (
+            <p>
+              Die bereits aktive geplante Änderung wird jetzt als reguläre Einstellung
+              übernommen.
+            </p>
+          ) : (
+            <p>
+              <strong>
+                {preview.mode === 'scheduled' ? 'Wirksam ab' : 'Neuer Rhythmus ab'}:
+              </strong>{' '}
+              {formatDayLabel(preview.effectiveFrom)}
+            </p>
+          )}
           {preview.transition ? (
             <p>
               <strong>Einmaliger Übergangszeitraum:</strong> {preview.transition.label} (
               {preview.transition.days.length} Tage). Bereits vorhandene Einkäufe und
               Verteilungen bleiben ihrem bisherigen Zeitraum zugeordnet.
             </p>
-          ) : (
+          ) : preview.mode === 'name' || preview.mode === 'cancel' ? null : (
             <p>Kein verkürzter Übergangszeitraum nötig.</p>
           )}
-          <p>
-            <strong>Erster regulärer Zeitraum:</strong> {preview.firstRegularPeriod.label}
-          </p>
+          {preview.mode !== 'name' && preview.mode !== 'cancel' ? (
+            <p>
+              <strong>Erster regulärer Zeitraum:</strong>{' '}
+              {preview.firstRegularPeriod.label}
+            </p>
+          ) : null}
+          {preview.bindingFuturePeriods.length > 0 ? (
+            <p>
+              <strong>Verbindliche Zukunftsperioden bleiben erhalten:</strong>{' '}
+              {preview.bindingFuturePeriods.map((period) => period.label).join(', ')}
+            </p>
+          ) : null}
+          {preview.unusedFuturePeriods.length > 0 ? (
+            <p>
+              <strong>Unbenutzte systemseitige Zettel werden entfernt:</strong>{' '}
+              {preview.unusedFuturePeriods.map((period) => period.label).join(', ')}
+            </p>
+          ) : null}
           {preview.blocked ? <p>{preview.conflict?.message}</p> : null}
         </div>
       ) : null}

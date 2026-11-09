@@ -12,22 +12,22 @@ import {
 describe('local date handling', () => {
   it('finds the Monday–Sunday week around a date', () => {
     const monday = '2026-05-25'
-    const week = currentWeek(monday)
+    const week = currentWeek(monday, 0)
     expect(week[0]).toBe('2026-05-25')
     expect(week[6]).toBe('2026-05-31')
     expect(weekdayIndex(monday)).toBe(0)
-    expect(startOfWeek('2026-05-28')).toBe(monday)
+    expect(startOfWeek('2026-05-28', 0)).toBe(monday)
   })
 
   it('crosses a year boundary without shifting a day', () => {
-    const week = currentWeek('2026-12-31')
+    const week = currentWeek('2026-12-31', 0)
     expect(week[0]).toBe('2026-12-28')
     expect(week[6]).toBe('2027-01-03')
     expect(addDays('2026-12-31', 1)).toBe('2027-01-01')
   })
 
   it('plans only today and the remaining days of the week', () => {
-    expect(planningDays('2026-05-25')).toEqual([
+    expect(planningDays('2026-05-25', 0)).toEqual([
       '2026-05-25',
       '2026-05-26',
       '2026-05-27',
@@ -36,8 +36,8 @@ describe('local date handling', () => {
       '2026-05-30',
       '2026-05-31',
     ])
-    expect(planningDays('2026-05-27')).toHaveLength(5)
-    expect(planningDays('2026-05-31')).toEqual(['2026-05-31'])
+    expect(planningDays('2026-05-27', 0)).toHaveLength(5)
+    expect(planningDays('2026-05-31', 0)).toEqual(['2026-05-31'])
   })
 
   it('handles leap years', () => {

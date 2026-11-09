@@ -24,6 +24,7 @@ import type {
   FreeDish,
   Recipe,
   ShoppingItemRule,
+  ShoppingList,
   ShoppingManualItem,
   ShoppingPurchase,
   ShoppingQuantityCorrection,
@@ -38,6 +39,8 @@ export interface ShoppingPeriodViewInput {
   cookSessions: readonly CookSession[]
   manualItems: readonly ShoppingManualItem[]
   purchases: readonly ShoppingPurchase[]
+  /** Persisted lists; explicit listId references take precedence over the date. */
+  lists?: readonly ShoppingList[]
   rules: readonly ShoppingItemRule[]
   quantityCorrections: readonly ShoppingQuantityCorrection[]
   today?: string
@@ -69,10 +72,29 @@ export function periodForStart(periodStart: string): ShoppingPeriod {
 
 export function buildShoppingPeriodView(input: ShoppingPeriodViewInput): ShoppingPeriodView {
   const period = input.period
+  const listById = new Map((input.lists ?? []).map((list) => [list.id, list]))
+  const manualItemIds = new Set(input.manualItems.map((item) => item.id))
   const conflictManualItems: ShoppingManualItem[] = []
   const conflictPurchases: ShoppingPurchase[] = []
   const manualItems: ShoppingManualItem[] = []
   for (const item of input.manualItems) {
+    if (item.listId) {
+      const list = listById.get(item.listId)
+      if (!list) {
+        conflictManualItems.push(item)
+        continue
+      }
+      if (list.kind === 'free') continue
+      if (list.periodStart !== period.start) {
+        conflictManualItems.push(item)
+        continue
+      }
+      const date = item.shoppingDate || item.weekStart
+      if (!isInPeriod(date, period)) {
+        conflictManualItems.push(item)
+        continue
+      }
+    }
     const date = item.shoppingDate || item.weekStart
     if (!isInPeriod(date, period)) continue
     if (item.legacyWeekAmbiguous) {
@@ -83,6 +105,28 @@ export function buildShoppingPeriodView(input: ShoppingPeriodViewInput): Shoppin
   }
   const purchases: ShoppingPurchase[] = []
   for (const purchase of input.purchases) {
+    if (purchase.manualItemId) {
+      if (!manualItemIds.has(purchase.manualItemId)) {
+        conflictPurchases.push(purchase)
+        continue
+      }
+    }
+    if (purchase.listId) {
+      const list = listById.get(purchase.listId)
+      if (!list) {
+        conflictPurchases.push(purchase)
+        continue
+      }
+      if (list.kind === 'free') continue
+      if (list.periodStart !== period.start) {
+        conflictPurchases.push(purchase)
+        continue
+      }
+      if (!isInPeriod(purchase.shoppingDate, period)) {
+        conflictPurchases.push(purchase)
+        continue
+      }
+    }
     if (!isInPeriod(purchase.shoppingDate, period)) continue
     if (purchase.legacyWeekAmbiguous) {
       conflictPurchases.push(purchase)

@@ -34,7 +34,8 @@ import {
   undoDayNoteMove,
 } from '../mealplan/dayNoteService'
 import { calendarSettingsFromRows, setCalendarSettings } from '../settings/calendar'
-import type { DayNote, MealPlanEntry } from '../types'
+import { setHouseholdSize } from '../mealplan/service'
+import { DEFAULT_HOUSEHOLD_SIZE, type DayNote, type MealPlanEntry } from '../types'
 import { AddEntryDialog } from './plan/AddEntryDialog'
 import {
   CalendarDragOverlay,
@@ -169,6 +170,12 @@ export function PlanPage() {
     () => calendarSettingsFromRows(settingsRows ?? []),
     [settingsRows],
   )
+  const householdSize = useMemo(() => {
+    const row = (settingsRows ?? []).find((setting) => setting.key === 'householdSize')
+    return typeof row?.value === 'number' && Number.isFinite(row.value) && row.value >= 1
+      ? Math.round(row.value)
+      : DEFAULT_HOUSEHOLD_SIZE
+  }, [settingsRows])
   const calendarWindow = useMemo(
     () =>
       buildCalendarWindow(
@@ -854,6 +861,21 @@ export function PlanPage() {
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="field">
+                <span className="field-label">Haushaltsgröße</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={householdSize}
+                  onChange={(event) => {
+                    const next = Number(event.target.value)
+                    if (Number.isFinite(next) && next >= 1 && next <= 20) {
+                      void setHouseholdSize(next)
+                    }
+                  }}
+                />
               </label>
               <label className="field">
                 <span className="field-label">Tage davor</span>

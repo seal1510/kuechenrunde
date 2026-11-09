@@ -53,6 +53,11 @@ beforeEach(async () => {
   await db.mealPlans.clear()
   await db.mealDays.clear()
   await db.settings.clear()
+  await db.shoppingLists.clear()
+  // These historical tests assume a Monday-based planning week. The product
+  // default is now the configured shopping day; the explicit test setting keeps
+  // the existing expectations deterministic.
+  await db.settings.put({ key: 'shoppingPeriodStartDay', value: 0 })
   await db.cookSessions.clear()
   await db.recipes.clear()
   await db.images.clear()

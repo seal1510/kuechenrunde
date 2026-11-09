@@ -26,6 +26,7 @@ export type ShoppingListErrorCode =
   | 'confirmation-required'
   | 'purchase-conflict'
   | 'orphaned-allocation'
+  | 'overlapping-periods'
   | 'cycle-change-conflict'
 
 export class ShoppingListError extends Error {

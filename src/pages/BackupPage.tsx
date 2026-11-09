@@ -121,7 +121,8 @@ export function BackupPage() {
       inspection.conflicts.dayNotes +
       inspection.conflicts.freeDishes +
       inspection.conflicts.shoppingCycle +
-      inspection.conflicts.orphanedManualPurchaseReferences
+      inspection.conflicts.orphanedManualPurchaseReferences +
+      inspection.conflicts.overlappingStandardPeriods
     : 0
 
   return (
@@ -224,6 +225,9 @@ export function BackupPage() {
                   : ''}
                 {inspection.conflicts.orphanedManualPurchaseReferences > 0
                   ? `, ${inspection.conflicts.orphanedManualPurchaseReferences} Kauf/Käufe verweisen auf fehlende manuelle Artikel`
+                  : ''}
+                {inspection.conflicts.overlappingStandardPeriods > 0
+                  ? `, ${inspection.conflicts.overlappingStandardPeriods} überlappende Standardperiode(n)`
                   : ''}
                 .
               </p>

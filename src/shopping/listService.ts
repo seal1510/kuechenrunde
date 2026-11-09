@@ -839,6 +839,7 @@ export type ShoppingListServiceConflictCode =
   | 'unknown-purchase-list'
   | 'manual-purchase-ambiguous'
   | 'orphaned-manual-list'
+  | 'orphaned-manual-purchase'
   | 'unmatched-purchase'
   | 'legacy-week-ambiguous'
   | 'manual-list-period-mismatch'
@@ -929,7 +930,26 @@ export async function getOpenDemandByList(
     db.shoppingManualItems.toArray(),
   ])
 
-  const resolvePurchaseList = (purchase: ShoppingPurchase): string => {
+  // An explicit reference to this standard list with a date outside its stored
+  // period is an inconsistency; report it instead of silently hiding the row.
+  for (const purchase of allPurchases) {
+    if (purchase.manualItemId || !purchase.listId) continue
+    const list = listById.get(purchase.listId)
+    if (
+      list?.kind === 'standard' &&
+      list.periodStart === period.start &&
+      !periodContainsDate(period, purchase.shoppingDate)
+    ) {
+      serviceConflicts.push({
+        code: 'purchase-list-mismatch',
+        itemKey: purchase.itemKey,
+        listId: list.id,
+        purchaseId: purchase.id,
+      })
+    }
+  }
+
+  const resolvePurchaseList = (purchase: ShoppingPurchase): string | null => {
     if (!purchase.listId) return standardId
     const list = listById.get(purchase.listId)
     if (!list) {
@@ -939,7 +959,7 @@ export async function getOpenDemandByList(
         listId: purchase.listId,
         purchaseId: purchase.id,
       })
-      return standardId
+      return null
     }
     if (list.kind === 'standard' && list.periodStart !== period.start) {
       serviceConflicts.push({
@@ -948,7 +968,7 @@ export async function getOpenDemandByList(
         listId: purchase.listId,
         purchaseId: purchase.id,
       })
-      return standardId
+      return null
     }
     return list.id
   }
@@ -958,6 +978,20 @@ export async function getOpenDemandByList(
   for (const purchase of allPurchases) {
     if (!DATE_RE.test(purchase.shoppingDate)) continue
     if (purchase.manualItemId) {
+      // A manual purchase is only valid while its manual article exists. An
+      // orphaned reference stays persisted but is never counted as recipe
+      // demand and is surfaced as a structured conflict.
+      const manual = allManualItems.find((item) => item.id === purchase.manualItemId)
+      if (!manual) {
+        serviceConflicts.push({
+          code: 'orphaned-manual-purchase',
+          itemKey: purchase.itemKey,
+          listId: purchase.listId ?? null,
+          purchaseId: purchase.id,
+          manualItemId: purchase.manualItemId,
+        })
+        continue
+      }
       // Manual articles on a free list are independent from a calendar period;
       // their purchases travel with the article, not with a week.
       const list = manualPurchases.get(purchase.manualItemId) ?? []
@@ -967,6 +1001,7 @@ export async function getOpenDemandByList(
     }
     if (!periodContainsDate(period, purchase.shoppingDate)) continue
     const listId = resolvePurchaseList(purchase)
+    if (!listId) continue
     const resolvedList = listById.get(listId)
     if (purchase.legacyWeekAmbiguous && resolvedList?.kind !== 'free') {
       serviceConflicts.push({
