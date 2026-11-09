@@ -208,8 +208,25 @@ export async function removeManualItem(id: string): Promise<void> {
   })
 }
 
-export async function restoreManualItem(item: ShoppingManualItem): Promise<void> {
-  await db.shoppingManualItems.put(item)
+/**
+ * Restore a deleted manual article together with exactly the purchase rows
+ * that were removed with it. Both writes share one transaction so the restored
+ * article can never appear with a silently lost done state.
+ */
+export async function restoreManualItem(
+  item: ShoppingManualItem,
+  purchases: readonly ShoppingPurchase[] = [],
+): Promise<void> {
+  await db.transaction(
+    'rw',
+    [db.shoppingManualItems, db.shoppingPurchases],
+    async () => {
+      await db.shoppingManualItems.put(item)
+      if (purchases.length > 0) {
+        await db.shoppingPurchases.bulkPut(purchases.map((purchase) => ({ ...purchase })))
+      }
+    },
+  )
 }
 
 /* ------------------------------------------------------------------ */

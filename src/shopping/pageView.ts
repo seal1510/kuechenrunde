@@ -29,6 +29,7 @@ import {
   standardShoppingListId,
   standardShoppingListName,
   standardShoppingListRecord,
+  type ShoppingDistributionResult,
   type ShoppingOpenPosition,
   type ShoppingPeriod,
 } from '../domain/shoppingLists'
@@ -97,6 +98,8 @@ export interface ShoppingPageRow {
   status: 'open' | 'done'
   /** Purchases that produced this row's done state. */
   purchaseIds: string[]
+  /** Lists this automatic item is currently distributed to, by display name. */
+  distributionListNames: string[]
   /** Rich automatic item metadata, re-used by the existing edit dialog. */
   richItem: ShoppingListItem | null
   manualItem: ShoppingManualItem | null
@@ -119,6 +122,8 @@ export interface ShoppingPageView {
   conflictLabels: string[]
   richItems: ShoppingListItem[]
   automaticPurchases: ShoppingPurchase[]
+  /** Read-only distribution used by the move/split dialog. */
+  distribution: ShoppingDistributionResult | null
 }
 
 export interface ShoppingPageViewInput {
@@ -214,9 +219,31 @@ function openAmounts(
   return result.sort((left, right) => left.dimension.localeCompare(right.dimension))
 }
 
+function distributedListNames(
+  itemKey: string,
+  distribution: ShoppingDistributionResult,
+  listNameById: ReadonlyMap<string, string>,
+): string[] {
+  const names = new Set<string>()
+  for (const position of distribution.positions) {
+    if (position.itemKey !== itemKey) continue
+    for (const amount of position.amounts) {
+      if (amount.lower <= 0 && amount.upper <= 0) continue
+      names.add(listNameById.get(amount.listId) ?? amount.listId)
+    }
+  }
+  for (const placement of distribution.unquantified) {
+    if (placement.itemKey !== itemKey) continue
+    names.add(listNameById.get(placement.listId) ?? placement.listId)
+  }
+  return Array.from(names)
+}
+
 function buildRows(
   open: ShoppingOpenDemandResult,
   richItems: readonly ShoppingListItem[],
+  distribution: ShoppingDistributionResult,
+  listNameById: ReadonlyMap<string, string>,
 ): Record<string, ShoppingPageRow[]> {
   const rowsByList: Record<string, ShoppingPageRow[]> = {}
   const push = (row: ShoppingPageRow) => {
@@ -300,6 +327,11 @@ function buildRows(
       notes: richItem?.purchaseNotes ?? [],
       status,
       purchaseIds,
+      distributionListNames: distributedListNames(
+        group.itemKey,
+        distribution,
+        listNameById,
+      ),
       richItem,
       manualItem: null,
     })
@@ -332,6 +364,11 @@ function buildRows(
       notes: richItem?.purchaseNotes ?? [],
       status: qualitativeIds.length > 0 ? 'done' : 'open',
       purchaseIds: qualitativeIds,
+      distributionListNames: distributedListNames(
+        placement.itemKey,
+        distribution,
+        listNameById,
+      ),
       richItem,
       manualItem: null,
     })
@@ -391,6 +428,7 @@ function buildRows(
       notes: item.purchaseNote ? [item.purchaseNote] : [],
       status: manual.done ? 'done' : 'open',
       purchaseIds: [],
+      distributionListNames: [],
       richItem: null,
       manualItem: item,
     })
@@ -466,6 +504,7 @@ export function buildShoppingPageView(input: ShoppingPageViewInput): ShoppingPag
       conflictLabels: [],
       richItems: [],
       automaticPurchases: [],
+      distribution: null,
     }
   }
 
@@ -521,7 +560,16 @@ export function buildShoppingPageView(input: ShoppingPageViewInput): ShoppingPag
     manualItems: input.manualItems,
   })
 
-  const rawRows = buildRows(openDemand, richList.items)
+  const listNameById = new Map<string, string>([
+    [standardListIdValue, standardName],
+    ...freeLists.map((list) => [list.id, list.name] as const),
+  ])
+  const rawRows = buildRows(
+    openDemand,
+    richList.items,
+    distribution,
+    listNameById,
+  )
   const rowsByList: Record<string, ShoppingPageRow[]> = {}
   for (const [listId, rows] of Object.entries(rawRows)) {
     rowsByList[listId] = sortRows(rows, categoryOrder)
@@ -586,5 +634,6 @@ export function buildShoppingPageView(input: ShoppingPageViewInput): ShoppingPag
     conflictLabels,
     richItems: richList.items,
     automaticPurchases,
+    distribution,
   }
 }

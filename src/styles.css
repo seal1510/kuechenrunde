@@ -6126,6 +6126,27 @@ body.calendar-dragging * {
   line-height: 1;
 }
 
+.shopping-row-distribute {
+  flex: 0 0 auto;
+  min-height: 2.5rem;
+  margin: 0 0.2rem 0 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 650;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+.shopping-row-distribute:hover,
+.shopping-row-distribute:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .shopping-row.is-done {
   min-height: 2.7rem;
 }
@@ -6236,6 +6257,160 @@ body.calendar-dragging * {
 .shopping-confirm-modal,
 .shopping-settings-modal {
   max-width: 390px;
+}
+
+.shopping-distribution-modal {
+  max-width: 520px;
+}
+
+.shopping-distribution-current {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.shopping-distribution-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.shopping-distribution-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  font-size: 0.8rem;
+}
+
+.shopping-distribution-total span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.shopping-distribution-total strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.shopping-distribution-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.shopping-distribution-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.shopping-distribution-list li > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.shopping-distribution-list li > span:last-child {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.shopping-distribution-assignments {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.shopping-distribution-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.shopping-distribution-mode legend {
+  width: 100%;
+  margin-bottom: 0.05rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.shopping-distribution-mode label {
+  display: flex;
+  flex: 1 1 10rem;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.shopping-distribution-mode label.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.shopping-distribution-mode label:has(input:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.shopping-distribution-mode input {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--accent);
+}
+
+.shopping-distribution-partial {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.shopping-distribution-partial[hidden] {
+  display: none;
+}
+
+.shopping-distribution-quantity {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.shopping-distribution-status {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface));
+  color: var(--text);
+  font-size: 0.8rem;
 }
 
 .shopping-edit-form {
@@ -6578,9 +6753,20 @@ body.calendar-dragging * {
     display: none;
   }
 
+  .shopping-row-distribute {
+    min-height: 2.4rem;
+    margin-right: 0.1rem;
+    padding: 0.15rem 0.42rem;
+    font-size: 0.66rem;
+  }
+
   .shopping-modal {
     max-height: 86dvh;
     padding: 0.95rem;
+  }
+
+  .shopping-distribution-quantity {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
   }
 }
 
@@ -6605,6 +6791,14 @@ body.calendar-dragging * {
 
   .shopping-icon-button {
     width: 2.15rem;
+  }
+
+  .shopping-distribution-quantity {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shopping-distribution-mode label {
+    flex-basis: 100%;
   }
 }
 

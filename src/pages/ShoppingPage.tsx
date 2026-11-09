@@ -39,6 +39,7 @@ import {
   adjacentShoppingPeriodStart,
   applyShoppingSettings,
 } from '../shopping/cycle'
+import type { ShoppingDistributionPosition } from '../domain/shoppingLists'
 import type { ShoppingSettings } from '../settings/shopping'
 import {
   addShoppingPurchase,
@@ -55,12 +56,16 @@ import {
   type ItemRuleInput,
 } from '../shopping/service'
 import {
+  assignShoppingSubquantity,
   createFreeShoppingList,
   createManualListItem,
   deleteFreeShoppingList,
   ensureStandardShoppingList,
+  moveShoppingItem,
   removeManualListItem,
+  removeShoppingAllocation,
   renameShoppingList,
+  resetShoppingAllocations,
   setManualItemPurchased,
   updateManualListItem,
 } from '../shopping/listService'
@@ -170,8 +175,12 @@ export function ShoppingPage() {
     listId: string
     itemKey: string
   } | null>(null)
+  const [distributingItemKey, setDistributingItemKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [undoItem, setUndoItem] = useState<ShoppingManualItem | null>(null)
+  const [undoItem, setUndoItem] = useState<{
+    item: ShoppingManualItem
+    purchases: ShoppingPurchase[]
+  } | null>(null)
   const addTriggerRef = useRef<HTMLButtonElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -291,6 +300,18 @@ export function ShoppingPage() {
       ) ?? null
     )
   }, [view, confirmingAuto])
+
+  const distributingItem =
+    view?.richItems.find((item) => item.key === distributingItemKey) ?? null
+  const distributingPositions = useMemo(
+    () =>
+      view?.distribution && distributingItemKey
+        ? view.distribution.positions.filter(
+            (position) => position.itemKey === distributingItemKey,
+          )
+        : [],
+    [view, distributingItemKey],
+  )
 
   const renamingList =
     view?.lists.find((list) => list.id === renamingListId) ?? null
@@ -494,8 +515,17 @@ export function ShoppingPage() {
   }
 
   async function deleteManual(item: ShoppingManualItem) {
+    // Capture the purchase rows this explicit delete removes so "Rückgängig"
+    // restores the complete done state, not just the article.
+    const before = await db.shoppingPurchases.toArray()
     await removeManualListItem(item.id)
-    setUndoItem(item)
+    const afterIds = new Set(
+      (await db.shoppingPurchases.toArray()).map((purchase) => purchase.id),
+    )
+    setUndoItem({
+      item,
+      purchases: before.filter((purchase) => !afterIds.has(purchase.id)),
+    })
   }
 
   function moveCategory(id: ShoppingCategoryId, direction: -1 | 1) {
@@ -631,6 +661,21 @@ export function ShoppingPage() {
         </div>
       ) : null}
 
+      {view &&
+      view.serviceConflicts.length === 0 &&
+      view.distribution?.requiresReview ? (
+        <div className="notice shopping-notice shopping-conflict-note" role="status">
+          <strong>Einkaufszuordnung prüfen.</strong> Mindestens eine feste
+          Teilmenge passt nicht mehr zum aktuellen Bedarf.
+          {view.conflictLabels.length > 0
+            ? ` Betroffen: ${view.conflictLabels.slice(0, 4).join(', ')}${
+                view.conflictLabels.length > 4 ? ' …' : ''
+              }.`
+            : ''}{' '}
+          Passe die Verteilung über „Verteilen“ an oder setze sie zurück.
+        </div>
+      ) : null}
+
       {view && view.warnings.length > 0 ? (
         <div className="notice shopping-notice shopping-warnings">
           <ul>
@@ -646,13 +691,13 @@ export function ShoppingPage() {
 
       {undoItem ? (
         <div className="shopping-undo" role="status">
-          <span>„{undoItem.name}“ wurde entfernt.</span>
+          <span>„{undoItem.item.name}“ wurde entfernt.</span>
           <button
             type="button"
             className="shopping-text-action"
             onClick={() =>
               void run(async () => {
-                await restoreManualItem(undoItem)
+                await restoreManualItem(undoItem.item, undoItem.purchases)
                 setUndoItem(null)
               })
             }
@@ -834,6 +879,11 @@ export function ShoppingPage() {
                               ? () => editRow(row)
                               : undefined
                           }
+                          onDistribute={
+                            row.kind === 'automatic'
+                              ? () => setDistributingItemKey(row.itemKey)
+                              : undefined
+                          }
                         />
                       ))}
                     </ul>
@@ -862,6 +912,11 @@ export function ShoppingPage() {
                       onEdit={
                         row.kind === 'manual' || row.richItem
                           ? () => editRow(row)
+                          : undefined
+                      }
+                      onDistribute={
+                        row.kind === 'automatic'
+                          ? () => setDistributingItemKey(row.itemKey)
                           : undefined
                       }
                     />
@@ -917,6 +972,20 @@ export function ShoppingPage() {
         />
       ) : null}
 
+      {distributingItem && view?.distribution ? (
+        <DistributionDialog
+          key={distributingItem.key}
+          itemKey={distributingItem.key}
+          name={distributingItem.name}
+          periodStart={view.period.start}
+          standardListId={view.standardListId}
+          currentListId={selectedList?.id}
+          positions={distributingPositions}
+          lists={view.lists}
+          onClose={() => setDistributingItemKey(null)}
+        />
+      ) : null}
+
       {settingsOpen && view ? (
         <SettingsDialog
           order={view.categoryOrder}
@@ -953,9 +1022,16 @@ interface ShoppingRowProps {
   done?: boolean
   onToggle: () => void
   onEdit?: () => void
+  onDistribute?: () => void
 }
 
-function ShoppingRow({ row, done = false, onToggle, onEdit }: ShoppingRowProps) {
+function ShoppingRow({
+  row,
+  done = false,
+  onToggle,
+  onEdit,
+  onDistribute,
+}: ShoppingRowProps) {
   const openAmount = rowAmountSummary(row)
   const purchasedAmount = formatAmounts(row.purchasedPositions)
   const amount = done ? rowAmountSummary(row, true) : openAmount
@@ -964,6 +1040,9 @@ function ShoppingRow({ row, done = false, onToggle, onEdit }: ShoppingRowProps) 
   const secondary = [
     row.variant ? `Variante: ${row.variant}` : '',
     ...row.notes,
+    row.distributionListNames.length > 1
+      ? `Verteilt auf: ${row.distributionListNames.join(', ')}`
+      : '',
     partialText,
   ].filter(Boolean)
   const accessibleName = row.variant ? `${row.name}, ${row.variant}` : row.name
@@ -1008,6 +1087,16 @@ function ShoppingRow({ row, done = false, onToggle, onEdit }: ShoppingRowProps) 
       ) : (
         <div className="shopping-row-main">{content}</div>
       )}
+      {onDistribute ? (
+        <button
+          type="button"
+          className="shopping-row-distribute"
+          onClick={onDistribute}
+          aria-label={`${accessibleName} verschieben oder aufteilen`}
+        >
+          Verteilen
+        </button>
+      ) : null}
     </li>
   )
 }
@@ -1408,6 +1497,485 @@ function DeleteListDialog({ list, onDelete, onClose }: DeleteListDialogProps) {
       <div className="shopping-panel-actions">
         <button type="button" className="button danger" disabled={busy} onClick={() => void remove()}>
           {busy ? 'Lösche …' : 'Zettel löschen'}
+        </button>
+        <button type="button" className="button quiet" onClick={onClose} disabled={busy}>
+          Abbrechen
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+interface DistributionDialogProps {
+  itemKey: string
+  name: string
+  periodStart: string
+  standardListId: string
+  currentListId?: string
+  positions: readonly ShoppingDistributionPosition[]
+  lists: readonly ShoppingPageList[]
+  onClose: () => void
+}
+
+function draftFor(
+  positions: readonly ShoppingDistributionPosition[],
+  dimension: string,
+  targetListId: string,
+): { quantityText: string; unit: string } {
+  const position = positions.find((entry) => entry.dimension === dimension)
+  if (!position) return { quantityText: '', unit: '' }
+  const amount = position.amounts.find(
+    (entry) => entry.listId === targetListId && (entry.lower > 0 || entry.upper > 0),
+  )
+  const editable = editableShoppingAmount(
+    amount
+      ? {
+          dimension: position.dimension,
+          unit: position.unit,
+          lower: amount.lower,
+          upper: amount.upper,
+          qualifier: position.qualifier,
+        }
+      : {
+          dimension: position.dimension,
+          unit: position.unit,
+          lower: position.totalLower,
+          upper: position.totalUpper,
+          qualifier: position.qualifier,
+        },
+  )
+  return {
+    quantityText: amount ? editable.quantityText : '',
+    unit: editable.unit,
+  }
+}
+
+/**
+ * Move a complete automatic recipe position or assign a fixed subset. The
+ * dialog only formats the already resolved distribution; every write is done
+ * by the existing allocation services.
+ */
+export function DistributionDialog({
+  itemKey,
+  name,
+  periodStart,
+  standardListId,
+  currentListId,
+  positions,
+  lists,
+  onClose,
+}: DistributionDialogProps) {
+  const firstFree = lists.find((list) => !list.isStandard)
+  const initialTarget =
+    (currentListId && lists.some((list) => list.id === currentListId)
+      ? currentListId
+      : null) ??
+    firstFree?.id ??
+    standardListId ??
+    lists[0]?.id ??
+    ''
+  const initialDimension = positions[0]?.dimension ?? ''
+  const initialDraft = draftFor(positions, initialDimension, initialTarget)
+  const [mode, setMode] = useState<'full' | 'partial'>('full')
+  const [targetListId, setTargetListId] = useState(initialTarget)
+  const [dimension, setDimension] = useState(initialDimension)
+  const [quantityText, setQuantityText] = useState(initialDraft.quantityText)
+  const [unit, setUnit] = useState(initialDraft.unit)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [status, setStatus] = useState('')
+
+  const listNameById = new Map(lists.map((list) => [list.id, list.name]))
+  const targetName = listNameById.get(targetListId) ?? targetListId
+  const selectedPosition =
+    positions.find((position) => position.dimension === dimension) ??
+    positions[0] ??
+    null
+  const hasFullAllocation = positions.some((position) =>
+    position.allocations.some(
+      (resolved) =>
+        !resolved.blocked && resolved.allocation.mode === 'full',
+    ),
+  )
+  const isRange =
+    selectedPosition !== null &&
+    selectedPosition.totalLower !== selectedPosition.totalUpper
+  const partialAllowed =
+    positions.length > 0 && !hasFullAllocation && !isRange
+  const hasNumericDemand = positions.length > 0
+  const hasAnyAllocation = positions.some(
+    (position) => position.allocations.length > 0,
+  )
+
+  useEffect(() => {
+    if (
+      positions.length > 0 &&
+      !positions.some((position) => position.dimension === dimension)
+    ) {
+      setDimension(positions[0]!.dimension)
+    }
+  }, [positions, dimension])
+
+  useEffect(() => {
+    const draft = draftFor(positions, dimension, targetListId)
+    setQuantityText(draft.quantityText)
+    setUnit(draft.unit)
+  }, [positions, dimension, targetListId])
+
+  useEffect(() => {
+    if (!partialAllowed && mode === 'partial') setMode('full')
+  }, [partialAllowed, mode])
+
+  const assignments: Array<{ id: string; label: string }> = []
+  const seenAssignments = new Set<string>()
+  for (const position of positions) {
+    for (const resolved of position.allocations) {
+      if (resolved.blocked || seenAssignments.has(resolved.allocation.id)) continue
+      const listName = listNameById.get(resolved.listId) ?? resolved.listId
+      if (resolved.allocation.mode === 'full') {
+        assignments.push({
+          id: resolved.allocation.id,
+          label:
+            resolved.allocation.dimension === '*'
+              ? `Alles auf ${listName}`
+              : `Gesamte Menge ${quantityDimensionLabel(position.dimension)} auf ${listName}`,
+        })
+        seenAssignments.add(resolved.allocation.id)
+        continue
+      }
+      if (resolved.effectiveLower <= 0 && resolved.effectiveUpper <= 0) continue
+      assignments.push({
+        id: resolved.allocation.id,
+        label: `${quantityDimensionLabel(position.dimension)}: ${formatShoppingAmount({
+          dimension: position.dimension,
+          unit: position.unit,
+          lower: resolved.effectiveLower,
+          upper: resolved.effectiveUpper,
+          qualifier: position.qualifier,
+        })} auf ${listName}`,
+      })
+      seenAssignments.add(resolved.allocation.id)
+    }
+  }
+
+  async function ensureStandardList() {
+    if (targetListId === standardListId) {
+      await ensureStandardShoppingList(periodStart)
+    }
+  }
+
+  async function save() {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    setStatus('')
+    try {
+      if (!targetListId) throw new Error('Bitte einen Zielzettel auswählen.')
+      await ensureStandardList()
+      if (mode === 'full') {
+        await moveShoppingItem({ periodStart, itemKey, targetListId })
+        setStatus(`„${name}“ wurde vollständig auf „${targetName}“ verschoben.`)
+      } else {
+        if (!selectedPosition) {
+          throw new Error('Bitte eine Mengenart auswählen.')
+        }
+        if (selectedPosition.totalLower !== selectedPosition.totalUpper) {
+          throw new Error('Ein Mengenbereich kann nicht als feste Teilmenge zugewiesen werden.')
+        }
+        const parsed = parseShoppingQuantityPosition(quantityText, unit)
+        if (!parsed) {
+          throw new Error('Bitte eine gültige Menge mit Einheit angeben.')
+        }
+        if (parsed.lower !== parsed.upper) {
+          throw new Error('Bitte eine feste Menge angeben, keinen Bereich.')
+        }
+        if (parsed.lower <= 0) {
+          throw new Error('Die Menge muss größer als null sein.')
+        }
+        if (parsed.dimension !== selectedPosition.dimension) {
+          throw new Error('Die Einheit passt nicht zur ausgewählten Mengenart.')
+        }
+        await assignShoppingSubquantity({
+          periodStart,
+          itemKey,
+          dimension: selectedPosition.dimension,
+          targetListId,
+          quantity: parsed.lower,
+        })
+        const assignedLabel = formatShoppingAmount({
+          dimension: selectedPosition.dimension,
+          unit: selectedPosition.unit,
+          lower: parsed.lower,
+          upper: parsed.upper,
+          qualifier: selectedPosition.qualifier,
+        })
+        setStatus(`${assignedLabel} wurden „${targetName}“ zugewiesen.`)
+      }
+    } catch (caught) {
+      setError(errorText(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function removeAssignment(id: string) {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    setStatus('')
+    try {
+      await removeShoppingAllocation(id)
+      setStatus('Die Zuordnung wurde entfernt.')
+    } catch (caught) {
+      setError(errorText(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function resetAssignments() {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    setStatus('')
+    try {
+      await resetShoppingAllocations({ periodStart, itemKey })
+      setStatus('Alle eigenen Zuordnungen wurden zurückgesetzt.')
+    } catch (caught) {
+      setError(errorText(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal label={`${name} verschieben oder aufteilen`} className="shopping-distribution-modal" onClose={onClose}>
+      <div className="shopping-panel-head">
+        <div>
+          <h2>Zutat verschieben / aufteilen</h2>
+          <p className="shopping-panel-subline">
+            {name} · Gesamtbedarf:{' '}
+            {positions.length > 0
+              ? positions
+                  .map((position) =>
+                    formatShoppingAmount({
+                      dimension: position.dimension,
+                      unit: position.unit,
+                      lower: position.totalLower,
+                      upper: position.totalUpper,
+                      qualifier: position.qualifier,
+                    }),
+                  )
+                  .join(' · ')
+              : 'ohne teilbare Mengenangabe'}
+          </p>
+        </div>
+        <button type="button" className="shopping-icon-button" aria-label="Schließen" onClick={onClose}>
+          <CloseIcon />
+        </button>
+      </div>
+
+      <div className="shopping-distribution-current">
+        <span className="shopping-field-label">Aktuelle Verteilung</span>
+        {hasNumericDemand ? (
+          positions.map((position) => (
+            <div className="shopping-distribution-block" key={position.dimension}>
+              <div className="shopping-distribution-total">
+                <span>{quantityDimensionLabel(position.dimension)}</span>
+                <strong>
+                  {formatShoppingAmount({
+                    dimension: position.dimension,
+                    unit: position.unit,
+                    lower: position.totalLower,
+                    upper: position.totalUpper,
+                    qualifier: position.qualifier,
+                  })}
+                </strong>
+              </div>
+              <ul className="shopping-distribution-list">
+                {position.amounts
+                  .filter((amount) => amount.lower > 0 || amount.upper > 0)
+                  .map((amount) => (
+                    <li key={amount.listId}>
+                      <span>{listNameById.get(amount.listId) ?? amount.listId}</span>
+                      <span>
+                        {formatShoppingAmount({
+                          dimension: position.dimension,
+                          unit: position.unit,
+                          lower: amount.lower,
+                          upper: amount.upper,
+                          qualifier: position.qualifier,
+                        })}
+                      </span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          ))
+        ) : (
+          <p className="shopping-field-hint">
+            Diese Zutat hat keine eindeutig teilbare Mengenangabe. Du kannst sie
+            nur vollständig verschieben.
+          </p>
+        )}
+
+        {assignments.length > 0 ? (
+          <div className="shopping-distribution-assignments">
+            <span className="shopping-field-label">Eigene Zuordnungen</span>
+            <ul className="shopping-plain-list">
+              {assignments.map((assignment) => (
+                <li key={assignment.id}>
+                  <span>{assignment.label}</span>
+                  <button
+                    type="button"
+                    className="shopping-text-action danger"
+                    disabled={busy}
+                    onClick={() => void removeAssignment(assignment.id)}
+                  >
+                    Entfernen
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {hasAnyAllocation ? (
+          <button
+            type="button"
+            className="shopping-text-action danger"
+            disabled={busy}
+            onClick={() => void resetAssignments()}
+          >
+            Alle eigenen Zuordnungen zurücksetzen
+          </button>
+        ) : null}
+      </div>
+
+      <fieldset className="shopping-distribution-mode">
+        <legend>Änderung</legend>
+        <label className={mode === 'full' ? 'is-active' : undefined}>
+          <input
+            type="radio"
+            name="shopping-distribution-mode"
+            checked={mode === 'full'}
+            disabled={busy}
+            onChange={() => setMode('full')}
+          />
+          <span>Alles verschieben</span>
+        </label>
+        <label className={mode === 'partial' ? 'is-active' : undefined}>
+          <input
+            type="radio"
+            name="shopping-distribution-mode"
+            checked={mode === 'partial'}
+            disabled={busy || !partialAllowed}
+            onChange={() => setMode('partial')}
+          />
+          <span>Teilmenge zuweisen</span>
+        </label>
+      </fieldset>
+      {hasFullAllocation ? (
+        <p className="shopping-field-hint">
+          Für eine Teilmenge bitte zuerst die vollständige Verschiebung
+          entfernen oder alle Zuordnungen zurücksetzen.
+        </p>
+      ) : null}
+      {isRange ? (
+        <p className="shopping-field-hint">
+          Ein Mengenbereich kann nicht als feste Teilmenge aufgeteilt werden.
+        </p>
+      ) : null}
+
+      <label className="shopping-field">
+        <span>Zielzettel</span>
+        <select
+          value={targetListId}
+          onChange={(event) => setTargetListId(event.target.value)}
+          disabled={busy || lists.length === 0}
+        >
+          {lists.map((list) => (
+            <option key={list.id} value={list.id}>
+              {list.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {mode === 'full' ? (
+        <p className="shopping-field-hint">
+          Der gesamte Bedarf folgt dem Zielzettel, auch wenn sich die benötigte
+          Menge später ändert.
+        </p>
+      ) : null}
+      <div className="shopping-distribution-partial" hidden={mode !== 'partial'}>
+        {positions.length > 1 ? (
+          <label className="shopping-field">
+            <span>Mengenart</span>
+            <select
+              value={dimension}
+              onChange={(event) => setDimension(event.target.value)}
+              disabled={busy}
+            >
+              {positions.map((position) => (
+                <option key={position.dimension} value={position.dimension}>
+                  {quantityDimensionLabel(position.dimension)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        <div className="shopping-distribution-quantity">
+          <label className="shopping-field">
+            <span>Menge</span>
+            <input
+              value={quantityText}
+              onChange={(event) => setQuantityText(event.target.value)}
+              placeholder="z. B. 5"
+              inputMode="decimal"
+              disabled={busy || !partialAllowed}
+              aria-label="Teilmenge"
+            />
+          </label>
+          <label className="shopping-field">
+            <span>Einheit</span>
+            <input
+              value={unit}
+              onChange={(event) => setUnit(event.target.value)}
+              placeholder="z. B. Stück"
+              disabled={busy || !partialAllowed}
+              aria-label="Einheit der Teilmenge"
+            />
+          </label>
+        </div>
+        <p className="shopping-field-hint">
+          Feste Teilmenge: Der Rest bleibt auf dem Wocheneinkauf und folgt
+          späteren Bedarfsänderungen.
+        </p>
+      </div>
+
+      {error ? (
+        <p className="notice danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {status ? (
+        <p className="notice shopping-distribution-status" role="status">
+          {status}
+        </p>
+      ) : null}
+
+      <div className="shopping-panel-actions">
+        <button
+          type="button"
+          className="button primary"
+          disabled={
+            busy ||
+            !targetListId ||
+            (mode === 'partial' && (!partialAllowed || !quantityText.trim()))
+          }
+          onClick={() => void save()}
+        >
+          {busy ? 'Speichere …' : 'Speichern'}
         </button>
         <button type="button" className="button quiet" onClick={onClose} disabled={busy}>
           Abbrechen

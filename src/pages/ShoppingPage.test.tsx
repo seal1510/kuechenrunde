@@ -1,5 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ShoppingDistributionPosition } from '../domain/shoppingLists'
+import type { ShoppingPageList } from '../shopping/pageView'
 import type {
   CookSession,
   Ingredient,
@@ -8,7 +10,7 @@ import type {
   ShoppingManualItem,
   ShoppingPurchase,
 } from '../types'
-import { ShoppingPage } from './ShoppingPage'
+import { DistributionDialog, ShoppingPage } from './ShoppingPage'
 
 const live = vi.hoisted(() => {
   let call = 0
@@ -175,6 +177,101 @@ describe('shopping page', () => {
     expect(html).toContain('Standardzettel')
   })
 
+  it('renders a touch-friendly move/split dialog with the current distribution', () => {
+    const standard: ShoppingPageList = {
+      id: 'standard:2026-05-07',
+      kind: 'standard',
+      name: 'Wocheneinkauf · 7.–13. Mai',
+      periodStart: '2026-05-07',
+      periodEnd: '2026-05-13',
+      createdAt: 1,
+      isStandard: true,
+      openCount: 1,
+      doneCount: 0,
+      requiresReview: false,
+    }
+    const market: ShoppingPageList = {
+      id: 'free-markt',
+      kind: 'free',
+      name: 'Markt',
+      periodStart: null,
+      periodEnd: null,
+      createdAt: 2,
+      isStandard: false,
+      openCount: 1,
+      doneCount: 0,
+      requiresReview: false,
+    }
+    const positions: ShoppingDistributionPosition[] = [
+      {
+        itemKey: 'tomate',
+        name: 'Tomaten',
+        dimension: 'count',
+        unit: 'Stück',
+        qualifier: '',
+        totalLower: 8,
+        totalUpper: 8,
+        standardLower: 3,
+        standardUpper: 3,
+        amounts: [
+          { listId: market.id, lower: 5, upper: 5, explicit: true },
+          { listId: standard.id, lower: 3, upper: 3, explicit: false },
+        ],
+        allocations: [
+          {
+            allocation: {
+              id: 'alloc-market',
+              periodStart: '2026-05-07',
+              itemKey: 'tomate',
+              dimension: 'count',
+              listId: market.id,
+              mode: 'partial',
+              quantityMilli: 5000,
+              createdAt: 1,
+              updatedAt: 1,
+            },
+            listId: market.id,
+            requestedMilli: 5000,
+            effectiveLower: 5,
+            effectiveUpper: 5,
+            clamped: false,
+            orphaned: false,
+            shadowed: false,
+            blocked: false,
+          },
+        ],
+      },
+    ]
+    const html = renderToStaticMarkup(
+      <DistributionDialog
+        itemKey="tomate"
+        name="Tomaten"
+        periodStart="2026-05-07"
+        standardListId={standard.id}
+        positions={positions}
+        lists={[standard, market]}
+        onClose={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('Zutat verschieben / aufteilen')
+    expect(html).toContain('Aktuelle Verteilung')
+    expect(html).toContain('Wocheneinkauf')
+    expect(html).toContain('Markt')
+    expect(html).toContain('5 Stück')
+    expect(html).toContain('3 Stück')
+    expect(html).toContain('Alles verschieben')
+    expect(html).toContain('Teilmenge zuweisen')
+    expect(html).toContain('Zielzettel')
+    expect(html).toContain('aria-label="Teilmenge"')
+    expect(html).toContain('shopping-distribution-quantity')
+    expect(html).toContain('Eigene Zuordnungen')
+    expect(html).toContain('Entfernen')
+    expect(html).toContain('Alle eigenen Zuordnungen zurücksetzen')
+    expect(html).toContain('Speichern')
+    expect(html).toContain('Abbrechen')
+  })
+
   it('derives recipe demand from the planned cooking event', () => {
     live.reset(baseValues({ recipes: [recipe()], cookSessions: [session()] }))
     const html = renderToStaticMarkup(<ShoppingPage />)
@@ -182,6 +279,8 @@ describe('shopping page', () => {
     expect(html).toContain('Zwiebeln')
     expect(html).toContain('2 Stück')
     expect(html).toContain('Obst &amp; Gemüse')
+    expect(html).toContain('>Verteilen<')
+    expect(html).toContain('Zwiebeln verschieben oder aufteilen')
     expect(html).not.toContain('Noch nichts zu kaufen')
   })
 
