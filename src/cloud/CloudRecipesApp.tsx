@@ -3,9 +3,10 @@
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Nur die Rezeptbibliothek ist im Cloud-Modus freigeschaltet. Alle anderen
- * Bereiche bleiben sichtbar als „noch nicht verfügbar“ markiert, bis sie
- * korrekt angebunden sind. Die vorhandenen Rezeptkomponenten werden geteilt.
+ * Rezeptbibliothek und Wochenplan sind im Cloud-Modus freigeschaltet.
+ * Einkaufsliste und Kochmodus bleiben sichtbar als „noch nicht verfügbar“
+ * markiert, bis sie korrekt angebunden sind. Die vorhandenen Rezept- und
+ * Planungskomponenten werden geteilt; nur die Persistenz ist cloudbasiert.
  *
  * Hier wird außerdem die einzige Bild-Laufzeit erzeugt: Signed-URL-Cache,
  * Storage-Zugriff und Metadaten-Service. Beim Logout wird der Cache verworfen.
@@ -22,11 +23,14 @@ import {
 import { CloudImageUrlCache } from '../data/cloudImageUrls'
 import { CloudRecipeImageService } from '../data/cloudImages'
 import type { CloudRecordsStore } from '../data/cloudRecords'
+import { PlanBackendProvider } from '../mealplan/planBackend'
+import { PlanPage } from '../pages/PlanPage'
 import { NavigationGuardProvider } from '../routing/NavigationGuard'
 import { parseRoute, type Route } from '../routing/routes'
 import { requireSupabase } from '../supabase/client'
 import { createSupabaseImageStorage } from '../supabase/imageStorage'
 import { CloudImageUrlProvider } from './CloudImageProvider'
+import { createCloudPlanBackend } from './cloudPlanBackend'
 import { CloudLibraryPage } from './CloudLibraryPage'
 import {
   clearCloudImageNotice,
@@ -42,12 +46,12 @@ function CloudUnavailablePage() {
       <div className="empty-state">
         <p>Dieser Bereich ist im Cloud-Modus noch nicht verfügbar.</p>
         <p className="muted">
-          Wochenplan, Einkaufsliste und Kochmodus werden in den nächsten
-          Etappen angebunden. Die Rezeptbibliothek inklusive Bildern funktioniert
+          Einkaufsliste und Kochmodus werden in den nächsten Etappen
+          angebunden. Rezeptbibliothek, Bilder und Wochenplan funktionieren
           bereits geräteübergreifend.
         </p>
-        <a className="button primary" href="#/">
-          Zur Rezeptbibliothek
+        <a className="button primary" href="#/plan">
+          Zum Wochenplan
         </a>
       </div>
     </div>
@@ -86,6 +90,7 @@ export function CloudRecipesApp({
     () => new CloudRecipeImageService({ records: store, storage }),
     [store, storage],
   )
+  const planBackend = useMemo(() => createCloudPlanBackend(store), [store])
   const notice = useSyncExternalStore(
     subscribeCloudImageNotice,
     getCloudImageNotice,
@@ -100,6 +105,8 @@ export function CloudRecipesApp({
   let content: ReactNode
   if (route.name === 'library') {
     content = <CloudLibraryPage store={store} />
+  } else if (route.name === 'plan') {
+    content = <PlanPage />
   } else if (route.name === 'recipe') {
     content = <CloudRecipeDetailPage store={store} id={route.id} />
   } else if (route.name === 'recipe-new') {
@@ -118,43 +125,52 @@ export function CloudRecipesApp({
   }
 
   return (
-    <NavigationGuardProvider applyRoute={applyRoute}>
-      <nav className="cloud-nav" aria-label="Cloud-Navigation">
-        <a
-          href="#/"
-          className={isLibraryArea(route) ? 'active' : ''}
-          aria-current={isLibraryArea(route) ? 'page' : undefined}
-        >
-          Rezeptbibliothek
-        </a>
-        <span className="cloud-nav-note">Wochenplan · Einkauf · Kochen folgen</span>
-        <span className="cloud-user">{email}</span>
-        <button
-          type="button"
-          className="button quiet"
-          onClick={() => {
-            clearCloudImageNotice()
-            void onLogout()
-          }}
-        >
-          Abmelden
-        </button>
-      </nav>
-      {notice ? (
-        <div className="notice cloud-image-notice" role="status">
-          <p>{notice}</p>
-          <div className="notice-actions">
-            <button
-              type="button"
-              className="button quiet"
-              onClick={clearCloudImageNotice}
-            >
-              Hinweis schließen
-            </button>
+    <PlanBackendProvider value={planBackend}>
+      <NavigationGuardProvider applyRoute={applyRoute}>
+        <nav className="cloud-nav" aria-label="Cloud-Navigation">
+          <a
+            href="#/"
+            className={isLibraryArea(route) ? 'active' : ''}
+            aria-current={isLibraryArea(route) ? 'page' : undefined}
+          >
+            Rezeptbibliothek
+          </a>
+          <a
+            href="#/plan"
+            className={route.name === 'plan' ? 'active' : ''}
+            aria-current={route.name === 'plan' ? 'page' : undefined}
+          >
+            Wochenplan
+          </a>
+          <span className="cloud-nav-note">Einkauf · Kochen folgen</span>
+          <span className="cloud-user">{email}</span>
+          <button
+            type="button"
+            className="button quiet"
+            onClick={() => {
+              clearCloudImageNotice()
+              void onLogout()
+            }}
+          >
+            Abmelden
+          </button>
+        </nav>
+        {notice ? (
+          <div className="notice cloud-image-notice" role="status">
+            <p>{notice}</p>
+            <div className="notice-actions">
+              <button
+                type="button"
+                className="button quiet"
+                onClick={clearCloudImageNotice}
+              >
+                Hinweis schließen
+              </button>
+            </div>
           </div>
-        </div>
-      ) : null}
-      <CloudImageUrlProvider cache={imageUrls}>{content}</CloudImageUrlProvider>
-    </NavigationGuardProvider>
+        ) : null}
+        <CloudImageUrlProvider cache={imageUrls}>{content}</CloudImageUrlProvider>
+      </NavigationGuardProvider>
+    </PlanBackendProvider>
   )
 }

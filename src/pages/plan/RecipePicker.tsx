@@ -8,7 +8,7 @@
  * table; no new search, import or data layer is introduced.
  */
 
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../../db'
 import { resolveOriginalServings } from '../../domain/scaling'
@@ -66,6 +66,8 @@ export interface RecipePickerProps {
   onQueryChange: (value: string) => void
   selectedRecipeId?: string | null
   onChoose: (recipeId: string) => void
+  /** Storage-specific cover; defaults to the local IndexedDB images. */
+  renderCover?: (recipe: Recipe, className?: string) => ReactNode
 }
 
 export function RecipePicker({
@@ -74,6 +76,7 @@ export function RecipePicker({
   onQueryChange,
   selectedRecipeId,
   onChoose,
+  renderCover,
 }: RecipePickerProps) {
   const filtered = useMemo(
     () =>
@@ -141,7 +144,11 @@ export function RecipePicker({
                 aria-label={`${recipe.title} auswählen`}
                 onClick={() => onChoose(recipe.id)}
               >
-                <RecipeCover recipe={recipe} className="plan-picker-cover" />
+                {renderCover ? (
+                  renderCover(recipe, 'plan-picker-cover')
+                ) : (
+                  <RecipeCover recipe={recipe} className="plan-picker-cover" />
+                )}
                 <span className="plan-picker-text">
                   <span className="plan-picker-title">{recipe.title}</span>
                   <span className="plan-picker-meta">{recipeMeta(recipe)}</span>

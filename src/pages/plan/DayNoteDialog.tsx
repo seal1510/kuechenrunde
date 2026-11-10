@@ -10,7 +10,7 @@
 
 import { useState } from 'react'
 import { formatDayLabel } from '../../domain/dates'
-import { deleteDayNote, saveDayNote } from '../../mealplan/dayNoteService'
+import { usePlanBackend } from '../../mealplan/planBackend'
 import type { DayNote } from '../../types'
 import { draftSignature, useDiscardGuard } from './discardGuard'
 import { chooserBackStep } from './planningBack'
@@ -33,6 +33,7 @@ export function DayNoteDialog({
   onBackToChooser,
   onClose,
 }: DayNoteDialogProps) {
+  const backend = usePlanBackend()
   const [text, setText] = useState(initialText)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -56,7 +57,7 @@ export function DayNoteDialog({
     setBusy(true)
     setError(null)
     try {
-      await saveDayNote(date, text)
+      await backend.saveDayNote(date, text)
       onClose()
     } catch (cause) {
       setError((cause as Error).message || 'Der Kommentar konnte nicht gespeichert werden.')
@@ -70,7 +71,7 @@ export function DayNoteDialog({
     setBusy(true)
     setError(null)
     try {
-      await deleteDayNote(date)
+      await backend.deleteDayNote(date)
       onClose()
     } catch (cause) {
       setError((cause as Error).message || 'Der Kommentar konnte nicht gelöscht werden.')
@@ -88,7 +89,7 @@ export function DayNoteDialog({
     setBusy(true)
     setError(null)
     try {
-      const saved = await saveDayNote(date, text)
+      const saved = await backend.saveDayNote(date, text)
       if (!saved) {
         setError('Bitte einen Kommentar eingeben.')
         return

@@ -7,8 +7,6 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../db'
 import {
   addDays,
   formatWeekRange,
@@ -24,17 +22,13 @@ import { groupThemeFor } from '../domain/groupColor'
 import {
   CookedMoveConflictError,
   DishPlanMoveConflictError,
-  moveDishPlanEntry,
-  undoDishPlanMove,
   type MoveDishPlanResult,
 } from '../mealplan/dishService'
 import {
   DayNoteMoveConflictError,
-  moveDayNote,
-  undoDayNoteMove,
 } from '../mealplan/dayNoteService'
-import { calendarSettingsFromRows, setCalendarSettings } from '../settings/calendar'
-import { setHouseholdSize } from '../mealplan/service'
+import { usePlanBackend } from '../mealplan/planBackend'
+import { calendarSettingsFromRows } from '../settings/calendar'
 import { DEFAULT_HOUSEHOLD_SIZE, type DayNote, type MealPlanEntry } from '../types'
 import { AddEntryDialog } from './plan/AddEntryDialog'
 import {
@@ -91,14 +85,16 @@ function normalizePointerType(value: string): DragPointerType {
 }
 
 export function PlanPage() {
+  const backend = usePlanBackend()
   const today = useMemo(() => todayKey(), [])
   const [anchorDate, setAnchorDate] = useState(today)
-  const entries = useLiveQuery(() => db.mealPlans.toArray(), [])
-  const recipes = useLiveQuery(() => db.recipes.toArray(), [])
-  const freeDishes = useLiveQuery(() => db.freeDishes.toArray(), [])
-  const sessions = useLiveQuery(() => db.cookSessions.toArray(), [])
-  const settingsRows = useLiveQuery(() => db.settings.toArray(), [])
-  const dayNotes = useLiveQuery(() => db.dayNotes.toArray(), [])
+  const data = backend.usePlanData()
+  const entries = data?.entries
+  const recipes = data?.recipes
+  const freeDishes = data?.freeDishes
+  const sessions = data?.sessions
+  const settingsRows = data?.settings
+  const dayNotes = data?.dayNotes
 
   const [overlay, dispatchOverlay] = useReducer(
     planningSessionReducer,
@@ -274,7 +270,7 @@ export function PlanPage() {
   async function updateCalendarSettings(patch: Partial<CalendarSettings>) {
     setError(null)
     try {
-      await setCalendarSettings(patch)
+      await backend.setCalendarSettings(patch)
     } catch (cause) {
       setError((cause as Error).message || 'Die Einstellung konnte nicht gespeichert werden.')
     }
@@ -662,13 +658,13 @@ export function PlanPage() {
     setError(null)
     try {
       if (undoOffer.kind === 'dish') {
-        await undoDishPlanMove({
+        await backend.undoDishPlanMove({
           entryId: undoOffer.entryId,
           originalDate: undoOffer.originalDate,
           expected: undoOffer.snapshot,
         })
       } else {
-        await undoDayNoteMove({
+        await backend.undoDayNoteMove({
           currentDate: undoOffer.currentDate,
           originalDate: undoOffer.originalDate,
           expected: undoOffer.snapshot,
@@ -706,7 +702,7 @@ export function PlanPage() {
     setMoving(true)
     setError(null)
     try {
-      const result = await moveDishPlanEntry(entry.id, targetDate)
+      const result = await backend.moveDishPlanEntry(entry.id, targetDate)
       setMoveRequest(null)
       offerUndo(result, entry)
       return result
@@ -714,7 +710,7 @@ export function PlanPage() {
       if (cause instanceof CookedMoveConflictError) {
         if (window.confirm(`${cause.message}\n\nTrotzdem verschieben?`)) {
           try {
-            const result = await moveDishPlanEntry(entry.id, targetDate, {
+            const result = await backend.moveDishPlanEntry(entry.id, targetDate, {
               allowCookedChange: true,
             })
             setMoveRequest(null)
@@ -751,7 +747,7 @@ export function PlanPage() {
     setMoving(true)
     setError(null)
     try {
-      const moved = await moveDayNote(note.date, targetDate)
+      const moved = await backend.moveDayNote(note.date, targetDate)
       setMoveRequest(null)
       offerNoteUndo(moved, note.date)
       return moved
@@ -872,7 +868,7 @@ export function PlanPage() {
                   onChange={(event) => {
                     const next = Number(event.target.value)
                     if (Number.isFinite(next) && next >= 1 && next <= 20) {
-                      void setHouseholdSize(next)
+                      void backend.setHouseholdSize(next)
                     }
                   }}
                 />
@@ -1005,6 +1001,8 @@ export function PlanPage() {
             session={dialogSession}
             recipes={recipes ?? []}
             weekStartDay={calendarSettings.weekStartDay}
+            cookModeEnabled={backend.cookModeEnabled}
+            renderCover={backend.renderRecipeCover}
             onBackToChooser={
               dialog.kind === 'create' && backToAddDate
                 ? returnToAddMenu

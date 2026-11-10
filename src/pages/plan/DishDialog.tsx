@@ -8,7 +8,7 @@
  * selection, scaling and persistence logic.
  */
 
-import { useMemo, useState, type MouseEvent } from 'react'
+import { useMemo, useState, type MouseEvent, type ReactNode } from 'react'
 import { formatDayLabel } from '../../domain/dates'
 import {
   cookedRedefinition,
@@ -20,12 +20,8 @@ import {
   formatFactor,
   formatPortionCount,
 } from '../../lib/format'
-import {
-  CookedPlanConflictError,
-  deleteDishPlan,
-  saveDishPlan,
-} from '../../mealplan/dishService'
-import { removeMealEntry } from '../../mealplan/service'
+import { CookedPlanConflictError } from '../../mealplan/dishService'
+import { usePlanBackend } from '../../mealplan/planBackend'
 import { cookHash } from '../../routing/routes'
 import type { CookSession, MealPlanEntry, Recipe } from '../../types'
 import {
@@ -53,6 +49,10 @@ export interface DishDialogProps {
   recipes: Recipe[]
   /** Configured first weekday of the calendar week (0 = Monday … 6 = Sunday). */
   weekStartDay: number
+  /** Cloud mode does not link to cook mode until it is connected there. */
+  cookModeEnabled?: boolean
+  /** Optional storage-specific recipe cover (cloud image bucket). */
+  renderCover?: (recipe: Recipe, className?: string) => ReactNode
   /** Keyboard-accessible move alternative for an existing dish. */
   onMoveRequest?: () => void
   /** Return from the create flow to the shared entry chooser. */
@@ -69,11 +69,14 @@ export function DishDialog({
   session,
   recipes,
   weekStartDay,
+  cookModeEnabled = true,
+  renderCover,
   onMoveRequest,
   onBackToChooser,
   onDone,
   onClose,
 }: DishDialogProps) {
+  const backend = usePlanBackend()
   const [recipeId, setRecipeId] = useState<string | null>(initialRecipeId ?? null)
   const [view, setView] = useState<'picker' | 'plan'>(() =>
     mode === 'create' && !initialRecipeId ? 'picker' : 'plan',
@@ -179,7 +182,7 @@ export function DishDialog({
   }
 
   async function persist(allowCookedChange: boolean): Promise<void> {
-    await saveDishPlan({
+    await backend.saveDishPlan({
       cookSessionId: session?.id ?? null,
       recipeId: recipeId!,
       days: planDays,
@@ -244,9 +247,9 @@ export function DishDialog({
     setBusy(true)
     try {
       if (session?.id) {
-        await deleteDishPlan(session.id)
+        await backend.deleteDishPlan(session.id)
       } else {
-        for (const entry of initialEntries) await removeMealEntry(entry.id)
+        for (const entry of initialEntries) await backend.removeMealEntry(entry.id)
       }
       onDone()
     } catch (cause) {
@@ -260,7 +263,7 @@ export function DishDialog({
   const actions = (
     <div className="plan-panel-actions">
       <div className="plan-panel-actions-secondary">
-        {mode === 'edit' && recipe ? (
+        {mode === 'edit' && recipe && cookModeEnabled ? (
           <a
             className="button"
             href={cookHash(recipe.id, cookSessionId)}
@@ -347,12 +350,17 @@ export function DishDialog({
           onQueryChange={setQuery}
           selectedRecipeId={recipeId}
           onChoose={chooseRecipe}
+          renderCover={renderCover}
         />
       ) : (
         <>
           {recipe ? (
             <div className="plan-recipe">
-              <RecipeCover recipe={recipe} className="plan-recipe-cover" />
+              {renderCover ? (
+                renderCover(recipe, 'plan-recipe-cover')
+              ) : (
+                <RecipeCover recipe={recipe} className="plan-recipe-cover" />
+              )}
               <div className="plan-recipe-text">
                 <p className="plan-recipe-kicker">Rezept</p>
                 <h3>{recipe.title}</h3>

@@ -25,12 +25,8 @@ import {
   type DaySelection,
 } from '../../domain/daySelection'
 import { buildIngredientList, type DraftIngredient } from '../../recipe/editor'
-import {
-  CookedPlanConflictError,
-  deleteDishPlan,
-} from '../../mealplan/dishService'
-import { saveFreeDishPlan } from '../../mealplan/freeDishService'
-import { removeMealEntry } from '../../mealplan/service'
+import { CookedPlanConflictError } from '../../mealplan/dishService'
+import { usePlanBackend } from '../../mealplan/planBackend'
 import type { CookSession, FreeDish, Ingredient, MealPlanEntry } from '../../types'
 import { DaySelectionEditor } from './DaySelectionEditor'
 import { draftSignature, useDiscardGuard } from './discardGuard'
@@ -84,6 +80,7 @@ export function FreeDishDialog({
   onDone,
   onClose,
 }: FreeDishDialogProps) {
+  const backend = usePlanBackend()
   const [name, setName] = useState(freeDish?.name ?? '')
   const [selection, setSelection] = useState<DaySelection>(() =>
     createDaySelection(initialEntries, initialDate),
@@ -166,7 +163,7 @@ export function FreeDishDialog({
   }
 
   async function persist(allowCookedChange: boolean): Promise<void> {
-    await saveFreeDishPlan({
+    await backend.saveFreeDishPlan({
       cookSessionId: session?.id ?? null,
       freeDishId: freeDish?.id ?? null,
       name,
@@ -230,9 +227,9 @@ export function FreeDishDialog({
     setBusy(true)
     try {
       if (session?.id) {
-        await deleteDishPlan(session.id)
+        await backend.deleteDishPlan(session.id)
       } else {
-        for (const entry of initialEntries) await removeMealEntry(entry.id)
+        for (const entry of initialEntries) await backend.removeMealEntry(entry.id)
       }
       onDone()
     } catch (cause) {

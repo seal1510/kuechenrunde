@@ -1,12 +1,44 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Markdown } from '../components/Markdown'
 import { RecipeBody } from '../components/RecipeCard'
 import { RecipeImageGallery } from '../components/RecipeImageGallery'
 import type { CloudRecordsStore } from '../data/cloudRecords'
+import { todayKey } from '../domain/dates'
 import { formatDuration, effectiveDuration } from '../lib/format'
+import { usePlanBackend } from '../mealplan/planBackend'
+import { DishDialog } from '../pages/plan/DishDialog'
+import { calendarSettingsFromRows } from '../settings/calendar'
 import type { Recipe } from '../types'
 import { useCloudImageUrls } from './CloudImageProvider'
 import { useCloudRecipe, useCloudRecipeImages } from './useCloudRecipes'
+
+function CloudPlanDishDialog({
+  recipe,
+  onDone,
+  onClose,
+}: {
+  recipe: Recipe
+  onDone: () => void
+  onClose: () => void
+}) {
+  const backend = usePlanBackend()
+  const data = backend.usePlanData()
+  const weekStartDay = calendarSettingsFromRows(data?.settings ?? []).weekStartDay
+  return (
+    <DishDialog
+      mode="create"
+      initialDate={todayKey()}
+      initialRecipeId={recipe.id}
+      initialEntries={[]}
+      recipes={[recipe]}
+      weekStartDay={weekStartDay}
+      cookModeEnabled={backend.cookModeEnabled}
+      renderCover={backend.renderRecipeCover}
+      onDone={onDone}
+      onClose={onClose}
+    />
+  )
+}
 
 function servingsValue(recipe: Recipe): string {
   const text = recipe.servingsText.trim()
@@ -26,6 +58,13 @@ export function CloudRecipeDetailPage({
 }) {
   const row = useCloudRecipe(store, id)
   const images = useCloudRecipeImages(store, id)
+  const [planning, setPlanning] = useState(false)
+  const [planSaved, setPlanSaved] = useState(false)
+
+  useEffect(() => {
+    setPlanning(false)
+    setPlanSaved(false)
+  }, [id])
   const imagePaths = useMemo(
     () => (images ?? []).map((image) => image.storagePath),
     [images],
@@ -123,6 +162,33 @@ export function CloudRecipeDetailPage({
               ))}
             </dl>
           ) : null}
+          <div className="recipe-actions">
+            <button
+              type="button"
+              className="button primary detail-plan"
+              onClick={() => {
+                setPlanSaved(false)
+                setPlanning(true)
+              }}
+            >
+              <svg
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                aria-hidden="true"
+                focusable="false"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="2.2" y="3.2" width="11.6" height="10.4" rx="1.6" />
+                <path d="M5 1.8v3M11 1.8v3M2.2 6.3h11.6M5.4 9.2h.1M8 9.2h.1M10.6 9.2h.1M5.4 11.5h.1M8 11.5h.1" />
+              </svg>
+              Einplanen
+            </button>
+          </div>
           {recipe.description ? (
             <div className="recipe-description">
               <Markdown text={recipe.description} />
@@ -139,10 +205,41 @@ export function CloudRecipeDetailPage({
 
       <RecipeBody recipe={recipe} />
 
+      {planSaved ? (
+        <p className="notice success plan-saved-notice" role="status">
+          Eingeplant. Der Wochenplan wurde aktualisiert.
+        </p>
+      ) : null}
+
+      <nav className="detail-mobile-actions" aria-label="Rezeptaktionen">
+        <button
+          type="button"
+          className="button primary"
+          onClick={() => {
+            setPlanSaved(false)
+            setPlanning(true)
+          }}
+        >
+          Einplanen
+        </button>
+      </nav>
+
       <p className="muted small">
-        Wochenplan und Kochmodus sind im Cloud-Modus noch nicht verfügbar.
-        Rezepte und Bilder funktionieren bereits geräteübergreifend.
+        Kochmodus und Einkaufsliste sind im Cloud-Modus noch nicht verfügbar.
+        Rezeptbibliothek, Bilder und Wochenplan funktionieren bereits
+        geräteübergreifend.
       </p>
+
+      {planning ? (
+        <CloudPlanDishDialog
+          recipe={recipe}
+          onDone={() => {
+            setPlanning(false)
+            setPlanSaved(true)
+          }}
+          onClose={() => setPlanning(false)}
+        />
+      ) : null}
     </div>
   )
 }
