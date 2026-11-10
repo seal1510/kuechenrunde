@@ -553,6 +553,23 @@ export class RecordsTransaction {
     this.setPending(collection, id, data, 0)
   }
 
+  /**
+   * Replaces a row that this transaction created itself. Such a row has no
+   * server revision yet, so a normal compare-and-swap update cannot address it.
+   * Used only for merging two writes to the same new row within one batch.
+   */
+  updateCreated<T>(collection: string, id: string, data: T): void {
+    assertKey(collection, id)
+    const entry = this.pending.get(rowKey(collection, id))
+    if (!entry || entry.deleted || entry.expectedRev !== 0) {
+      throw new CloudDataError(
+        'Die Zeile wurde in dieser Transaktion nicht neu angelegt.',
+      )
+    }
+    assertRecordData(data)
+    entry.data = data
+  }
+
   update<T>(collection: string, id: string, data: T, expectedRev: number): void {
     assertKey(collection, id)
     if (!Number.isInteger(expectedRev) || expectedRev <= 0) {

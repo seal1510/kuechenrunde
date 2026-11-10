@@ -104,8 +104,13 @@ function writeRow<T>(
   data: T,
   existing: RecordRow<T> | undefined,
 ): void {
-  if (existing) tx.update(collection, id, data, existing.rev)
-  else tx.create(collection, id, data)
+  if (!existing) {
+    tx.create(collection, id, data)
+  } else if (existing.rev === 0) {
+    tx.updateCreated(collection, id, data)
+  } else {
+    tx.update(collection, id, data, existing.rev)
+  }
 }
 
 function normalizePlanDays(days: readonly SaveDishPlanDay[]): SaveDishPlanDay[] {

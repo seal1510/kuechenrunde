@@ -14,15 +14,15 @@ wird ausschließlich über `VITE_DATA_MODE=cloud` aktiviert; allein vorhandene
 Supabase-Variablen schalten die App nicht um.
 
 Im Cloud-Modus stehen **Anmeldung, Session-Verwaltung, die gemeinsame
-Rezeptbibliothek inklusive Bildern und die gemeinsame Wochenplanung** zur
-Verfügung: Rezepte lassen sich anlegen, öffnen, bearbeiten und löschen, Bilder
-hinzufügen, anzeigen, ersetzen und entfernen. Der Wochenplan wird weiterhin
-ausschließlich manuell befüllt; es gibt keine automatische Planung. Änderungen
-erscheinen über Supabase Realtime auch in anderen Sitzungen. Die Bilddateien
+Rezeptbibliothek inklusive Bildern, die gemeinsame Wochenplanung und die
+gemeinsame Einkaufsliste** zur Verfügung: Rezepte lassen sich anlegen, öffnen,
+bearbeiten und löschen, Bilder hinzufügen, anzeigen, ersetzen und entfernen. Der
+Wochenplan wird weiterhin ausschließlich manuell befüllt; es gibt keine
+automatische Planung. Einkäufe bleiben einzelne, revisionsgesicherte Ereignisse
+und erscheinen über Supabase Realtime auch in anderen Sitzungen. Die Bilddateien
 liegen im privaten Supabase-Storage-Bucket `recipe-images`; angezeigt werden
-sie über kurzlebige Signed URLs. Einkaufsliste und Kochmodus sind noch
-**nicht** angebunden; lokale Dexie-Daten werden dort nicht als Cloud-Bestand
-angezeigt.
+sie über kurzlebige Signed URLs. Der Kochmodus ist noch **nicht** angebunden;
+lokale Dexie-Daten werden dort nicht als Cloud-Bestand angezeigt.
 
 Details zur Cloud-Grundlage stehen in [`supabase/README.md`](supabase/README.md).
 

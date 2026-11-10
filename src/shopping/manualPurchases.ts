@@ -19,7 +19,12 @@ import {
   standardShoppingListId,
 } from '../domain/shoppingLists'
 import { addDays } from '../domain/dates'
-import type { ShoppingList, ShoppingManualItem, ShoppingPurchase } from '../types'
+import type {
+  ShoppingItemRule,
+  ShoppingList,
+  ShoppingManualItem,
+  ShoppingPurchase,
+} from '../types'
 import { resolveShoppingPeriod } from './cycle'
 import { loadShoppingPeriodDemand, manualItemKey } from './demand'
 import { ShoppingListError } from './errors'
@@ -136,34 +141,38 @@ export interface ManualPurchaseContext {
   ambiguous: boolean
 }
 
-export async function loadManualPurchaseContext(
-  item: ShoppingManualItem,
-): Promise<ManualPurchaseContext> {
-  const periodStart = await periodOf(dateOf(item))
-  const [lists, rules, allManualItems, allPurchases, demand] = await Promise.all([
-    db.shoppingLists.toArray(),
-    db.shoppingItemRules.toArray(),
-    db.shoppingManualItems.toArray(),
-    db.shoppingPurchases.toArray(),
-    loadShoppingPeriodDemand(periodStart),
-  ])
-  const listById = new Map(lists.map((list) => [list.id, list]))
-  const context = contextFor(item, listById, periodStart)
-  const key = manualItemKey(item)
-  const sameContextItems = allManualItems.filter(
+export interface ManualPurchaseContextBuildInput {
+  item: ShoppingManualItem
+  periodStart: string
+  lists: readonly ShoppingList[]
+  rules: readonly ShoppingItemRule[]
+  manualItems: readonly ShoppingManualItem[]
+  purchases: readonly ShoppingPurchase[]
+  /** Keys of the current automatic demand in the item's period. */
+  demandItemKeys: readonly string[]
+}
+
+/** Pure context builder shared by the local and cloud adapters. */
+export function buildManualPurchaseContext(
+  input: ManualPurchaseContextBuildInput,
+): ManualPurchaseContext {
+  const listById = new Map(input.lists.map((list) => [list.id, list]))
+  const context = contextFor(input.item, listById, input.periodStart)
+  const key = manualItemKey(input.item)
+  const sameContextItems = input.manualItems.filter(
     (other) =>
       manualItemKey(other) === key &&
       contextKeyForOther(other, listById) === context.key,
   )
-  const automaticDemand = demand.items.some((entry) => entry.key === key)
-  const candidatePurchases = allPurchases.filter(
+  const automaticDemand = input.demandItemKeys.includes(key)
+  const candidatePurchases = input.purchases.filter(
     (purchase) =>
       !purchase.manualItemId &&
-      resolveCanonicalKey(purchase.itemKey, rules) === key &&
-      purchaseIsInContext(purchase, context, periodStart, listById),
+      resolveCanonicalKey(purchase.itemKey, input.rules) === key &&
+      purchaseIsInContext(purchase, context, input.periodStart, listById),
   )
   const compatible = candidatePurchases.filter((purchase) =>
-    purchaseIsCompatible(item, purchase),
+    purchaseIsCompatible(input.item, purchase),
   )
   const ambiguous =
     candidatePurchases.length > 0 &&
@@ -176,8 +185,8 @@ export async function loadManualPurchaseContext(
       ? compatible[0]
       : undefined
   return {
-    item,
-    periodStart,
+    item: input.item,
+    periodStart: input.periodStart,
     listId: context.listId,
     isFree: context.isFree,
     sameContextItems,
@@ -186,4 +195,26 @@ export async function loadManualPurchaseContext(
     adoptablePurchase,
     ambiguous,
   }
+}
+
+export async function loadManualPurchaseContext(
+  item: ShoppingManualItem,
+): Promise<ManualPurchaseContext> {
+  const periodStart = await periodOf(dateOf(item))
+  const [lists, rules, allManualItems, allPurchases, demand] = await Promise.all([
+    db.shoppingLists.toArray(),
+    db.shoppingItemRules.toArray(),
+    db.shoppingManualItems.toArray(),
+    db.shoppingPurchases.toArray(),
+    loadShoppingPeriodDemand(periodStart),
+  ])
+  return buildManualPurchaseContext({
+    item,
+    periodStart,
+    lists,
+    rules,
+    manualItems: allManualItems,
+    purchases: allPurchases,
+    demandItemKeys: demand.items.map((entry) => entry.key),
+  })
 }

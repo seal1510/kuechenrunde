@@ -28,8 +28,17 @@ import {
   type ShoppingDistributionResult,
   type ShoppingPeriod,
 } from '../domain/shoppingLists'
-import { getShoppingSettings } from '../settings/shopping'
-import type { ShoppingList, ShoppingManualItem } from '../types'
+import { getShoppingSettings, type ShoppingSettings } from '../settings/shopping'
+import type {
+  CookSession,
+  FreeDish,
+  Recipe,
+  ShoppingDemandAllocation,
+  ShoppingItemRule,
+  ShoppingList,
+  ShoppingManualItem,
+  ShoppingQuantityCorrection,
+} from '../types'
 import { resolveShoppingPeriod, requireDateKey } from './cycle'
 import { ShoppingListError } from './errors'
 
@@ -84,33 +93,36 @@ export function manualItemKey(
   return shoppingItemKey(splitIngredientName(item.name, { unit: item.unit }).identityName)
 }
 
-export async function loadShoppingPeriodDemand(
-  anchor: string,
-): Promise<ShoppingPeriodDemand> {
-  const date = requirePeriod(anchor)
-  const [period, settings, recipes, freeDishes, cookSessions, rules, quantityCorrections] =
-    await Promise.all([
-      resolveShoppingPeriod(date),
-      getShoppingSettings(),
-      db.recipes.toArray(),
-      db.freeDishes.toArray(),
-      db.cookSessions.toArray(),
-      db.shoppingItemRules.toArray(),
-      db.shoppingQuantityCorrections.toArray(),
-    ])
+/**
+ * Pure demand builder. The cloud adapter passes the shared family records
+ * directly, so both modes use exactly the same `buildShoppingList` rules.
+ */
+export interface ShoppingDemandBuildInput {
+  period: ShoppingPeriod
+  settings: ShoppingSettings
+  recipes: readonly Recipe[]
+  freeDishes: readonly FreeDish[]
+  cookSessions: readonly CookSession[]
+  rules: readonly ShoppingItemRule[]
+  quantityCorrections: readonly ShoppingQuantityCorrection[]
+}
+
+export function buildShoppingPeriodDemand(
+  input: ShoppingDemandBuildInput,
+): ShoppingPeriodDemand {
   const built = buildShoppingList({
-    anchor: period.start,
-    weekStartDay: settings.periodStartDay,
-    periodStart: period.start,
-    periodEnd: period.end,
-    recipes,
-    freeDishes,
-    cookSessions,
+    anchor: input.period.start,
+    weekStartDay: input.settings.periodStartDay,
+    periodStart: input.period.start,
+    periodEnd: input.period.end,
+    recipes: input.recipes,
+    freeDishes: input.freeDishes,
+    cookSessions: input.cookSessions,
     manualItems: [],
     checks: [],
     purchases: [],
-    rules,
-    quantityCorrections,
+    rules: input.rules,
+    quantityCorrections: input.quantityCorrections,
   })
   const items = built.items.map<ShoppingPeriodDemandItem>((item) => ({
     key: item.key,
@@ -129,8 +141,8 @@ export async function loadShoppingPeriodDemand(
     warnings: [...item.warnings],
   }))
   return {
-    period,
-    standardListId: standardShoppingListId(period.start),
+    period: input.period,
+    standardListId: standardShoppingListId(input.period.start),
     items,
     warnings: built.warnings,
     requiresReview: items.some((item) =>
@@ -139,21 +151,51 @@ export async function loadShoppingPeriodDemand(
   }
 }
 
-export async function loadShoppingDistribution(
+export async function loadShoppingPeriodDemand(
   anchor: string,
-): Promise<ShoppingDistributionView> {
-  const demand = await loadShoppingPeriodDemand(anchor)
-  const [storedAllocations, lists, settings] = await Promise.all([
-    db.shoppingDemandAllocations.where('periodStart').equals(demand.period.start).toArray(),
-    db.shoppingLists.toArray(),
-    getShoppingSettings(),
-  ])
+): Promise<ShoppingPeriodDemand> {
+  const date = requirePeriod(anchor)
+  const [period, settings, recipes, freeDishes, cookSessions, rules, quantityCorrections] =
+    await Promise.all([
+      resolveShoppingPeriod(date),
+      getShoppingSettings(),
+      db.recipes.toArray(),
+      db.freeDishes.toArray(),
+      db.cookSessions.toArray(),
+      db.shoppingItemRules.toArray(),
+      db.shoppingQuantityCorrections.toArray(),
+    ])
+  return buildShoppingPeriodDemand({
+    period,
+    settings,
+    recipes,
+    freeDishes,
+    cookSessions,
+    rules,
+    quantityCorrections,
+  })
+}
+
+export interface ShoppingDistributionBuildInput {
+  demand: ShoppingPeriodDemand
+  lists: readonly ShoppingList[]
+  allocations: readonly ShoppingDemandAllocation[]
+  settings: ShoppingSettings
+}
+
+/** Pure distribution builder shared by the local and cloud adapters. */
+export function buildShoppingDistributionView(
+  input: ShoppingDistributionBuildInput,
+): ShoppingDistributionView {
+  const { demand, lists, settings } = input
   // Legacy rows keep their ids and list decisions, but contribute under the
   // current canonical identity.
-  const allocations = storedAllocations.map((allocation) => ({
-    ...allocation,
-    itemKey: catalogShoppingKey(allocation.itemKey),
-  }))
+  const allocations = input.allocations
+    .filter((allocation) => allocation.periodStart === demand.period.start)
+    .map((allocation) => ({
+      ...allocation,
+      itemKey: catalogShoppingKey(allocation.itemKey),
+    }))
   const standardList =
     lists.find((list) => list.id === demand.standardListId) ??
     standardShoppingListRecord(demand.period, settings.standardListName, 0)
@@ -178,10 +220,25 @@ export async function loadShoppingDistribution(
   })
   return {
     ...distribution,
-    lists,
+    lists: [...lists],
     standardList,
     demand,
   }
+}
+
+export async function loadShoppingDistribution(
+  anchor: string,
+): Promise<ShoppingDistributionView> {
+  const demand = await loadShoppingPeriodDemand(anchor)
+  const [allocations, lists, settings] = await Promise.all([
+    db.shoppingDemandAllocations
+      .where('periodStart')
+      .equals(demand.period.start)
+      .toArray(),
+    db.shoppingLists.toArray(),
+    getShoppingSettings(),
+  ])
+  return buildShoppingDistributionView({ demand, lists, allocations, settings })
 }
 
 export interface LegacyPurchaseTarget {

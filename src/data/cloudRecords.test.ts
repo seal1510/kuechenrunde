@@ -270,6 +270,23 @@ describe('CloudRecordsStore', () => {
     expect(store.get(COLLECTION, 'r2')?.rev).toBe(1)
   })
 
+  it('ersetzt eine in derselben Transaktion neu angelegte Zeile ohne Revision', async () => {
+    await store.transaction(async (tx) => {
+      tx.create(COLLECTION, 'r2', { id: 'r2', title: 'Erst', updatedAt: 2 })
+      tx.updateCreated(COLLECTION, 'r2', {
+        id: 'r2',
+        title: 'Dann',
+        updatedAt: 3,
+      })
+      expect(tx.get<{ title: string }>(COLLECTION, 'r2')?.data.title).toBe('Dann')
+    })
+
+    expect(backend.calls).toHaveLength(1)
+    expect(backend.calls[0]?.upserts).toHaveLength(1)
+    expect(backend.calls[0]?.upserts[0]?.data).toMatchObject({ title: 'Dann' })
+    expect(store.get<{ title: string }>(COLLECTION, 'r2')?.data.title).toBe('Dann')
+  })
+
   it('ersetzt eine Collection innerhalb einer Transaktion', async () => {
     await store.transaction(async (tx) => {
       tx.clear(COLLECTION)

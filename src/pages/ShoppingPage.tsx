@@ -17,8 +17,6 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../db'
 import { formatDayLabel, todayKey, WEEKDAY_NAMES } from '../domain/dates'
 import {
   categoryLabel,
@@ -35,40 +33,11 @@ import {
   type ShoppingCategoryId,
   type ShoppingListItem,
 } from '../domain/shopping'
-import {
-  adjacentShoppingPeriodStart,
-  applyShoppingSettings,
-} from '../shopping/cycle'
+import { adjacentShoppingPeriodStart } from '../shopping/cycle'
 import type { ShoppingDistributionPosition } from '../domain/shoppingLists'
 import type { ShoppingSettings } from '../settings/shopping'
-import {
-  addShoppingPurchase,
-  clearLegacyQuantity,
-  mergeShoppingProducts,
-  removeQuantityCorrection,
-  removeShoppingPurchase,
-  resolveAmbiguousRule,
-  restoreManualItem,
-  saveCategoryOrder,
-  saveItemRule,
-  saveQuantityCorrection,
-  splitShoppingProduct,
-  type ItemRuleInput,
-} from '../shopping/service'
-import {
-  assignShoppingSubquantity,
-  createFreeShoppingList,
-  createManualListItem,
-  deleteFreeShoppingList,
-  ensureStandardShoppingList,
-  moveShoppingItem,
-  removeManualListItem,
-  removeShoppingAllocation,
-  renameShoppingList,
-  resetShoppingAllocations,
-  setManualItemPurchased,
-  updateManualListItem,
-} from '../shopping/listService'
+import type { ItemRuleInput } from '../shopping/service'
+import { useShoppingBackend } from '../shopping/shoppingBackend'
 import {
   buildShoppingPageView,
   type ShoppingPageList,
@@ -158,6 +127,7 @@ function CloseIcon() {
 }
 
 export function ShoppingPage() {
+  const backend = useShoppingBackend()
   const today = useMemo(() => todayKey(), [])
   const [periodAnchor, setPeriodAnchor] = useState(today)
   const [selectedListId, setSelectedListId] = useState<string | null>(null)
@@ -187,31 +157,19 @@ export function ShoppingPage() {
   const addTriggerRef = useRef<HTMLButtonElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  const recipes = useLiveQuery(() => db.recipes.toArray(), [])
-  const freeDishes = useLiveQuery(() => db.freeDishes.toArray(), [])
-  const cookSessions = useLiveQuery(() => db.cookSessions.toArray(), [])
-  const manualItems = useLiveQuery(() => db.shoppingManualItems.toArray(), [])
-  const purchases = useLiveQuery(() => db.shoppingPurchases.toArray(), [])
-  const rules = useLiveQuery(() => db.shoppingItemRules.toArray(), [])
-  const quantityCorrections = useLiveQuery(
-    () => db.shoppingQuantityCorrections.toArray(),
-    [],
-  )
-  const settingsRows = useLiveQuery(() => db.settings.toArray(), [])
-  const shoppingLists = useLiveQuery(() => db.shoppingLists.toArray(), [])
-  const allocations = useLiveQuery(() => db.shoppingDemandAllocations.toArray(), [])
+  const data = backend.useShoppingData()
+  const recipes = data?.recipes
+  const freeDishes = data?.freeDishes
+  const cookSessions = data?.cookSessions
+  const manualItems = data?.manualItems
+  const purchases = data?.purchases
+  const rules = data?.rules
+  const quantityCorrections = data?.quantityCorrections
+  const settingsRows = data?.settings
+  const shoppingLists = data?.shoppingLists
+  const allocations = data?.allocations
 
-  const loading =
-    recipes === undefined ||
-    freeDishes === undefined ||
-    cookSessions === undefined ||
-    manualItems === undefined ||
-    purchases === undefined ||
-    rules === undefined ||
-    quantityCorrections === undefined ||
-    settingsRows === undefined ||
-    shoppingLists === undefined ||
-    allocations === undefined
+  const loading = data === undefined
 
   const view = useMemo<ShoppingPageView | null>(() => {
     if (loading) return null
@@ -410,8 +368,8 @@ export function ShoppingPage() {
     try {
       setError(null)
       if (selectedList.kind === 'standard') {
-        const list = await ensureStandardShoppingList(view.period.start)
-        await createManualListItem({
+        const list = await backend.ensureStandardShoppingList(view.period.start)
+        await backend.createManualListItem({
           listId: list.id,
           shoppingDate: view.period.start,
           name: input.name,
@@ -423,7 +381,7 @@ export function ShoppingPage() {
       } else {
         // Free lists are deliberately independent from the shopping week. The
         // service stores the article without inventing a period date.
-        await createManualListItem({
+        await backend.createManualListItem({
           listId: selectedList.id,
           name: input.name,
           quantityText: input.quantityText,
@@ -446,7 +404,7 @@ export function ShoppingPage() {
     setListBusy(true)
     try {
       setError(null)
-      const list = await createFreeShoppingList({ name: newListName })
+      const list = await backend.createFreeShoppingList({ name: newListName })
       setNewListName('')
       setCreatingList(false)
       setSelectedListId(list.id)
@@ -460,7 +418,7 @@ export function ShoppingPage() {
   async function toggleManual(row: ShoppingPageRow) {
     const item = row.manualItem
     if (!item) return
-    await run(() => setManualItemPurchased(item.id, row.status !== 'done'))
+    await run(() => backend.setManualItemPurchased(item.id, row.status !== 'done'))
   }
 
   async function addAutomaticPurchase(
@@ -469,7 +427,7 @@ export function ShoppingPage() {
     qualitative = false,
   ) {
     if (!view) throw new Error('Die Einkaufsliste ist noch nicht geladen.')
-    await addShoppingPurchase({
+    await backend.addShoppingPurchase({
       shoppingDate: view.period.start,
       itemKey: row.itemKey,
       listId: row.listId,
@@ -487,11 +445,7 @@ export function ShoppingPage() {
   async function toggleAutomatic(row: ShoppingPageRow) {
     if (row.status === 'done') {
       if (row.purchaseIds.length === 0) return
-      await run(async () => {
-        for (const purchaseId of row.purchaseIds) {
-          await removeShoppingPurchase(purchaseId)
-        }
-      })
+      await run(() => backend.removeShoppingPurchases(row.purchaseIds))
       return
     }
     if (row.openPositions.length > 0) {
@@ -538,28 +492,19 @@ export function ShoppingPage() {
   }
 
   async function deleteManual(item: ShoppingManualItem) {
-    // Capture the purchase rows this explicit delete removes so "Rückgängig"
-    // restores the complete done state, not just the article.
-    const before = await db.shoppingPurchases.toArray()
-    await removeManualListItem(item.id)
-    const afterIds = new Set(
-      (await db.shoppingPurchases.toArray()).map((purchase) => purchase.id),
-    )
-    setUndoItem({
-      item,
-      purchases: before.filter((purchase) => !afterIds.has(purchase.id)),
-    })
+    // The backend returns exactly the purchase rows this delete removed, so
+    // "Rückgängig" restores the complete done state, not just the article.
+    const removed = await backend.removeManualListItemWithPurchases(item.id)
+    setUndoItem({ item, purchases: removed })
   }
 
   async function removeReviewAllocations(row: ShoppingPageReviewRow) {
     if (reviewBusyId) return
     setReviewBusyId(row.id)
     try {
-      const success = await run(async () => {
-        for (const id of row.allocationIds) {
-          await removeShoppingAllocation(id)
-        }
-      })
+      const success = await run(() =>
+        backend.removeShoppingAllocations(row.allocationIds),
+      )
       if (success) setFlash(`Zuordnung für „${row.name}“ entfernt.`)
     } finally {
       setReviewBusyId(null)
@@ -570,11 +515,9 @@ export function ShoppingPage() {
     if (reviewBusyId) return
     setReviewBusyId(row.id)
     try {
-      const success = await run(async () => {
-        for (const id of row.purchaseIds) {
-          await removeShoppingPurchase(id)
-        }
-      })
+      const success = await run(() =>
+        backend.removeShoppingPurchases(row.purchaseIds),
+      )
       if (success) setFlash(`Kauf für „${row.name}“ entfernt.`)
     } finally {
       setReviewBusyId(null)
@@ -584,7 +527,7 @@ export function ShoppingPage() {
   function moveCategory(id: ShoppingCategoryId, direction: -1 | 1) {
     if (!view) return
     void run(async () => {
-      await saveCategoryOrder(categoryOrderWithMove(view.categoryOrder, id, direction))
+      await backend.saveCategoryOrder(categoryOrderWithMove(view.categoryOrder, id, direction))
     })
   }
 
@@ -596,7 +539,7 @@ export function ShoppingPage() {
       )
     if (!confirmed) return
     void run(async () => {
-      await splitShoppingProduct(aliasKey)
+      await backend.splitShoppingProduct(aliasKey)
       setEditingAuto(null)
     })
   }
@@ -697,7 +640,7 @@ export function ShoppingPage() {
             className="shopping-text-action"
             onClick={() =>
               void run(async () => {
-                await restoreManualItem(undoItem.item, undoItem.purchases)
+                await backend.restoreManualItem(undoItem.item, undoItem.purchases)
                 setUndoItem(null)
               })
             }
@@ -1017,7 +960,7 @@ export function ShoppingPage() {
           key={editingManualRow.manualItem.id}
           item={editingManualRow.manualItem}
           onSave={async (input) => {
-            await updateManualListItem(editingManualRow.manualItem!.id, {
+            await backend.updateManualListItem(editingManualRow.manualItem!.id, {
               name: input.name,
               quantityText: input.quantityText,
               unit: input.unit,
@@ -1086,7 +1029,7 @@ export function ShoppingPage() {
       {renamingList ? (
         <ListNameDialog
           list={renamingList}
-          onSave={(name) => renameShoppingList(renamingList.id, name)}
+          onSave={(name) => backend.renameShoppingList(renamingList.id, name)}
           onClose={() => setRenamingListId(null)}
         />
       ) : null}
@@ -1095,7 +1038,7 @@ export function ShoppingPage() {
         <DeleteListDialog
           list={deletingList}
           onDelete={async () => {
-            await deleteFreeShoppingList(deletingList.id, { confirmManualItems: true })
+            await backend.deleteFreeShoppingList(deletingList.id, { confirmManualItems: true })
             if (selectedListId === deletingList.id) setSelectedListId(null)
           }}
           onClose={() => setDeletingListId(null)}
@@ -1782,6 +1725,7 @@ export function DistributionDialog({
   onDone,
   onClose,
 }: DistributionDialogProps) {
+  const backend = useShoppingBackend()
   const firstFree = lists.find((list) => !list.isStandard)
   const initialTarget =
     (currentListId && lists.some((list) => list.id === currentListId)
@@ -1912,7 +1856,7 @@ export function DistributionDialog({
 
   async function ensureStandardList() {
     if (targetListId === standardListId) {
-      await ensureStandardShoppingList(periodStart)
+      await backend.ensureStandardShoppingList(periodStart)
     }
   }
 
@@ -1924,7 +1868,7 @@ export function DistributionDialog({
       if (!targetListId) throw new Error('Bitte einen Zielzettel auswählen.')
       await ensureStandardList()
       if (mode === 'full') {
-        await moveShoppingItem({ periodStart, itemKey, targetListId })
+        await backend.moveShoppingItem({ periodStart, itemKey, targetListId })
         onDone(`„${name}“ wurde auf „${targetName}“ verschoben.`)
       } else {
         if (!selectedPosition) {
@@ -1945,7 +1889,7 @@ export function DistributionDialog({
         if (parsed.dimension !== selectedPosition.dimension) {
           throw new Error('Die Einheit passt nicht zur ausgewählten Mengenart.')
         }
-        await assignShoppingSubquantity({
+        await backend.assignShoppingSubquantity({
           periodStart,
           itemKey,
           dimension: selectedPosition.dimension,
@@ -1968,9 +1912,7 @@ export function DistributionDialog({
     setBusy(true)
     setError('')
     try {
-      for (const id of share.allocationIds) {
-        await removeShoppingAllocation(id)
-      }
+      await backend.removeShoppingAllocations(share.allocationIds)
       onDone(`Zuordnung zu „${share.name}“ entfernt.`)
     } catch (caught) {
       setError(errorText(caught))
@@ -1984,7 +1926,7 @@ export function DistributionDialog({
     setBusy(true)
     setError('')
     try {
-      await resetShoppingAllocations({ periodStart, itemKey })
+      await backend.resetShoppingAllocations({ periodStart, itemKey })
       onDone('Verteilung zurückgesetzt.')
     } catch (caught) {
       setError(errorText(caught))
@@ -2266,6 +2208,7 @@ function ItemEditorDialog({
   onSplit,
   onError,
 }: ItemEditorDialogProps) {
+  const backend = useShoppingBackend()
   const manualItem = singleManualItem(item)
   const initial = useMemo(() => editorInitialValues(item, manualItem), [item, manualItem])
   const [displayName, setDisplayName] = useState(initial.displayName)
@@ -2340,7 +2283,7 @@ function ItemEditorDialog({
       if (manualItem) {
         // A single manual article is corrected at its source, so its name and
         // amount stay editable without inventing a product rule.
-        await updateManualListItem(manualItem.id, {
+        await backend.updateManualListItem(manualItem.id, {
           name: displayName,
           quantityText,
           unit,
@@ -2361,7 +2304,7 @@ function ItemEditorDialog({
           JSON.stringify([...hiddenNotes].sort()) !==
           JSON.stringify([...item.hiddenPurchaseNotes].sort())
         if (hiddenChanged) patch.hiddenPurchaseNotes = hiddenNotes
-        await saveItemRule(item.key, patch)
+        await backend.saveItemRule(item.key, patch)
 
         for (const position of item.derivedPositions) {
           const correction = correctionFor(position.dimension)
@@ -2370,7 +2313,7 @@ function ItemEditorDialog({
           const empty = !draft.quantityText.trim()
           const matchesDerived = sameDraft(draft, derived)
           if (empty || matchesDerived) {
-            if (correction) await removeQuantityCorrection(correction.id)
+            if (correction) await backend.removeQuantityCorrection(correction.id)
             continue
           }
           if (correction) {
@@ -2381,7 +2324,7 @@ function ItemEditorDialog({
             // An unchanged stale correction stays visible for explicit review.
             if (unchanged) continue
           }
-          await saveQuantityCorrection({
+          await backend.saveQuantityCorrection({
             shoppingDate: correction?.shoppingDate ?? shoppingDate,
             itemKey: item.key,
             dimension: position.dimension,
@@ -2413,7 +2356,7 @@ function ItemEditorDialog({
     }
     setBusy(true)
     try {
-      await saveQuantityCorrection({
+      await backend.saveQuantityCorrection({
         shoppingDate: correction.shoppingDate,
         itemKey: item.key,
         dimension: position.dimension,
@@ -2433,7 +2376,7 @@ function ItemEditorDialog({
     if (busy) return
     setBusy(true)
     try {
-      await removeQuantityCorrection(correctionId)
+      await backend.removeQuantityCorrection(correctionId)
       onClose()
     } catch (caught) {
       onError(errorText(caught))
@@ -2446,7 +2389,7 @@ function ItemEditorDialog({
     if (!legacyTarget || !legacyPosition || busy) return
     setBusy(true)
     try {
-      await saveQuantityCorrection({
+      await backend.saveQuantityCorrection({
         shoppingDate,
         itemKey: item.key,
         dimension: legacyTarget.dimension,
@@ -2454,7 +2397,7 @@ function ItemEditorDialog({
         unit: item.legacyUnit,
         sourceSignature: shoppingPositionSignature(legacyTarget),
       })
-      await clearLegacyQuantity(item.key)
+      await backend.clearLegacyQuantity(item.key)
       onClose()
     } catch (caught) {
       onError(errorText(caught))
@@ -2467,7 +2410,7 @@ function ItemEditorDialog({
     if (busy) return
     setBusy(true)
     try {
-      await clearLegacyQuantity(item.key)
+      await backend.clearLegacyQuantity(item.key)
       onClose()
     } catch (caught) {
       onError(errorText(caught))
@@ -2480,7 +2423,7 @@ function ItemEditorDialog({
     if (busy) return
     setBusy(true)
     try {
-      await resolveAmbiguousRule(ruleKey, item.key)
+      await backend.resolveAmbiguousRule(ruleKey, item.key)
       onClose()
     } catch (caught) {
       onError(errorText(caught))
@@ -2493,7 +2436,7 @@ function ItemEditorDialog({
     if (!mergeTarget || busy) return
     setBusy(true)
     try {
-      await mergeShoppingProducts(item.key, mergeTarget)
+      await backend.mergeShoppingProducts(item.key, mergeTarget)
       onClose()
     } catch (caught) {
       onError(errorText(caught))
@@ -2511,7 +2454,7 @@ function ItemEditorDialog({
 
   async function removePurchase(purchase: ShoppingPurchase) {
     try {
-      await removeShoppingPurchase(purchase.id)
+      await backend.removeShoppingPurchase(purchase.id)
     } catch (caught) {
       onError(errorText(caught))
     }
@@ -3008,6 +2951,7 @@ interface SettingsDialogProps {
 }
 
 function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProps) {
+  const backend = useShoppingBackend()
   const [day, setDay] = useState(settings.periodStartDay)
   const [name, setName] = useState(settings.standardListName)
   const [busy, setBusy] = useState(false)
@@ -3019,7 +2963,7 @@ function SettingsDialog({ order, settings, onMove, onClose }: SettingsDialogProp
     setBusy(true)
     setError('')
     try {
-      await applyShoppingSettings({
+      await backend.applyShoppingSettings({
         periodStartDay: day,
         standardListName: name,
       })

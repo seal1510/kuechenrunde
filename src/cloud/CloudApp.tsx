@@ -3,9 +3,9 @@
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Im Cloud-Modus sind nach dem Bootstrap Rezeptbibliothek und Wochenplan
- * freigeschaltet. Einkauf und Kochmodus bleiben vorerst deaktiviert. Lokale
- * Dexie-Daten werden hier nie als Cloud-Bestand gerendert.
+ * Im Cloud-Modus sind nach dem Bootstrap Rezeptbibliothek, Wochenplan und
+ * Einkaufsliste freigeschaltet. Der Kochmodus bleibt vorerst deaktiviert.
+ * Lokale Dexie-Daten werden hier nie als Cloud-Bestand gerendert.
  */
 
 import { AuthProvider, useAuth } from '../auth/AuthProvider'
