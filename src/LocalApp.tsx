@@ -4,7 +4,7 @@ import { RecipePage } from './pages/RecipePage'
 import { RecipeEditorPage } from './pages/RecipeEditorPage'
 import { CookPage } from './pages/CookPage'
 import { ImportPage } from './pages/ImportPage'
-import { UrlImportPage } from './pages/UrlImportPage'
+import { LocalUrlImportPage } from './pages/LocalUrlImportPage'
 import { PlanPage } from './pages/PlanPage'
 import { ShoppingPage } from './pages/ShoppingPage'
 import { BackupPage } from './pages/BackupPage'
@@ -98,7 +98,7 @@ export function LocalApp() {
           {route.name === 'plan' ? <PlanPage /> : null}
           {route.name === 'shopping' ? <ShoppingPage /> : null}
           {route.name === 'import' ? <ImportPage /> : null}
-          {route.name === 'import-url' ? <UrlImportPage /> : null}
+          {route.name === 'import-url' ? <LocalUrlImportPage /> : null}
           {route.name === 'backup' ? <BackupPage /> : null}
           {route.name === 'about' ? <AboutPage /> : null}
         </main>

@@ -8,10 +8,10 @@ import {
   candidateImportKey,
   downloadCandidateImages,
   draftFromUrlCandidate,
-  findUrlImportDuplicates,
   importIdForCandidate,
   type UrlImportContext,
 } from './url-import'
+import { findUrlImportDuplicates } from './local-url-import'
 import type { Recipe } from '../types'
 import type { RecipeUrlFetcher } from './url-fetcher'
 

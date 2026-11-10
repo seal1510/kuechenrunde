@@ -26,6 +26,15 @@ temporäre Kochfortschritt bleiben bewusst gerätelokal.
 
 Details zur Cloud-Grundlage stehen in [`supabase/README.md`](supabase/README.md).
 
+Der URL-Rezeptimport ist zusätzlich für Cloudflare Pages vorbereitet: Eine
+Pages Function unter `functions/api/recipe-fetch.ts` prüft Supabase-Token und
+Haushaltsmitgliedschaft, ruft die fremde Seite serverseitig mit manuellen
+Redirects und harten Grenzen ab und liefert nur die vom vorhandenen JSON-LD-
+Parser erzeugten Rezeptdaten zurück. Der lokale Vite-Import bleibt unverändert.
+Cloudflare Pages ist noch nicht eingerichtet; es wurde nichts veröffentlicht.
+Details, Sicherheitsgrenzen und die noch nötigen manuellen Tests stehen in
+[`docs/url-import-cloud.md`](docs/url-import-cloud.md).
+
 ## Funktionen
 
 - Rezeptbibliothek mit Mela-Import
@@ -83,8 +92,13 @@ sind nicht im Backup enthalten.
 pnpm install
 pnpm dev
 pnpm test
+pnpm typecheck
+pnpm typecheck:worker
 pnpm build
 ```
+
+`pnpm typecheck:worker` prüft die Cloudflare-Function isoliert gegen
+Web-Standard-Typen (ohne Node-APIs). `pnpm build` führt diesen Check mit aus.
 
 Für den Produktionsbuild werden die Lizenztexte aus `public/legal/` mit
 ausgeliefert. Nach Änderungen an `LICENSE` oder `NOTICE` müssen die Kopien in

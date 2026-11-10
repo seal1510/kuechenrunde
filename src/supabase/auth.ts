@@ -80,10 +80,25 @@ export async function getSession(): Promise<Session | null> {
   return data.session
 }
 
-/** Kurzlebiger Access-Token für geschützte Same-Origin-Endpunkte (URL-Import). */
+/**
+ * Kurzlebiger Access-Token für geschützte Same-Origin-Endpunkte (URL-Import).
+ * Läuft die Sitzung in den nächsten 30 Sekunden ab, wird sie vorher über den
+ * vorhandenen Supabase-Mechanismus erneuert. Schlägt das fehl, gibt es keinen
+ * Token; der Import-Endpunkt lehnt die Anfrage dann mit 401 ab.
+ */
 export async function getAccessToken(): Promise<string | null> {
-  const session = await getSession()
-  return session?.access_token ?? null
+  const client = requireSupabase()
+  const { data, error } = await client.auth.getSession()
+  if (error) throw new AuthFailure(authErrorMessage(error))
+  const session = data.session
+  if (!session) return null
+  const expiresAt = session.expires_at ? session.expires_at * 1000 : 0
+  if (expiresAt > 0 && expiresAt < Date.now() + 30_000) {
+    const refreshed = await client.auth.refreshSession()
+    if (refreshed.error) return null
+    return refreshed.data.session?.access_token ?? null
+  }
+  return session.access_token
 }
 
 export function onAuthStateChange(

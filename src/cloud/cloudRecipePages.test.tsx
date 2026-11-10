@@ -60,7 +60,7 @@ function fakeStore(recipes: Recipe[]): CloudRecordsStore {
 }
 
 describe('Cloud-Rezeptseiten', () => {
-  it('zeigt die Cloud-Bibliothek ohne lokale Import-/Backup-Aktionen', () => {
+  it('zeigt die Cloud-Bibliothek ohne lokale Mela-Import-/Backup-Aktionen', () => {
     const html = renderToStaticMarkup(
       <CloudLibraryPage store={fakeStore([recipe('r1', 'Cloud-Curry')])} />,
     )
@@ -69,7 +69,8 @@ describe('Cloud-Rezeptseiten', () => {
     expect(html).toContain('Cloud-Curry')
     expect(html).toContain('Neues Rezept')
     expect(html).not.toContain('Zur Bibliothek')
-    expect(html).not.toContain('Import')
+    expect(html).toContain('URL-Import')
+    expect(html).not.toContain('Mela-Import')
     expect(html).not.toContain('Backup')
     expect(html).not.toContain('Alles bleibt lokal')
   })
@@ -78,6 +79,7 @@ describe('Cloud-Rezeptseiten', () => {
     const html = renderToStaticMarkup(<CloudLibraryPage store={fakeStore([])} />)
     expect(html).toContain('Noch keine Cloud-Rezepte gespeichert.')
     expect(html).toContain('Lege dein erstes Rezept an.')
+    expect(html).toContain('Rezept per URL importieren')
     expect(html).not.toContain('Zum Import')
   })
 

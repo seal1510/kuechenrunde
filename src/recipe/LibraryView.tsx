@@ -11,6 +11,7 @@
 
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import type { Recipe } from '../types'
+import { URL_IMPORT_HASH } from '../routing/routes'
 import { filterValues, matchesRecipeFilters } from './editor'
 import { LIBRARY_SORT_OPTIONS, sortRecipes, type LibrarySort } from './library'
 
@@ -127,7 +128,11 @@ export function RecipeLibraryView({
             </svg>
             Neues Rezept
           </a>
-          {cloudMode ? null : (
+          {cloudMode ? (
+            <a className="button quiet" href={URL_IMPORT_HASH}>
+              URL-Import
+            </a>
+          ) : (
             <>
               <a className="button quiet" href="#/import">
                 Import
@@ -226,7 +231,11 @@ export function RecipeLibraryView({
               : 'Importiere eine Mela-Datei (.melarecipe oder .melarecipes) oder lege ein Rezept manuell an. Alles bleibt lokal im Browser.'}
           </p>
           <div className="notice-actions">
-            {cloudMode ? null : (
+            {cloudMode ? (
+              <a className="button" href={URL_IMPORT_HASH}>
+                Rezept per URL importieren
+              </a>
+            ) : (
               <a className="button" href="#/import">
                 Zum Import
               </a>

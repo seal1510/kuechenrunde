@@ -8,18 +8,37 @@ import {
   downloadCandidateImages,
   draftFromUrlCandidate,
   duplicateSummary,
-  findUrlImportDuplicates,
   type UrlDuplicateInfo,
   type UrlImportContext,
 } from '../import/url-import'
 import {
   defaultRecipeFetcher,
   RecipeFetchError,
+  type RecipeFetchService,
+  type RecipeUrlFetcher,
 } from '../import/url-fetcher'
-import { saveRecipeWithImages, type EditorImage } from '../recipe/repository'
+import type { EditorImage } from '../recipe/repository'
 import type { RecipeDraft } from '../recipe/editor'
+import type { Recipe } from '../types'
 
 type Status = 'idle' | 'fetching' | 'ready' | 'saving' | 'saved'
+
+export type UrlImportSaveHandler = (
+  recipe: Recipe,
+  images: EditorImage[],
+) => Promise<string[] | void>
+
+export interface UrlImportPageProps {
+  /** Local Dexie (default) or the shared Supabase recipe library. */
+  service?: RecipeFetchService
+  fetcher?: RecipeUrlFetcher
+  /** Local Dexie scan or the loaded Cloud snapshot; no default on purpose. */
+  findDuplicates: (importUrl: string, candidateKey: string) => Promise<UrlDuplicateInfo>
+  /** Local Dexie save or the existing Cloud image service; no default on purpose. */
+  saveImport: UrlImportSaveHandler
+  /** Optional allow-list of the backing image storage (cloud bucket). */
+  allowedImageTypes?: readonly string[]
+}
 
 interface UrlInspection {
   originalUrl: string
@@ -44,7 +63,14 @@ function uniqueWarnings(...groups: string[][]): string[] {
   return result
 }
 
-export function UrlImportPage() {
+export function UrlImportPage({
+  service = 'local',
+  fetcher = defaultRecipeFetcher,
+  findDuplicates,
+  saveImport,
+  allowedImageTypes,
+}: UrlImportPageProps) {
+  const cloud = service === 'cloud'
   const [urlInput, setUrlInput] = useState('')
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState('')
@@ -58,7 +84,11 @@ export function UrlImportPage() {
   const [imageStatus, setImageStatus] = useState<'idle' | 'loading' | 'done'>('idle')
   const [duplicate, setDuplicate] = useState<UrlDuplicateInfo | null>(null)
   const [allowDuplicate, setAllowDuplicate] = useState(false)
-  const [saved, setSaved] = useState<{ id: string; title: string } | null>(null)
+  const [saved, setSaved] = useState<{
+    id: string
+    title: string
+    warnings: string[]
+  } | null>(null)
   const selectionToken = useRef(0)
 
   const candidate = inspection?.candidates[selected] ?? null
@@ -100,12 +130,12 @@ export function UrlImportPage() {
     setAllowDuplicate(false)
     setImageStatus(nextCandidate.images.length > 0 ? 'loading' : 'done')
 
-    const duplicates = await findUrlImportDuplicates(result.finalUrl, nextCandidate.key)
+    const duplicates = await findDuplicates(result.finalUrl, nextCandidate.key)
     if (selectionToken.current !== token) return
     setDuplicate(duplicates)
 
     if (nextCandidate.images.length === 0) return
-    const downloaded = await downloadCandidateImages(nextCandidate.images, defaultRecipeFetcher)
+    const downloaded = await downloadCandidateImages(nextCandidate.images, fetcher)
     if (selectionToken.current !== token) return
     setImages(downloaded.images)
     setImageWarnings(downloaded.warnings)
@@ -136,8 +166,11 @@ export function UrlImportPage() {
     resetResult()
 
     try {
-      const page = await defaultRecipeFetcher.fetchPage(normalized)
-      const extraction = extractRecipeCandidates(page.html, page.finalUrl)
+      const page = await fetcher.fetchPage(normalized)
+      // The local endpoint returns HTML; the Cloudflare endpoint already parsed
+      // it with the same shared parser. Both paths therefore use identical
+      // JSON-LD, ingredient and quantity logic.
+      const extraction = page.extraction ?? extractRecipeCandidates(page.html, page.finalUrl)
       const result: UrlInspection = {
         originalUrl: normalized,
         finalUrl: page.finalUrl,
@@ -204,8 +237,8 @@ export function UrlImportPage() {
         },
         imageWarnings,
       })
-      await saveRecipeWithImages(recipe, images)
-      setSaved({ id: recipe.id, title: recipe.title })
+      const warnings = (await saveImport(recipe, images)) ?? []
+      setSaved({ id: recipe.id, title: recipe.title, warnings })
       setStatus('saved')
     } catch (cause) {
       setStatus('ready')
@@ -227,13 +260,16 @@ export function UrlImportPage() {
         <div>
           <h1>Rezept per URL importieren</h1>
           <p className="muted">
-            Webseite abrufen, erkanntes Rezept prüfen, korrigieren und erst dann lokal speichern.
+            Webseite abrufen, erkanntes Rezept prüfen, korrigieren und erst dann{' '}
+            {cloud ? 'in der Familien-Cloud' : 'lokal'} speichern.
           </p>
         </div>
         <div className="page-head-actions">
-          <a className="button" href="#/import">
-            Mela-Import
-          </a>
+          {cloud ? null : (
+            <a className="button" href="#/import">
+              Mela-Import
+            </a>
+          )}
           <a className="button quiet" href="#/">
             Zur Bibliothek
           </a>
@@ -243,8 +279,9 @@ export function UrlImportPage() {
       <section className="panel">
         <h2>Webseite abrufen</h2>
         <p className="muted small">
-          Der Abruf läuft über den lokalen, abgesicherten Importdienst. Es werden keine Cookies oder
-          Zugangsdaten an fremde Seiten gesendet. Fremde Seitenskripte werden nicht ausgeführt.
+          {cloud
+            ? 'Der Abruf läuft über den abgesicherten Importdienst der Familien-Cloud. Anmeldung und Haushaltsmitgliedschaft werden geprüft. An fremde Seiten werden keine Cookies oder Zugangsdaten gesendet; fremde Seitenskripte werden nicht ausgeführt.'
+            : 'Der Abruf läuft über den lokalen, abgesicherten Importdienst. Es werden keine Cookies oder Zugangsdaten an fremde Seiten gesendet. Fremde Seitenskripte werden nicht ausgeführt.'}
         </p>
         <form className="url-input-row" onSubmit={handleFetch}>
           <input
@@ -274,9 +311,9 @@ export function UrlImportPage() {
           <p>{error}</p>
           {serviceGap ? (
             <p className="muted small">
-              In der Entwicklung wird der Dienst vom Vite-Server bereitgestellt. Für einen
-              Produktivbetrieb ist ein separat abgesichertes Backend nötig; die Anwendung führt
-              bewusst keinen direkten Browser-Fetch aus.
+              {cloud
+                ? 'Der Import-Endpunkt ist auf diesem Deployment nicht verfügbar. Bitte die Pages-Functions-Konfiguration und die Umgebungsvariablen prüfen.'
+                : 'In der Entwicklung wird der Dienst vom Vite-Server bereitgestellt. Für einen Produktivbetrieb ist ein separat abgesichertes Backend nötig; die Anwendung führt bewusst keinen direkten Browser-Fetch aus.'}
             </p>
           ) : null}
           {manualFallback ? (
@@ -361,7 +398,9 @@ export function UrlImportPage() {
 
       {imageStatus === 'loading' ? (
         <div className="notice" aria-live="polite">
-          Bilder werden über den lokalen Dienst geprüft und geladen …
+          {cloud
+            ? 'Bilder werden über den abgesicherten Importdienst geprüft und geladen …'
+            : 'Bilder werden über den lokalen Dienst geprüft und geladen …'}
         </div>
       ) : null}
 
@@ -380,8 +419,18 @@ export function UrlImportPage() {
         <section className="panel" aria-live="polite">
           <h2>Import abgeschlossen</h2>
           <p>
-            <strong>{saved.title}</strong> wurde lokal gespeichert.
+            <strong>{saved.title}</strong> wurde {cloud ? 'in der Familien-Cloud' : 'lokal'}{' '}
+            gespeichert.
           </p>
+          {saved.warnings.length > 0 ? (
+            <div className="notice">
+              <ul>
+                {saved.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <div className="notice-actions">
             <a className="button primary" href={`#/recipe/${encodeURIComponent(saved.id)}`}>
               Rezept öffnen
@@ -431,6 +480,7 @@ export function UrlImportPage() {
             onChange={setDraft}
             images={images}
             onImagesChange={setImages}
+            allowedImageTypes={allowedImageTypes}
             onSubmit={handleSave}
             categoriesNote="aus schema.org recipeCategory (als Gerichtstyp übernommen)"
           />

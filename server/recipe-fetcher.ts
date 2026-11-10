@@ -29,6 +29,14 @@ import {
 } from 'node:zlib'
 import { SAFE_REMOTE_IMAGE_MIME_TYPES, sniffImageMime } from '../src/import/image-mime'
 import {
+  contentTypeMime,
+  decodeHtmlBytes,
+  isHtmlContentType,
+  isImageContentType,
+  REMOTE_FETCH_LIMITS,
+  resolveRemoteRedirect,
+} from '../src/import/remote-url-policy'
+import {
   isPublicIp,
   pinnedLookup,
   resolvePublicAddresses,
@@ -37,13 +45,15 @@ import {
   type ValidatedTarget,
 } from './url-safety'
 
+export { contentTypeMime, isHtmlContentType, isImageContentType }
+
 export const FETCH_LIMITS = {
-  htmlBytes: 5 * 1024 * 1024,
-  imageBytes: 8 * 1024 * 1024,
-  maxRedirects: 5,
-  maxImageRedirects: 3,
-  timeoutMs: 15_000,
-  maxUrlLength: 2048,
+  htmlBytes: REMOTE_FETCH_LIMITS.htmlBytes,
+  imageBytes: REMOTE_FETCH_LIMITS.imageBytes,
+  maxRedirects: REMOTE_FETCH_LIMITS.maxRedirects,
+  maxImageRedirects: REMOTE_FETCH_LIMITS.maxImageRedirects,
+  timeoutMs: REMOTE_FETCH_LIMITS.timeoutMs,
+  maxUrlLength: REMOTE_FETCH_LIMITS.maxUrlLength,
 } as const
 
 export type RemoteFetchErrorCode =
@@ -89,37 +99,9 @@ function headerValue(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
 }
 
-/** MIME type without parameters, lowercased. */
-export function contentTypeMime(value: string | string[] | undefined): string {
-  return headerValue(value).split(';')[0]?.trim().toLowerCase() ?? ''
-}
-
-export function isHtmlContentType(value: string | string[] | undefined): boolean {
-  const mime = contentTypeMime(value)
-  return mime === 'text/html' || mime === 'application/xhtml+xml'
-}
-
-export function isImageContentType(value: string | string[] | undefined): boolean {
-  const mime = contentTypeMime(value)
-  return mime.startsWith('image/') || mime === 'application/octet-stream'
-}
-
-/** Decode HTML bytes using the header charset, a meta charset, or UTF-8. */
+/** Decode HTML bytes using the shared charset logic (Node Buffer wrapper). */
 export function decodeHtmlBuffer(buffer: Buffer, contentType: string): string {
-  const headerCharset = /charset\s*=\s*["']?([^;"'\s]+)/i.exec(contentType)?.[1]
-  let charset = headerCharset
-  if (!charset) {
-    const head = buffer.subarray(0, 4096).toString('latin1')
-    charset =
-      /<meta[^>]+charset\s*=\s*["']?([^"'\s/>]+)/i.exec(head)?.[1] ??
-      /<meta[^>]+content\s*=\s*["'][^"']*charset\s*=\s*([^"'\s;]+)/i.exec(head)?.[1]
-  }
-  const label = (charset ?? 'utf-8').toLowerCase().replace(/^utf8$/, 'utf-8')
-  try {
-    return new TextDecoder(label, { fatal: false }).decode(buffer).replace(/^\uFEFF/, '')
-  } catch {
-    return new TextDecoder('utf-8', { fatal: false }).decode(buffer).replace(/^\uFEFF/, '')
-  }
+  return decodeHtmlBytes(buffer, contentType)
 }
 
 /** Read a stream with a hard byte cap; also guards against decompression bombs. */
@@ -152,13 +134,16 @@ export async function readLimited(
 
 /** Resolve a redirect target with the same URL safety rules as the first URL. */
 export function resolveRedirect(currentUrl: URL, location: string): URL {
-  let resolved: URL
   try {
-    resolved = new URL(location, currentUrl)
-  } catch {
-    throw new RemoteFetchError('redirect', 'Die Weiterleitung enthält eine ungültige Ziel-URL.')
+    return resolveRemoteRedirect(currentUrl, location)
+  } catch (error) {
+    throw new RemoteFetchError(
+      'redirect',
+      error instanceof UrlSafetyError
+        ? error.message
+        : 'Die Weiterleitung enthält eine ungültige Ziel-URL.',
+    )
   }
-  return validateTargetUrl(resolved.toString()).url
 }
 
 function requestHeaders(target: ValidatedTarget, kind: 'html' | 'image'): http.OutgoingHttpHeaders {

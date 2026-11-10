@@ -156,12 +156,23 @@ Es wurden keine Benutzer und keine dauerhaften Daten angelegt.
 - Temporäre SQL-Proben wurden zurückgerollt und entfernt; es blieben keine
   Testobjekte oder Testrezepte zurück.
 
+## URL-Rezeptimport (A4-Vorbereitung)
+
+- Die Pages Function `functions/api/recipe-fetch.ts` prüft ein
+  Supabase-Access-Token über `/auth/v1/user` und danach die Mitgliedschaft über
+  die vorhandene RPC `public.is_household_member()`.
+- Es wird nur der öffentliche Publishable-/Anon-Key verwendet; service_role-
+  und `sb_secret_`-Schlüssel werden abgelehnt.
+- Der Import speichert über den vorhandenen `CloudRecipeImageService` in
+  `records` und im privaten Bucket `recipe-images`. Es gibt keinen zweiten
+  Rezepteditor und keine neue Zutatenlogik.
+- Details: [`docs/url-import-cloud.md`](../docs/url-import-cloud.md).
+
 ## Noch nicht enthalten
 
-- Anbindung von Wochenplan, Einkaufsliste und Kochmodus (`src/db.ts` bleibt
-  für diese Bereiche lokal).
+- Cloudflare-Pages-Deployment; die Function ist vorbereitet, aber nicht
+  veröffentlicht oder live getestet.
 - ZIP-Migration der lokalen Daten.
-- Cloudflare-Pages-Deployment und URL-Import-Function.
 
 ## Hinweis zur Laufzeit
 

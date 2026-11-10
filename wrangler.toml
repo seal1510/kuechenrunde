@@ -1,0 +1,17 @@
+# Küchenrunde – Cloudflare Pages
+#
+# Dies ist nur die vorbereitete Konfiguration. Es wurde noch nichts
+# veröffentlicht. Die Function liegt unter functions/api/recipe-fetch.ts und
+# wird ausschließlich für /api/recipe-fetch aufgerufen (public/_routes.json).
+# Der Name muss beim Anlegen des Pages-Projekts ggf. angepasst werden.
+name = "kuechenrunde"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-11-01"
+
+# Verhindert, dass ein Subrequest in die eigene Zone am öffentlichen
+# Cloudflare-Eingang vorbei zum Origin geroutet wird.
+compatibility_flags = ["global_fetch_strictly_public"]
+
+# Keine Secrets in dieser Datei. SUPABASE_URL und SUPABASE_PUBLISHABLE_KEY
+# werden im Pages-Projekt als Umgebungsvariablen gesetzt. Ein
+# service_role-/Secret-Key darf hier niemals eingetragen werden.

@@ -45,6 +45,7 @@ import {
 } from './cloudImageNotice'
 import { CloudRecipeDetailPage } from './CloudRecipeDetailPage'
 import { CloudRecipeEditorPage } from './CloudRecipeEditorPage'
+import { CloudUrlImportPage } from './CloudUrlImportPage'
 
 function CloudUnavailablePage() {
   return (
@@ -131,6 +132,8 @@ export function CloudRecipesApp({
     )
   } else if (route.name === 'recipe') {
     content = <CloudRecipeDetailPage store={store} id={route.id} />
+  } else if (route.name === 'import-url') {
+    content = <CloudUrlImportPage store={store} images={imageService} />
   } else if (route.name === 'recipe-new') {
     content = <CloudRecipeEditorPage key="new" store={store} images={imageService} />
   } else if (route.name === 'recipe-edit') {
@@ -172,6 +175,13 @@ export function CloudRecipesApp({
                 aria-current={route.name === 'shopping' ? 'page' : undefined}
               >
                 Einkaufsliste
+              </a>
+              <a
+                href="#/import/url"
+                className={route.name === 'import-url' ? 'active' : ''}
+                aria-current={route.name === 'import-url' ? 'page' : undefined}
+              >
+                Import
               </a>
               <span className="cloud-user">{email}</span>
               <button

@@ -15,7 +15,6 @@
  *  - Existing recipes are never written or overwritten by an import.
  */
 
-import { db } from '../db'
 import { randomId } from '../lib/id'
 import { draftFromParts, buildRecipeFromDraft, type RecipeDraft } from '../recipe/editor'
 import type { Recipe, RecipeImportMeta } from '../types'
@@ -130,14 +129,14 @@ export function buildUrlRecipe(input: UrlRecipeBuildInput): Recipe {
  * titles. A full scan also catches manual/Mela recipes with a matching
  * `sourceUrl` that predate URL imports.
  */
-export async function findUrlImportDuplicates(
+export function findUrlImportDuplicatesIn(
+  recipes: readonly Recipe[],
   importUrl: string,
   candidateKey: string,
-): Promise<UrlDuplicateInfo> {
+): UrlDuplicateInfo {
   const normalized = normalizeHttpUrl(importUrl)
   if (!normalized) return { exact: null, sameSource: [] }
 
-  const recipes = await db.recipes.toArray()
   const sameSource = recipes.filter((recipe) => {
     for (const raw of [recipe.importUrl, recipe.sourceUrl]) {
       if (!raw) continue
