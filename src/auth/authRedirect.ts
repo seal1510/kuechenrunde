@@ -10,7 +10,7 @@
  * Es werden weder Tokens geloggt noch in Fehlermeldungen ausgegeben.
  */
 
-export type AuthRedirectPurpose = 'invite' | 'recovery'
+export type AuthRedirectPurpose = 'invite' | 'recovery' | 'signup'
 
 export type AuthRedirect =
   | {
@@ -26,18 +26,23 @@ export type AuthRedirect =
     }
   | {
       type: 'error'
+      purpose: AuthRedirectPurpose
       message: string
     }
 
-function friendlyError(raw: string | null): string {
+function friendlyError(
+  raw: string | null,
+  purpose: AuthRedirectPurpose,
+): string {
   const value = (raw ?? '').toLowerCase()
+  const subject = purpose === 'signup' ? 'Bestätigungslink' : 'Einladungslink'
   if (value.includes('expired') || value.includes('otp_expired')) {
-    return 'Der Einladungslink ist abgelaufen. Bitte den Betreiber um eine neue Einladung.'
+    return `Der ${subject} ist abgelaufen. Bitte den Betreiber um eine neue Einladung.`
   }
   if (value.includes('access_denied')) {
-    return 'Der Einladungslink wurde abgelehnt oder ist nicht mehr gültig. Bitte den Betreiber um eine neue Einladung.'
+    return `Der ${subject} wurde abgelehnt oder ist nicht mehr gültig. Bitte den Betreiber um eine neue Einladung.`
   }
-  return 'Der Einladungslink ist ungültig. Bitte den Betreiber um eine neue Einladung.'
+  return `Der ${subject} ist ungültig. Bitte den Betreiber um eine neue Einladung.`
 }
 
 /**
@@ -50,14 +55,14 @@ export function parseAuthRedirect(raw: string): AuthRedirect | null {
 
   const params = new URLSearchParams(clean)
   const purpose = params.get('type')
-  if (purpose !== 'invite' && purpose !== 'recovery') return null
+  if (purpose !== 'invite' && purpose !== 'recovery' && purpose !== 'signup') return null
 
   const error =
     params.get('error_description') ??
     params.get('error') ??
     params.get('error_code')
   if (error) {
-    return { type: 'error', message: friendlyError(error) }
+    return { type: 'error', purpose, message: friendlyError(error, purpose) }
   }
 
   const accessToken = params.get('access_token')
@@ -71,5 +76,5 @@ export function parseAuthRedirect(raw: string): AuthRedirect | null {
     return { type: 'token_hash', purpose, tokenHash }
   }
 
-  return { type: 'error', message: friendlyError(null) }
+  return { type: 'error', purpose, message: friendlyError(null, purpose) }
 }

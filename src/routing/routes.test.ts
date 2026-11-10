@@ -22,6 +22,7 @@ describe('route resolution', () => {
     expect(parseRoute('#/import')).toEqual({ name: 'import' })
     expect(parseRoute('#/import/url')).toEqual({ name: 'import-url' })
     expect(parseRoute('#/backup')).toEqual({ name: 'backup' })
+    expect(parseRoute('#/family')).toEqual({ name: 'family' })
     expect(parseRoute('#/about')).toEqual({ name: 'about' })
     expect(parseRoute('#/recipe/new')).toEqual({ name: 'recipe-new' })
     expect(parseRoute('#/recipe/r1')).toEqual({ name: 'recipe', id: 'r1' })
@@ -50,6 +51,7 @@ describe('route resolution', () => {
     expect(parseRoute('#/import/')).toEqual({ name: 'import' })
     expect(parseRoute('#/plan/')).toEqual({ name: 'plan' })
     expect(parseRoute('#/backup/')).toEqual({ name: 'backup' })
+    expect(parseRoute('#/family/')).toEqual({ name: 'family' })
     expect(parseRoute('#/about/')).toEqual({ name: 'about' })
     expect(parseRoute('#/recipe/r1/cook/')).toEqual({
       name: 'cook',

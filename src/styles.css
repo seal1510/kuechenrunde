@@ -10627,3 +10627,74 @@ body.plan-panel-open {
   text-align: center;
   border-style: dashed;
 }
+
+/* Familie verwalten und Einladung annehmen */
+.family-created {
+  margin-top: var(--space-4);
+}
+
+.family-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.family-link-input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.family-invites {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.family-invite {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--line);
+}
+
+.family-invite:first-child {
+  border-top: 0;
+}
+
+.family-invite-main {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.join-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.join-tabs .is-active {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+
+@media (max-width: 640px) {
+  .family-link-row .button,
+  .family-invite .button {
+    flex: 1 1 auto;
+  }
+}

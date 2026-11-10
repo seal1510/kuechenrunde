@@ -8,6 +8,7 @@ describe('InviteSetupPage', () => {
       <InviteSetupPage
         redirect={{
           type: 'error',
+          purpose: 'invite',
           message:
             'Der Einladungslink ist abgelaufen. Bitte den Betreiber um eine neue Einladung.',
         }}

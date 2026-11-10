@@ -22,6 +22,7 @@ export type Route =
   | { name: 'import' }
   | { name: 'import-url' }
   | { name: 'backup' }
+  | { name: 'family' }
   | { name: 'about' }
 
 /** Single source of truth for the URL-import link target. */
@@ -79,6 +80,7 @@ export function parseRoute(hash: string): Route {
   if (path === 'import') return { name: 'import' }
   if (path === 'import/url') return { name: 'import-url' }
   if (path === 'backup') return { name: 'backup' }
+  if (path === 'family') return { name: 'family' }
   if (path === 'about') return { name: 'about' }
   if (path === 'recipe/new') return { name: 'recipe-new' }
 

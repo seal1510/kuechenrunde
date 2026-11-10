@@ -48,6 +48,7 @@ import { CloudRecipeEditorPage } from './CloudRecipeEditorPage'
 import { CloudUrlImportPage } from './CloudUrlImportPage'
 import { CloudImportPage } from './CloudImportPage'
 import { CloudBackupPage } from './CloudBackupPage'
+import { FamilyPage } from './FamilyPage'
 import { AboutPage } from '../pages/AboutPage'
 
 function CloudUnavailablePage() {
@@ -141,6 +142,8 @@ export function CloudRecipesApp({
     content = <CloudUrlImportPage store={store} images={imageService} />
   } else if (route.name === 'backup') {
     content = <CloudBackupPage store={store} storage={storage} />
+  } else if (route.name === 'family') {
+    content = <FamilyPage />
   } else if (route.name === 'about') {
     content = <AboutPage />
   } else if (route.name === 'recipe-new') {
@@ -200,6 +203,13 @@ export function CloudRecipesApp({
                 aria-current={route.name === 'backup' ? 'page' : undefined}
               >
                 Backup
+              </a>
+              <a
+                href="#/family"
+                className={route.name === 'family' ? 'active' : ''}
+                aria-current={route.name === 'family' ? 'page' : undefined}
+              >
+                Familie
               </a>
               <a
                 href="#/about"

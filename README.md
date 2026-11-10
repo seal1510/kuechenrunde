@@ -27,10 +27,12 @@ temporäre Kochfortschritt bleiben bewusst gerätelokal.
 Im lokalen Modus bleiben alle Daten in IndexedDB. Es gibt keine automatische
 Migration lokaler Bestände in die Cloud und keinen Cloud-Reset.
 
-Familienmitglieder werden vom Betreiber per Supabase-Einladung angelegt und
-ausdrücklich in `household_members` freigeschaltet; siehe
-[`docs/family-access.md`](docs/family-access.md). Eine öffentliche Registrierung
-gibt es nicht.
+Familienmitglieder erhalten im Cloud-Modus unter **Familie verwalten**
+(`#/family`) einen Einladungslink, den der Haushaltsadministrator per WhatsApp
+oder Kopieren weitergibt. Die Person registriert sich selbst oder meldet sich
+mit einem bestehenden Konto an und wird nach der Einlösung automatisch
+Mitglied. Siehe [`docs/family-access.md`](docs/family-access.md). Ohne
+gültigen Einladungslink entsteht kein Haushaltszugriff.
 
 Details:
 

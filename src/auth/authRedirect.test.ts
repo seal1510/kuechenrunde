@@ -36,10 +36,22 @@ describe('parseAuthRedirect', () => {
     )
     expect(result).toEqual({
       type: 'error',
+      purpose: 'invite',
       message:
         'Der Einladungslink ist abgelaufen. Bitte den Betreiber um eine neue Einladung.',
     })
     expect(JSON.stringify(result)).not.toContain('access_token')
+  })
+
+  it('recognizes signup confirmation parameters', () => {
+    expect(
+      parseAuthRedirect('#access_token=a&refresh_token=b&type=signup'),
+    ).toEqual({
+      type: 'session',
+      purpose: 'signup',
+      accessToken: 'a',
+      refreshToken: 'b',
+    })
   })
 
   it('ignores ordinary app hashes and incomplete links', () => {
@@ -47,6 +59,7 @@ describe('parseAuthRedirect', () => {
     expect(parseAuthRedirect('')).toBeNull()
     expect(parseAuthRedirect('#type=invite')).toEqual({
       type: 'error',
+      purpose: 'invite',
       message:
         'Der Einladungslink ist ungültig. Bitte den Betreiber um eine neue Einladung.',
     })

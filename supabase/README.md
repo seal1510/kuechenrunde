@@ -25,30 +25,28 @@ und alle Seiten arbeiten weiterhin ausschließlich lokal mit Dexie.
    Keine manuellen SQL-Skripte parallel im Dashboard einspielen; sonst
    divergiert die Migrationshistorie.
 
-4. Familienmitglied über die offizielle Supabase-Einladung anlegen. Der
-   Betreiber ist einmalig mit der Supabase CLI angemeldet und führt aus:
+4. Familienmitglied einladen. Im Cloud-Modus gibt es dafür **Familie
+   verwalten** (`#/family`): Der Administrator erstellt einen sieben Tage
+   gültigen Einladungslink, kopiert ihn oder teilt ihn nativ. Die eingeladene
+   Person registriert sich selbst oder meldet sich an; die Einlösung erfolgt
+   serverseitig und atomar über `redeem_household_invite()`.
+
+   Details und Sicherheitsmodell: [`docs/family-access.md`](../docs/family-access.md).
+
+5. Administrations-Fallback ohne Oberfläche:
 
    ```bash
    pnpm invite-member "Name des Mitglieds" mitglied@example.org --yes
    ```
 
-   Das Skript verwendet `POST /auth/v1/invite` und trägt das Konto anschließend
-   ausdrücklich in `public.household_members` ein. Öffentliche Registrierung
-   bleibt deaktiviert; neue Konten werden nicht automatisch Mitglieder.
-5. Alternativ kann die Einladung im Dashboard unter **Authentication → Users →
-   Invite user** ausgelöst und die Mitgliedschaft anschließend nur über den
-   Betreiber eingetragen werden:
+   Das Skript nutzt `POST /auth/v1/invite` und trägt das Konto anschließend in
+   `public.household_members` ein. Alternativ kann die Einladung im Dashboard
+   unter **Authentication → Users → Invite user** ausgelöst und die
+   Mitgliedschaft per SQL eingetragen werden.
 
-   ```sql
-   insert into public.household_members (user_id, display_name)
-   select id, 'Name des Mitglieds'
-   from auth.users
-   where email = 'mitglied@example.org'
-   on conflict (user_id) do update set display_name = excluded.display_name;
-   ```
-
-   Der empfohlene Weg ist `pnpm invite-member`; Details stehen in
-   [`docs/family-access.md`](../docs/family-access.md).
+   Für die Selbstregistrierung ist `disable_signup = false` gesetzt;
+   E-Mail-Bestätigung ist derzeit nicht erforderlich. Ohne gültigen
+   Einladungslink entsteht trotzdem kein Haushaltszugriff.
 
 6. `.env.example` nach `.env` kopieren und `VITE_SUPABASE_URL` sowie
    `VITE_SUPABASE_PUBLISHABLE_KEY` eintragen. Nur der öffentliche
@@ -81,6 +79,8 @@ Angewendete Migrationen:
 - `20261110150500_harden_grants.sql` – entzieht `authenticated` die von
   Supabase standardmäßig gesetzten Rechte `TRUNCATE`, `REFERENCES` und
   `TRIGGER`; TRUNCATE wird von RLS nicht geprüft.
+- `20261110232000_family_invites.sql` – `is_admin`, gehashte Einladungen und
+  die serverseitigen Einlöse-RPCs.
 
 **Live geprüft:**
 
@@ -104,7 +104,7 @@ Angewendete Migrationen:
 - Der Bucket `recipe-images` ist privat, auf 10 MB pro Datei begrenzt und
   akzeptiert nur die vorgesehenen Bild-MIME-Typen. Die vier Storage-Policies gelten für
   `authenticated`.
-- `disable_signup = true`; anonyme Authentifizierung ist deaktiviert.
+- `disable_signup = false` für die Selbstregistrierung; ohne gültigen Einladungslink entsteht kein Haushaltszugriff. Anonyme Authentifizierung ist deaktiviert.
 - `pnpm supabase db advisors --type security` meldet keine Befunde.
 - `records` ist leer; `household_members` enthält das freigeschaltete
   Betreiberkonto, `auth.users` genau diesen Benutzer.

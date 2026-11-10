@@ -13,6 +13,8 @@ import { useState } from 'react'
 import { AuthProvider, useAuth } from '../auth/AuthProvider'
 import { InviteSetupPage } from '../auth/InviteSetupPage'
 import { parseAuthRedirect } from '../auth/authRedirect'
+import { readJoinToken } from '../family/joinLink'
+import { JoinPage } from './JoinPage'
 import { cloudConfig, cloudConfigError } from '../supabase/client'
 import { CloudRecipesApp } from './CloudRecipesApp'
 import { CloudStatus } from './CloudStatus'
@@ -76,6 +78,9 @@ function CloudConfigurationProblem({ message }: { message: string }) {
 }
 
 export function CloudApp() {
+  const [joinToken] = useState(() =>
+    typeof window === 'undefined' ? null : readJoinToken(window.location.search),
+  )
   const [authRedirect] = useState(() =>
     typeof window === 'undefined'
       ? null
@@ -83,7 +88,16 @@ export function CloudApp() {
         parseAuthRedirect(window.location.search),
   )
 
-  if (authRedirect && cloudConfig && !cloudConfigError) {
+  if (joinToken && cloudConfig && !cloudConfigError) {
+    return <JoinPage token={joinToken} authRedirect={authRedirect} />
+  }
+
+  if (
+    authRedirect &&
+    authRedirect.purpose !== 'signup' &&
+    cloudConfig &&
+    !cloudConfigError
+  ) {
     return <InviteSetupPage redirect={authRedirect} />
   }
 
