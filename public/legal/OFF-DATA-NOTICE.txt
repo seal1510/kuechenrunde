@@ -1,52 +1,67 @@
 Open Food Facts – Datenhinweis für Küchenrunde
 ==============================================
 
-Küchenrunde verwendet deutsche Namen, Synonyme und Verarbeitungsbegriffe aus
-den Open-Food-Facts-Taxonomien:
+Der in Küchenrunde verwendete, kuratierte Zutatenkatalog wurde unter Bezug auf
+die Open-Food-Facts-Taxonomien erstellt. Er wird vorsorglich als Datenbestand
+unter der Open Database License (ODbL) 1.0 veröffentlicht.
 
-- taxonomies/food/ingredients.txt
-- taxonomies/ingredients_processing.txt
+Quellen
+-------
 
-Quelle: https://github.com/openfoodfacts/openfoodfacts-server
+- ingredients.txt
+  https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/food/ingredients.txt
+- ingredients_processing.txt
+  https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/ingredients_processing.txt
 
-Open Food Facts wird von einer unabhängigen Non-Profit-Organisation
-betrieben. Küchenrunde ist kein offizielles Open-Food-Facts-Projekt und wird
-von Open Food Facts nicht unterstützt.
+Quellenangabe: „Open Food Facts contributors“, https://world.openfoodfacts.org
+Abgerufen am 2026-11-10 aus dem Branch `main` des
+OFF-Server-Repositories.
 
-Lizenzlage
-----------
+Lizenz
+------
 
-Die Open-Food-Facts-Nutzungsbedingungen nennen für die Datenbank die Open
-Database License (ODbL) 1.0 und für die Einzelinhalte die Database Contents
-License (DbCL) 1.0:
+ODbL 1.0: https://opendatacommons.org/licenses/odbl/1-0/
+DbCL 1.0: https://opendatacommons.org/licenses/dbcl/1-0/
+
+Die OFF-Dokumentation nennt für die OFF-Datenbank ODbL 1.0 und für
+Einzelinhalte DbCL 1.0:
 
   https://world.openfoodfacts.org/terms-of-use
+  https://world.openfoodfacts.org/data
 
-Der Quellcode des Open-Food-Facts-Servers steht unter AGPL-3.0:
+Der OFF-Servercode steht unter AGPL-3.0:
 
   https://github.com/openfoodfacts/openfoodfacts-server/blob/main/LICENSE
 
-Die OFF-Nutzungsbedingungen und die OFF-Daten-Seite benennen für die Datenbank
-die ODbL 1.0 und für die Einzelinhalte die DbCL 1.0; der Servercode steht
-unter AGPL-3.0. Für die konkreten Taxonomiedateien wurde keine eigene,
-dateispezifische Lizenzangabe gefunden. Offen ist daher genau diese Frage:
+Der hier veröffentlichte, kuratierte Katalog wird als ODbL-1.0-Datenbestand
+behandelt. Bei Weitergabe des Katalogs oder daraus abgeleiteter Datenbanken
+sind die Attributions- und Share-Alike-Bedingungen der ODbL 1.0 zu beachten.
+Eine darüber hinausgehende, dateispezifische Lizenzbestätigung von Open Food
+Facts wird nicht behauptet. Eine vorherige schriftliche Freigabe durch Open
+Food Facts ist für diese Veröffentlichung nicht erforderlich.
 
-  Ist die kuratierte Übernahme aus ingredients.txt und
-  ingredients_processing.txt als Bestandteil der OFF-Datenbank (ODbL 1.0,
-  inklusive Share-Alike) oder als Einzelinhalt (DbCL 1.0) zu behandeln, und
-  welche Attributions- und Share-Alike-Pflichten folgen daraus für
-  src/domain/ingredientCatalogData.ts?
+Der Katalog ist eine kuratierte, stark reduzierte Auswahl und keine
+vollständige Kopie der Taxonomien. Gegenüber den Quellen wurden die Auswahl,
+die deutsche Benennung und die Zusammenfassung zu Produktfamilien geändert.
 
-Vor einer öffentlichen Veröffentlichung ist diese Frage schriftlich mit Open
-Food Facts zu klären (reuse@openfoodfacts.org) oder die kuratierte Auswahl
-durch eine belastbar lizenzierte Quelle zu ersetzen.
+Download
+--------
 
-Bis zur Klärung behauptet Küchenrunde keine bestimmte Lizenz für diese
-Taxonomiedateien. Sie werden als Datenquelle mit Attribution genannt.
+Der tatsächlich verwendete Katalog steht maschinenlesbar als JSON bereit:
 
-Der Zutatenkatalog in src/domain/ingredientCatalogData.ts ist eine kuratierte,
-stark reduzierte Auswahl und keine vollständige Kopie der Taxonomien. Für die
-Daten gelten die Bedingungen der genannten Quellen; für den Quellcode dieses
-Projekts gilt die GPL-3.0-or-later.
+  https://kuechenrunde.pages.dev/legal/ingredient-catalog.json
+
+Die Datei wird beim Build aus src/domain/ingredientCatalogData.ts erzeugt;
+es gibt keine zweite, manuell gepflegte Katalogversion.
+
+Abgrenzung
+----------
+
+Der Anwendungscode von Küchenrunde steht weiterhin unter
+GPL-3.0-or-later. Private Familienrezepte, Einkaufslisten und sonstige
+Nutzerdaten sind nicht Bestandteil des veröffentlichten Katalogs.
+
+Küchenrunde ist kein offizielles Open-Food-Facts-Projekt und wird von Open
+Food Facts nicht unterstützt.
 
 Weitere Hinweise: NOTICE und docs/ingredient-catalog.md.

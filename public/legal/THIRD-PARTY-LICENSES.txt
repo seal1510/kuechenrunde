@@ -12,6 +12,10 @@ listed here.
 The Open Food Facts data notice is a separate file:
 public/legal/OFF-DATA-NOTICE.txt
 
+The curated ingredient catalogue derived from the Open Food Facts taxonomies is
+published under the Open Database License (ODbL) 1.0 at
+/legal/ingredient-catalog.json. The application code remains GPL-3.0-or-later.
+
 Runtime libraries
 -----------------
 einkaufslisten-card (adapted vocabulary)  MIT

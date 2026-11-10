@@ -84,40 +84,43 @@ SOFTWARE.
 https://world.openfoodfacts.org
 Copyright (C) Open Food Facts contributors
 
-Die OFF-Nutzungsbedingungen nennen für die Datenbank die Open Database
-License (ODbL) 1.0 und für die Einzelinhalte die Database Contents License
-(DbCL) 1.0:
-https://world.openfoodfacts.org/terms-of-use
+Der aus den OFF-Taxonomien abgeleitete, kuratierte Zutatenkatalog wird
+vorsorglich als Datenbestand unter der Open Database License (ODbL) 1.0
+behandelt:
 
-Der Quellcode des Open-Food-Facts-Servers steht unter AGPL-3.0:
-https://github.com/openfoodfacts/openfoodfacts-server/blob/main/LICENSE
+  https://opendatacommons.org/licenses/odbl/1-0/
 
-Verwendete Quellen:
-- taxonomies/food/ingredients.txt
-- taxonomies/ingredients_processing.txt
+Die OFF-Dokumentation nennt für die OFF-Datenbank ODbL 1.0 und für
+Einzelinhalte DbCL 1.0:
 
-Die OFF-Nutzungsbedingungen und die OFF-Daten-Seite benennen für die Datenbank
-die ODbL 1.0 und für die Einzelinhalte die DbCL 1.0; der Servercode steht
-unter AGPL-3.0. Für die konkreten Taxonomiedateien wurde keine eigene,
-dateispezifische Lizenzangabe gefunden. Offen ist daher genau diese Frage:
+  https://world.openfoodfacts.org/terms-of-use
+  https://world.openfoodfacts.org/data
 
-  Ist die kuratierte Übernahme aus ingredients.txt und
-  ingredients_processing.txt als Bestandteil der OFF-Datenbank (ODbL 1.0,
-  inklusive Share-Alike) oder als Einzelinhalt (DbCL 1.0) zu behandeln, und
-  welche Attributions- und Share-Alike-Pflichten folgen daraus für
-  src/domain/ingredientCatalogData.ts?
+Der OFF-Servercode steht unter AGPL-3.0:
 
-Vor einer öffentlichen Veröffentlichung ist diese Frage schriftlich mit Open
-Food Facts zu klären (reuse@openfoodfacts.org) oder die kuratierte Auswahl
-durch eine belastbar lizenzierte Quelle zu ersetzen. Bis dahin behauptet
-dieses Projekt keine bestimmte Lizenz für diese Taxonomiedateien; sie werden
-als Datenquelle mit Attribution genannt. Siehe auch
+  https://github.com/openfoodfacts/openfoodfacts-server/blob/main/LICENSE
+
+Verwendete Quellen (abgerufen am 2026-11-10 aus `main`):
+- https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/food/ingredients.txt
+- https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/ingredients_processing.txt
+
+Quellenangabe: "Open Food Facts contributors", ODbL 1.0.
+
+Der kuratierte Katalog ist eine stark reduzierte Auswahl, keine vollständige
+Kopie der Taxonomien. Änderungen: Auswahl, deutsche Benennung und
+Zusammenfassung zu Produktfamilien. Bei Weitergabe sind Attribution und
+Share-Alike der ODbL 1.0 zu beachten. Eine darüber hinausgehende,
+dateispezifische Lizenzbestätigung von Open Food Facts wird nicht behauptet;
+eine vorherige schriftliche Freigabe durch Open Food Facts ist für diese
+Veröffentlichung nicht erforderlich.
+
+Download des tatsächlich verwendeten Katalogs:
+https://kuechenrunde.pages.dev/legal/ingredient-catalog.json
+
+Der Anwendungscode steht weiterhin unter GPL-3.0-or-later. Private
+Familienrezepte, Einkaufslisten und sonstige Nutzerdaten sind nicht
+Bestandteil des veröffentlichten Katalogs. Siehe auch
 docs/ingredient-catalog.md und public/legal/OFF-DATA-NOTICE.txt.
-
-Der Zutatenkatalog in src/domain/ingredientCatalogData.ts ist eine kuratierte,
-stark reduzierte Auswahl und keine vollständige Kopie der Taxonomien. Für die
-Daten gelten die Bedingungen der genannten Quellen; für den Quellcode dieses
-Projekts gilt die GPL-3.0-or-later.
 
 4. Laufzeitabhängigkeiten
 =========================

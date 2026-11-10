@@ -92,7 +92,7 @@ export function AboutPage({
             </a>
           </li>
           <li>
-            <a href="/legal/OFF-DATA-NOTICE.txt">Hinweis zu den Open-Food-Facts-Daten</a>
+            <a href="/legal/OFF-DATA-NOTICE.txt">Open-Food-Facts-Daten (ODbL 1.0)</a>
           </li>
         </ul>
       </section>
@@ -123,17 +123,54 @@ export function AboutPage({
       </section>
 
       <section className="panel">
-        <h2>Daten und Dritte</h2>
+        <h2>Zutatenkatalog (Open Food Facts)</h2>
         <p>
-          Die Zutaten-Kategorien und -Synonyme wurden unter Bezug auf die Open-Food-Facts-Taxonomien
-          und die Kategorienliste von einkaufslisten-card zusammengestellt. Die
-          Open-Food-Facts-Nutzungsbedingungen nennen für die Datenbank ODbL 1.0 und für
-          Einzelinhalte DbCL 1.0; der OFF-Servercode steht unter AGPL-3.0. Die konkrete
-          Lizenzzuordnung der im Server-Repository liegenden Taxonomiedateien ist noch nicht
-          eindeutig geklärt. Dieser offene Punkt ist im{' '}
-          <a href="/legal/OFF-DATA-NOTICE.txt">OFF-Hinweis</a> dokumentiert und vor einer
-          öffentlichen Veröffentlichung mit Open Food Facts (reuse@openfoodfacts.org) zu klären.
+          Die Zutaten-Kategorien und -Synonyme wurden unter Bezug auf die
+          Open-Food-Facts-Taxonomien <code>ingredients.txt</code> und{' '}
+          <code>ingredients_processing.txt</code> zusammengestellt. Der daraus
+          abgeleitete, kuratierte Zutatenkatalog wird vorsorglich als
+          Datenbestand unter der Open Database License (ODbL 1.0)
+          veröffentlicht. Quellenangabe: „Open Food Facts contributors“.
         </p>
+        <ul>
+          <li>
+            <a
+              href="https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/food/ingredients.txt"
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              ingredients.txt (Open Food Facts)
+            </a>
+          </li>
+          <li>
+            <a
+              href="https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/ingredients_processing.txt"
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              ingredients_processing.txt (Open Food Facts)
+            </a>
+          </li>
+          <li>
+            <a href="/legal/ingredient-catalog.json" download>
+              Zutatenkatalog als JSON herunterladen
+            </a>
+          </li>
+          <li>
+            <a href="/legal/OFF-DATA-NOTICE.txt">
+              ODbL-1.0- und Quellenhinweis
+            </a>
+          </li>
+        </ul>
+        <p className="muted small">
+          Der Anwendungscode steht weiterhin unter GPL-3.0-or-later. Private
+          Familienrezepte, Einkaufslisten und sonstige Nutzerdaten sind nicht
+          Bestandteil des veröffentlichten Katalogs.
+        </p>
+      </section>
+
+      <section className="panel">
+        <h2>Daten und Dritte</h2>
         <p>
           Im Cloud-Modus werden die gemeinsamen Rezepte, Bilder, Pläne und Einkaufsdaten bei
           Supabase gespeichert. Die App verwendet dafür ein Supabase-Projekt des Betreibers; die

@@ -1339,10 +1339,11 @@ function roundAmount(value: number): number {
  * compiled with reference to:
  * - misterm2310/einkaufslisten-card, custom_components/einkaufsliste/data/
  *   kategorien.json (MIT, Copyright (c) 2026 misterm2310)
- * - Open Food Facts ingredients taxonomy
- *   (https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/food/ingredients.txt;
- *   Daten: ODbL 1.0 / DbCL 1.0, die genaue Lizenzzuordnung der
- *   Taxonomiedateien ist offen, siehe NOTICE), German names and synonyms only
+ * - Open Food Facts ingredients taxonomies
+ *   (https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/food/ingredients.txt
+ *   und .../taxonomies/ingredients_processing.txt). Der daraus abgeleitete,
+ *   kuratierte Zutatenkatalog wird vorsorglich unter ODbL 1.0 veröffentlicht;
+ *   German names and synonyms only
  *
  * The list stays deliberately explicit. Unknown products fall through to
  * "Sonstiges" instead of being guessed from a risky fragment.

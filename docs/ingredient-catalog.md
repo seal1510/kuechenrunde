@@ -129,35 +129,42 @@ Deliberately separate:
 
 ## 4. Data sources and licences
 
-- **Open Food Facts ingredients taxonomy**
-  <https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/food/ingredients.txt>
-  used as reference for German names, synonyms, plant parts and international
-  food vocabulary. Copyright (C) Open Food Facts contributors.
-  The OFF terms of use and the OFF data page name the database as **ODbL
-  1.0** and individual contents as **DbCL 1.0**:
+- **Open Food Facts ingredients taxonomies**
+  - `ingredients.txt`:
+    <https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/food/ingredients.txt>
+  - `ingredients_processing.txt`:
+    <https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/ingredients_processing.txt>
+
+  Used as the reference for German names, synonyms, plant parts, processing
+  terms and international food vocabulary. Copyright (C) Open Food Facts
+  contributors. The derived, curated catalogue is treated as a database under
+  the **Open Database License (ODbL) 1.0**:
+  <https://opendatacommons.org/licenses/odbl/1-0/>.
+
+  OFF documents ODbL 1.0 for its database and DbCL 1.0 for individual
+  contents:
   <https://world.openfoodfacts.org/terms-of-use>,
   <https://world.openfoodfacts.org/data>. The OFF server code is
-  **AGPL-3.0**. The taxonomy files live in the AGPL repository but have no
-  file-specific licence statement. Open question: is the curated selection
-  a part of the database (ODbL, including Share-Alike) or individual
-  contents (DbCL), and which attribution/Share-Alike obligations follow
-  for `src/domain/ingredientCatalogData.ts`? This must be clarified in
-  writing with Open Food Facts (`reuse@openfoodfacts.org`) or the selection
-  must be replaced by a clearly licensed source before a public release.
-- **Open Food Facts ingredients processing taxonomy**
-  <https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/ingredients_processing.txt>
-  used as reference for processing terms such as `frisch`, `getrocknet`,
-  `gemahlen`, `pulverisiert`, `Samen`, `Blätter`, `Wurzel`. The same open
-  licence question applies.
+  **AGPL-3.0**. The published Küchenrunde catalogue is ODbL 1.0; no
+  file-specific licence confirmation from OFF is claimed, and no prior
+  written approval from OFF is required for this release. Attribution:
+  "Open Food Facts contributors", ODbL 1.0. Changes compared with the
+  sources: selection, German naming and grouping into product families.
+
 - **einkaufslisten-card `kategorien.json`**
   <https://github.com/misterm2310/einkaufslisten-card>
   used for German shopping vocabulary. MIT, Copyright (c) 2026 misterm2310.
 
-Both OFF taxonomies were retrieved from `main` on 2026-11-10; the commit SHAs
-should be recorded for reproducibility. The catalogue is a curated, strongly
-reduced selection. It is neither a full copy of the taxonomies nor an automatic
-import, and it is shipped as source code, so no runtime API or database is
-needed.
+Both OFF taxonomies were retrieved from `main` on 2026-11-10. The catalogue is
+a curated, strongly reduced selection. It is neither a full copy of the
+taxonomies nor an automatic import, and it is shipped as source code, so no
+runtime API or database is needed.
+
+The catalogue is generated at build time from
+`src/domain/ingredientCatalogData.ts`; there is no second, manually maintained
+catalogue. The generated JSON is public at
+<https://kuechenrunde.pages.dev/legal/ingredient-catalog.json> and contains the
+same families and products that the application uses.
 
 The **eleven shopping categories are this app's own taxonomy**. They are not
 identical to openCook v0.4's twelve `GroceryCategory` values (which include
@@ -165,7 +172,10 @@ identical to openCook v0.4's twelve `GroceryCategory` values (which include
 categories. The keyword lists were compiled with reference to these sources and
 arranged for this taxonomy.
 
-Attribution is repeated in `NOTICE` and `public/legal/OFF-DATA-NOTICE.txt`.
+Attribution and download information are repeated in `NOTICE`,
+`public/legal/OFF-DATA-NOTICE.txt` and the About page. The application code
+remains under GPL-3.0-or-later. Private family recipes, shopping lists and
+other user data are not part of the published catalogue.
 
 ## 5. Coverage (current catalogue state)
 

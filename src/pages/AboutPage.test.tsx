@@ -20,6 +20,18 @@ describe('About page', () => {
     expect(html).not.toContain('beim Betreiber erhältlich')
   })
 
+  it('links the ODbL ingredient catalogue, its sources and its download', () => {
+    const html = renderToStaticMarkup(<AboutPage sourceCodeUrl={null} />)
+    expect(html).toContain('ODbL 1.0')
+    expect(html).toContain('Open Food Facts contributors')
+    expect(html).toContain('/legal/ingredient-catalog.json')
+    expect(html).toContain('ingredients.txt')
+    expect(html).toContain('ingredients_processing.txt')
+    expect(html).toContain('GPL-3.0-or-later')
+    expect(html).not.toContain('reuse@openfoodfacts.org')
+    expect(html).not.toContain('schriftlich')
+  })
+
   it('shows the on-request fallback when no source URL is configured', () => {
     const html = renderToStaticMarkup(<AboutPage sourceCodeUrl={null} />)
     expect(html).toContain('beim Betreiber erhältlich')

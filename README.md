@@ -62,7 +62,10 @@ openCook-Autoren nicht unterstützt.
 
 Die App steht unter **GPL-3.0-or-later**. Der vollständige Lizenztext liegt in
 [LICENSE](LICENSE). Die im Produktionsbuild ausgelieferten Kopien stehen unter
-`public/legal/`.
+`public/legal/`. Der daraus abgeleitete, kuratierte Zutatenkatalog ist davon
+getrennt und wird vorsorglich unter **ODbL 1.0** veröffentlicht; Download und
+Quellenangabe stehen unter `/legal/ingredient-catalog.json` bzw. in
+[NOTICE](NOTICE).
 
 **Quellcode:** Beim Release wird `VITE_SOURCE_CODE_URL` auf das tatsächliche
 öffentliche Repository gesetzt; die App verlinkt es unter „Über Küchenrunde“.
@@ -129,11 +132,16 @@ Die Build-Variablen `VITE_*` sind öffentlich; service_role- und
 
 ## Dritte
 
-- **Open Food Facts** – Zutaten-Taxonomien. Die OFF-Nutzungsbedingungen nennen
-  für die Datenbank ODbL 1.0 und für Einzelinhalte DbCL 1.0; der Servercode
-  steht unter AGPL-3.0. Die konkrete Lizenzzuordnung der Taxonomiedateien ist
-  noch offen und vor einer öffentlichen Veröffentlichung zu klären. Siehe
-  [NOTICE](NOTICE) und `docs/ingredient-catalog.md`.
+- **Open Food Facts** – Zutaten-Taxonomien (`ingredients.txt` und
+  `ingredients_processing.txt`). Der daraus abgeleitete, kuratierte
+  Zutatenkatalog wird vorsorglich unter der Open Database License
+  (ODbL) 1.0 veröffentlicht; Quellenangabe: „Open Food Facts contributors“.
+  Der Katalog steht maschinenlesbar unter
+  `/legal/ingredient-catalog.json` zum Download. Der Anwendungscode bleibt
+  GPL-3.0-or-later; private Familienrezepte und Einkaufsdaten sind nicht
+  Bestandteil des Katalogs. Siehe [NOTICE](NOTICE),
+  [docs/ingredient-catalog.md](docs/ingredient-catalog.md) und
+  [public/legal/OFF-DATA-NOTICE.txt](public/legal/OFF-DATA-NOTICE.txt).
 - **einkaufslisten-card** – Kategorienliste, MIT, Copyright (c) 2026
   misterm2310.
 - **Supabase** – Auth, PostgreSQL, Realtime und Storage im Cloud-Modus. Das

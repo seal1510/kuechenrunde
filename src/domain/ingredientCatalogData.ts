@@ -11,9 +11,14 @@
  *    https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/food/ingredients.txt
  *    https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/ingredients_processing.txt
  *    Copyright (C) Open Food Facts contributors.
- *    Die OFF-Nutzungsbedingungen nennen für die Datenbank ODbL 1.0 und für
- *    Einzelinhalte DbCL 1.0; der Servercode steht unter AGPL-3.0. Die genaue
- *    Lizenzzuordnung der Taxonomiedateien ist offen (siehe NOTICE).
+ *    Der daraus abgeleitete, kuratierte Zutatenkatalog wird vorsorglich als
+ *    Datenbestand unter der Open Database License (ODbL) 1.0 behandelt:
+ *    https://opendatacommons.org/licenses/odbl/1-0/
+ *    Die OFF-Dokumentation nennt für die OFF-Datenbank ODbL 1.0 und für
+ *    Einzelinhalte DbCL 1.0; der OFF-Servercode steht unter AGPL-3.0.
+ *    Quellenangabe: „Open Food Facts contributors“, ODbL 1.0.
+ *    Der maschinenlesbare Download wird beim Build aus dieser Datei erzeugt:
+ *    /legal/ingredient-catalog.json
  *    Used as the reference for German names, synonyms and processing terms
  *    (frisch, getrocknet, gemahlen, pulverisiert, Samen, Blätter, Wurzel …).
  *    This file is a curated, strongly reduced selection for Küchenrunde's own
