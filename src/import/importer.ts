@@ -1,11 +1,11 @@
 import { db } from '../db'
 import { planCleanupForDeletedSessions } from '../shopping/orphanCleanup'
 import { randomId } from '../lib/id'
+import { recipeFromParsedMela } from './melaRecipe'
 import type {
   ImportProgress,
   ImportResult,
   ParsedMelaRecipe,
-  Recipe,
   RecipeImage,
 } from '../types'
 
@@ -50,45 +50,14 @@ export async function importMelaRecipes(
       continue
     }
 
-    const now = Date.now()
-    const recipeId = randomId()
+    const recipe = recipeFromParsedMela(parsed)
     const images: RecipeImage[] = parsed.images.map((image, imageIndex) => ({
       id: randomId(),
-      recipeId,
+      recipeId: recipe.id,
       position: imageIndex,
       mimeType: image.mimeType,
       bytes: image.bytes,
     }))
-
-    const recipe: Recipe = {
-      id: recipeId,
-      importId: parsed.importId,
-      importSource: 'mela',
-      title: parsed.title,
-      description: parsed.description,
-      ingredientGroups: parsed.ingredientGroups,
-      ingredients: parsed.ingredients,
-      instructions: parsed.instructions,
-      servingsText: parsed.servingsText,
-      servingsNumber: parsed.servingsNumber,
-      prepTime: parsed.prepTime,
-      cookTime: parsed.cookTime,
-      totalTime: parsed.totalTime,
-      categories: parsed.categories,
-      cuisine: [],
-      dishType: [],
-      effort: '',
-      tags: [],
-      notes: parsed.notes,
-      nutrition: parsed.nutrition,
-      sourceUrl: parsed.sourceUrl,
-      favorite: parsed.favorite,
-      wantToCook: parsed.wantToCook,
-      melaDate: parsed.melaDate,
-      raw: parsed.raw,
-      createdAt: now,
-      updatedAt: now,
-    }
 
     try {
       await db.transaction('rw', db.recipes, db.images, async () => {

@@ -221,6 +221,12 @@ class TestStorage implements ImageStoragePort {
     return `https://signed.invalid/${encodeURIComponent(path)}?expires=${expiresInSeconds}`
   }
 
+  async download(path: string): Promise<ArrayBuffer> {
+    const object = this.objects.get(path)
+    if (!object) throw new Error(`Datei fehlt: ${path}`)
+    return object.bytes.slice().buffer as ArrayBuffer
+  }
+
   async remove(paths: readonly string[]): Promise<void> {
     this.removals.push([...paths])
     if (this.failRemove) {

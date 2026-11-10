@@ -45,6 +45,17 @@ export function createSupabaseImageStorage(client: SupabaseClient): ImageStorage
       }
     },
 
+    async download(path) {
+      try {
+        const { data, error } = await bucket.download(path)
+        if (error) throw error
+        if (!data) throw new Error('Supabase hat keine Bilddatei geliefert.')
+        return await data.arrayBuffer()
+      } catch (cause) {
+        throw imageStorageFailure('download', cause)
+      }
+    },
+
     async remove(paths) {
       const unique = [...new Set(paths.filter((path) => Boolean(path?.trim())))]
       if (unique.length === 0) return

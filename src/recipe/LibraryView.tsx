@@ -129,9 +129,17 @@ export function RecipeLibraryView({
             Neues Rezept
           </a>
           {cloudMode ? (
-            <a className="button quiet" href={URL_IMPORT_HASH}>
-              URL-Import
-            </a>
+            <>
+              <a className="button quiet" href={URL_IMPORT_HASH}>
+                URL-Import
+              </a>
+              <a className="button quiet" href="#/import">
+                Mela-Import
+              </a>
+              <a className="button quiet" href="#/backup">
+                Backup
+              </a>
+            </>
           ) : (
             <>
               <a className="button quiet" href="#/import">
@@ -232,9 +240,14 @@ export function RecipeLibraryView({
           </p>
           <div className="notice-actions">
             {cloudMode ? (
-              <a className="button" href={URL_IMPORT_HASH}>
-                Rezept per URL importieren
-              </a>
+              <>
+                <a className="button" href={URL_IMPORT_HASH}>
+                  Rezept per URL importieren
+                </a>
+                <a className="button" href="#/import">
+                  Mela-Datei importieren
+                </a>
+              </>
             ) : (
               <a className="button" href="#/import">
                 Zum Import

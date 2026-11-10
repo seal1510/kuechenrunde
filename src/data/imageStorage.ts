@@ -18,6 +18,8 @@ export interface ImageStoragePort {
   upload(path: string, bytes: ArrayBuffer, mimeType: string): Promise<void>
   /** Erzeugt eine zeitlich begrenzte, authentifizierte Download-URL. */
   createSignedUrl(path: string, expiresInSeconds: number): Promise<string>
+  /** Lädt die Bildbytes für ein Cloud-Backup aus dem privaten Bucket. */
+  download(path: string): Promise<ArrayBuffer>
   /** Entfernt eine oder mehrere Dateien. Fehlende Dateien gelten als entfernt. */
   remove(paths: readonly string[]): Promise<void>
 }

@@ -168,11 +168,25 @@ Es wurden keine Benutzer und keine dauerhaften Daten angelegt.
   Rezepteditor und keine neue Zutatenlogik.
 - Details: [`docs/url-import-cloud.md`](../docs/url-import-cloud.md).
 
+## Mela-Import und ZIP-Backup (A4.1)
+
+- Der vorhandene Mela-Import nutzt im Cloud-Modus den bestehenden
+  `CloudRecipeImageService` und die geladene `recipes`-Collection. Der
+  Mela-Parser bleibt unverändert.
+- Cloud-Backup und -Restore verwenden dasselbe ZIP-Format wie lokal. Bilder
+  werden aus dem privaten Bucket `recipe-images` geladen bzw. dorthin
+  zurückgeschrieben.
+- Restore ist nur in einen leeren Cloud-Bestand möglich; vorhandene Daten
+  werden weder gelöscht noch überschrieben. IDs und Verknüpfungen bleiben
+  erhalten.
+- Details: [`docs/cloud-import-backup.md`](../docs/cloud-import-backup.md).
+
 ## Noch nicht enthalten
 
 - Cloudflare-Pages-Deployment; die Function ist vorbereitet, aber nicht
   veröffentlicht oder live getestet.
-- ZIP-Migration der lokalen Daten.
+- Bestandsmigration lokaler Daten in die Cloud.
+- Cloud-Reset oder „Alle Daten löschen“ im Cloud-Modus.
 
 ## Hinweis zur Laufzeit
 

@@ -119,6 +119,8 @@ export interface BackupImage {
   bytes: ArrayBuffer
 }
 
+export type BackupData = Omit<BackupPayload, 'manifest'>
+
 export interface BackupPayload {
   manifest: BackupManifest
   recipes: Recipe[]
@@ -227,6 +229,14 @@ export class BackupError extends Error {
   }
 }
 
+export interface BackupInspectOptions {
+  /**
+   * Cloud-Backup: nicht die lokale Dexie-Datenbank nach Konflikten abfragen.
+   * Die Cloud prüft ihren eigenen Bestand vor der Wiederherstellung.
+   */
+  compareLocal?: boolean
+}
+
 function imageFile(id: string): string {
   return `images/${id}.bin`
 }
@@ -235,8 +245,10 @@ function jsonFile(value: unknown): Uint8Array {
   return strToU8(JSON.stringify(value))
 }
 
-export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: BackupManifest }> {
-  const [
+export function createBackupArchive(
+  data: BackupData,
+): { bytes: Uint8Array; manifest: BackupManifest } {
+  const {
     recipes,
     images,
     mealPlans,
@@ -252,23 +264,7 @@ export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: Bac
     shoppingQuantityCorrections,
     shoppingLists,
     shoppingDemandAllocations,
-  ] = await Promise.all([
-    db.recipes.toArray(),
-    db.images.toArray(),
-    db.mealPlans.toArray(),
-    db.mealDays.toArray(),
-    db.settings.toArray(),
-    db.cookSessions.toArray(),
-    db.dayNotes.toArray(),
-    db.freeDishes.toArray(),
-    db.shoppingManualItems.toArray(),
-    db.shoppingChecks.toArray(),
-    db.shoppingPurchases.toArray(),
-    db.shoppingItemRules.toArray(),
-    db.shoppingQuantityCorrections.toArray(),
-    db.shoppingLists.toArray(),
-    db.shoppingDemandAllocations.toArray(),
-  ])
+  } = data
 
   const manifest: BackupManifest = {
     format: BACKUP_FORMAT,
@@ -319,11 +315,11 @@ export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: Bac
     'recipes.json': jsonFile({ version: BACKUP_VERSION, recipes }),
     'images.json': jsonFile({
       version: BACKUP_VERSION,
-      images: images.map(({ id, recipeId, position, mimeType }) => ({
-        id,
-        recipeId,
-        position,
-        mimeType,
+      images: images.map(({ meta }) => ({
+        id: meta.id,
+        recipeId: meta.recipeId,
+        position: meta.position,
+        mimeType: meta.mimeType,
       })),
     }),
     'mealplan.json': jsonFile({
@@ -348,7 +344,7 @@ export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: Bac
   }
 
   for (const image of images) {
-    files[imageFile(image.id)] = new Uint8Array(image.bytes)
+    files[imageFile(image.meta.id)] = new Uint8Array(image.bytes)
   }
 
   const bytes = zipSync(files, { level: 6 })
@@ -360,7 +356,72 @@ export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: Bac
   return { bytes, manifest }
 }
 
-export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspection> {
+export async function exportBackup(): Promise<{ bytes: Uint8Array; manifest: BackupManifest }> {
+  const [
+    recipes,
+    images,
+    mealPlans,
+    mealDays,
+    settings,
+    cookSessions,
+    dayNotes,
+    freeDishes,
+    shoppingManualItems,
+    shoppingChecks,
+    shoppingPurchases,
+    shoppingItemRules,
+    shoppingQuantityCorrections,
+    shoppingLists,
+    shoppingDemandAllocations,
+  ] = await Promise.all([
+    db.recipes.toArray(),
+    db.images.toArray(),
+    db.mealPlans.toArray(),
+    db.mealDays.toArray(),
+    db.settings.toArray(),
+    db.cookSessions.toArray(),
+    db.dayNotes.toArray(),
+    db.freeDishes.toArray(),
+    db.shoppingManualItems.toArray(),
+    db.shoppingChecks.toArray(),
+    db.shoppingPurchases.toArray(),
+    db.shoppingItemRules.toArray(),
+    db.shoppingQuantityCorrections.toArray(),
+    db.shoppingLists.toArray(),
+    db.shoppingDemandAllocations.toArray(),
+  ])
+
+  return createBackupArchive({
+    recipes,
+    images: images.map((image) => ({
+      meta: {
+        id: image.id,
+        recipeId: image.recipeId,
+        position: image.position,
+        mimeType: image.mimeType,
+      },
+      bytes: image.bytes,
+    })),
+    mealPlans,
+    mealDays,
+    settings,
+    cookSessions,
+    dayNotes,
+    freeDishes,
+    shoppingManualItems,
+    shoppingChecks,
+    shoppingPurchases,
+    shoppingItemRules,
+    shoppingQuantityCorrections,
+    shoppingLists,
+    shoppingDemandAllocations,
+  })
+}
+
+export async function inspectBackup(
+  buffer: ArrayBuffer,
+  options: BackupInspectOptions = {},
+): Promise<BackupInspection> {
   if (buffer.byteLength === 0) throw new BackupError('Die Backup-Datei ist leer.')
   if (buffer.byteLength > MAX_BACKUP_BYTES) {
     throw new BackupError('Die Backup-Datei ist zu groß.')
@@ -927,6 +988,38 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     })
   }
 
+  const compareLocal = options.compareLocal !== false
+  const localData: [
+    Recipe[],
+    MealPlanEntry[],
+    MealDay[],
+    CookSession[],
+    DayNote[],
+    FreeDish[],
+    ShoppingManualItem[],
+    ShoppingCheck[],
+    ShoppingPurchase[],
+    ShoppingItemRule[],
+    ShoppingQuantityCorrection[],
+    ShoppingList[],
+    ShoppingDemandAllocation[],
+  ] = compareLocal
+    ? await Promise.all([
+        db.recipes.toArray(),
+        db.mealPlans.toArray(),
+        db.mealDays.toArray(),
+        db.cookSessions.toArray(),
+        db.dayNotes.toArray(),
+        db.freeDishes.toArray(),
+        db.shoppingManualItems.toArray(),
+        db.shoppingChecks.toArray(),
+        db.shoppingPurchases.toArray(),
+        db.shoppingItemRules.toArray(),
+        db.shoppingQuantityCorrections.toArray(),
+        db.shoppingLists.toArray(),
+        db.shoppingDemandAllocations.toArray(),
+      ])
+    : [[], [], [], [], [], [], [], [], [], [], [], [], []]
   const [
     existingRecipes,
     existingPlans,
@@ -941,26 +1034,12 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
     existingCorrections,
     existingLists,
     existingAllocations,
-  ] = await Promise.all([
-    db.recipes.toArray(),
-    db.mealPlans.toArray(),
-    db.mealDays.toArray(),
-    db.cookSessions.toArray(),
-    db.dayNotes.toArray(),
-    db.freeDishes.toArray(),
-    db.shoppingManualItems.toArray(),
-    db.shoppingChecks.toArray(),
-    db.shoppingPurchases.toArray(),
-    db.shoppingItemRules.toArray(),
-    db.shoppingQuantityCorrections.toArray(),
-    db.shoppingLists.toArray(),
-    db.shoppingDemandAllocations.toArray(),
-  ])
+  ] = localData
   const existingIds = new Set(existingRecipes.map((recipe) => recipe.id))
   const existingImportIds = new Set(existingRecipes.map((recipe) => recipe.importId))
   const existingPlanIds = new Set(existingPlans.map((plan) => plan.id))
   const existingDayDates = new Set(existingDays.map((day) => day.date))
-  const localSettingRows = await db.settings.toArray()
+  const localSettingRows = compareLocal ? await db.settings.toArray() : []
   const existingSettings = new Set(localSettingRows.map((setting) => setting.key))
   const localShoppingCycle = shoppingSettingsFromRows(localSettingRows)
   const backupHasShoppingCycle = settings.some(
@@ -968,13 +1047,14 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
       setting.key === SHOPPING_PERIOD_START_DAY_KEY ||
       setting.key === STANDARD_SHOPPING_LIST_NAME_KEY,
   )
-  const shoppingCycleConflicts = backupHasShoppingCycle
-    ? [
-        localShoppingCycle.periodStartDay !== backupSettings.periodStartDay,
-        localShoppingCycle.standardListName !== backupSettings.standardListName,
-      ].filter(Boolean).length
-    : 0
-  if (shoppingCycleConflicts > 0) {
+  const shoppingCycleConflicts =
+    compareLocal && backupHasShoppingCycle
+      ? [
+          localShoppingCycle.periodStartDay !== backupSettings.periodStartDay,
+          localShoppingCycle.standardListName !== backupSettings.standardListName,
+        ].filter(Boolean).length
+      : 0
+  if (compareLocal && shoppingCycleConflicts > 0) {
     warnings.push(
       'Die Einkaufskonfiguration im Backup unterscheidet sich von dieser Installation. „Zusammenführen“ behält die lokale Einstellung; „Lokal ersetzen“ übernimmt die Backup-Einstellung. Bereits gespeicherte Einkaufsperioden behalten in beiden Fällen ihre gespeicherten Zeiträume.',
     )

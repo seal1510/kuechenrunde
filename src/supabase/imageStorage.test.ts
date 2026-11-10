@@ -9,11 +9,14 @@ function fakeClient(options: {
   signedError?: { message: string; code?: string } | null
   removeError?: { message: string; code?: string } | null
   signedUrl?: string
+  downloadError?: { message: string; code?: string } | null
+  downloadBytes?: Uint8Array
 } = {}) {
   const calls = {
     buckets: [] as string[],
     uploads: [] as Array<{ path: string; bytes: ArrayBuffer; options: unknown }>,
     signed: [] as Array<{ path: string; expiresIn: number }>,
+    downloads: [] as string[],
     removals: [] as string[][],
   }
   const client = {
@@ -32,6 +35,17 @@ function fakeClient(options: {
             return options.signedError
               ? { data: null, error: options.signedError }
               : { data: { signedUrl: options.signedUrl ?? 'https://signed.invalid/x' }, error: null }
+          },
+          async download(path: string) {
+            calls.downloads.push(path)
+            return options.downloadError
+              ? { data: null, error: options.downloadError }
+              : {
+                  data: new Blob([
+                    (options.downloadBytes ?? new Uint8Array([1, 2, 3])).slice().buffer as ArrayBuffer,
+                  ]),
+                  error: null,
+                }
           },
           async remove(paths: string[]) {
             calls.removals.push([...paths])
@@ -78,6 +92,15 @@ describe('Supabase-Bildspeicher', () => {
     expect(calls.signed).toEqual([{ path: 'r1/img-a', expiresIn: 3600 }])
   })
 
+  it('lädt Bildbytes für ein Cloud-Backup', async () => {
+    const { client, calls } = fakeClient({ downloadBytes: new Uint8Array([4, 5, 6]) })
+    const storage = createSupabaseImageStorage(client)
+
+    const bytes = await storage.download('r1/img-a')
+    expect(new Uint8Array(bytes)).toEqual(new Uint8Array([4, 5, 6]))
+    expect(calls.downloads).toEqual(['r1/img-a'])
+  })
+
   it('entfernt doppelte Pfade in einem Aufruf', async () => {
     const { client, calls } = fakeClient()
     const storage = createSupabaseImageStorage(client)
@@ -98,6 +121,13 @@ describe('Supabase-Bildspeicher', () => {
       fakeClient({ signedError: { message: 'not found', code: '404' } }).client,
     )
     await expect(signed.createSignedUrl('r1/img-a', 60)).rejects.toThrow(
+      /konnte nicht aus dem Familienspeicher geladen werden/,
+    )
+
+    const download = createSupabaseImageStorage(
+      fakeClient({ downloadError: { message: 'not found', code: '404' } }).client,
+    )
+    await expect(download.download('r1/img-a')).rejects.toThrow(
       /konnte nicht aus dem Familienspeicher geladen werden/,
     )
 

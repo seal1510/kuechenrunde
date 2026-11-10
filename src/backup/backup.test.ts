@@ -171,6 +171,20 @@ describe('backup roundtrip', () => {
     expect((await db.settings.get('householdSize'))?.value).toBe(3)
   })
 
+  it('can inspect a backup without reading local conflicts for the cloud path', async () => {
+    await seed()
+    const { bytes: archive } = await exportBackup()
+    const buffer = toArrayBuffer(archive)
+
+    const withLocal = await inspectBackup(buffer)
+    expect(withLocal.conflicts.recipes).toBe(1)
+
+    const withoutLocal = await inspectBackup(buffer, { compareLocal: false })
+    expect(withoutLocal.conflicts.recipes).toBe(0)
+    expect(withoutLocal.conflicts.mealPlans).toBe(0)
+    expect(withoutLocal.recipes[0]?.title).toBe('Backup-Rezept')
+  })
+
   it('roundtrips structured instructions and explicit ingredient references', async () => {
     const structured: Recipe = {
       ...recipe,

@@ -46,6 +46,8 @@ import {
 import { CloudRecipeDetailPage } from './CloudRecipeDetailPage'
 import { CloudRecipeEditorPage } from './CloudRecipeEditorPage'
 import { CloudUrlImportPage } from './CloudUrlImportPage'
+import { CloudImportPage } from './CloudImportPage'
+import { CloudBackupPage } from './CloudBackupPage'
 
 function CloudUnavailablePage() {
   return (
@@ -132,8 +134,12 @@ export function CloudRecipesApp({
     )
   } else if (route.name === 'recipe') {
     content = <CloudRecipeDetailPage store={store} id={route.id} />
+  } else if (route.name === 'import') {
+    content = <CloudImportPage store={store} images={imageService} />
   } else if (route.name === 'import-url') {
     content = <CloudUrlImportPage store={store} images={imageService} />
+  } else if (route.name === 'backup') {
+    content = <CloudBackupPage store={store} storage={storage} />
   } else if (route.name === 'recipe-new') {
     content = <CloudRecipeEditorPage key="new" store={store} images={imageService} />
   } else if (route.name === 'recipe-edit') {
@@ -177,11 +183,20 @@ export function CloudRecipesApp({
                 Einkaufsliste
               </a>
               <a
-                href="#/import/url"
-                className={route.name === 'import-url' ? 'active' : ''}
-                aria-current={route.name === 'import-url' ? 'page' : undefined}
+                href="#/import"
+                className={route.name === 'import' || route.name === 'import-url' ? 'active' : ''}
+                aria-current={
+                  route.name === 'import' || route.name === 'import-url' ? 'page' : undefined
+                }
               >
                 Import
+              </a>
+              <a
+                href="#/backup"
+                className={route.name === 'backup' ? 'active' : ''}
+                aria-current={route.name === 'backup' ? 'page' : undefined}
+              >
+                Backup
               </a>
               <span className="cloud-user">{email}</span>
               <button

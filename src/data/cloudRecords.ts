@@ -185,6 +185,12 @@ export class CloudRecordsStore {
     return result
   }
 
+  /** Vorhandene Collection-Namen; für die Leer-Prüfung vor einem Restore. */
+  collections(): string[] {
+    this.assertReady()
+    return [...new Set([...this.rows.values()].map((row) => row.collection))].sort()
+  }
+
   /** Legt einen neuen Datensatz an. Existiert die ID bereits: Konflikt. */
   async create<T>(collection: string, id: string, data: T): Promise<RecordRow<T>> {
     this.assertReady()

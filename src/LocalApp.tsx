@@ -3,11 +3,11 @@ import { LibraryPage } from './pages/LibraryPage'
 import { RecipePage } from './pages/RecipePage'
 import { RecipeEditorPage } from './pages/RecipeEditorPage'
 import { CookPage } from './pages/CookPage'
-import { ImportPage } from './pages/ImportPage'
+import { LocalImportPage } from './pages/LocalImportPage'
 import { LocalUrlImportPage } from './pages/LocalUrlImportPage'
 import { PlanPage } from './pages/PlanPage'
 import { ShoppingPage } from './pages/ShoppingPage'
-import { BackupPage } from './pages/BackupPage'
+import { LocalBackupPage } from './pages/LocalBackupPage'
 import { AboutPage } from './pages/AboutPage'
 import { NavigationGuardProvider } from './routing/NavigationGuard'
 import { parseRoute, type Route } from './routing/routes'
@@ -97,9 +97,9 @@ export function LocalApp() {
           ) : null}
           {route.name === 'plan' ? <PlanPage /> : null}
           {route.name === 'shopping' ? <ShoppingPage /> : null}
-          {route.name === 'import' ? <ImportPage /> : null}
+          {route.name === 'import' ? <LocalImportPage /> : null}
           {route.name === 'import-url' ? <LocalUrlImportPage /> : null}
-          {route.name === 'backup' ? <BackupPage /> : null}
+          {route.name === 'backup' ? <LocalBackupPage /> : null}
           {route.name === 'about' ? <AboutPage /> : null}
         </main>
 

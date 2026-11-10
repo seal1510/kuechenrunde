@@ -159,6 +159,7 @@ describe('CloudRecordsStore', () => {
     expect(store.get<{ title: string }>(COLLECTION, 'r1')?.data.title).toBe('Alt')
     expect(store.get(COLLECTION, 'r1')?.rev).toBe(3)
     expect(store.list(COLLECTION)).toHaveLength(1)
+    expect(store.collections()).toEqual([COLLECTION])
   })
 
   it('verweigert Zugriffe vor dem Laden', () => {

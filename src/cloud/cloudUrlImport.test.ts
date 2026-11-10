@@ -23,6 +23,12 @@ class TestImageStorage implements ImageStoragePort {
     return 'https://signed.example/image'
   }
 
+  async download(path: string): Promise<ArrayBuffer> {
+    const file = this.files.get(path)
+    if (!file) throw new Error(`Datei fehlt: ${path}`)
+    return file.bytes
+  }
+
   async remove(paths: readonly string[]): Promise<void> {
     if (this.failRemove) throw new Error('Entfernen fehlgeschlagen.')
     for (const path of paths) this.files.delete(path)

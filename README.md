@@ -31,9 +31,17 @@ Pages Function unter `functions/api/recipe-fetch.ts` prüft Supabase-Token und
 Haushaltsmitgliedschaft, ruft die fremde Seite serverseitig mit manuellen
 Redirects und harten Grenzen ab und liefert nur die vom vorhandenen JSON-LD-
 Parser erzeugten Rezeptdaten zurück. Der lokale Vite-Import bleibt unverändert.
-Cloudflare Pages ist noch nicht eingerichtet; es wurde nichts veröffentlicht.
 Details, Sicherheitsgrenzen und die noch nötigen manuellen Tests stehen in
 [`docs/url-import-cloud.md`](docs/url-import-cloud.md).
+
+Mela-Import und ZIP-Backup sind ebenfalls im Cloud-Modus verfügbar. Der
+Mela-Import nutzt den vorhandenen Parser und den bestehenden Cloud-Bilddienst;
+das Backup verwendet dasselbe ZIP-Format wie lokal und lädt Bilder aus dem
+privaten Supabase-Storage. Eine Wiederherstellung ist ausschließlich in einen
+leeren Cloud-Bestand möglich und überschreibt keine Familiendaten. Details:
+[`docs/cloud-import-backup.md`](docs/cloud-import-backup.md).
+
+Cloudflare Pages ist noch nicht eingerichtet; es wurde nichts veröffentlicht.
 
 ## Funktionen
 

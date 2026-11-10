@@ -1,13 +1,30 @@
 import { useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
-import {
-  exportBackup,
-  inspectBackup,
-  restoreBackup,
-  type BackupInspection,
-  type RestoreResult,
+import type {
+  BackupInspection,
+  BackupManifest,
+  RestoreMode,
+  RestoreResult,
 } from '../backup/backup'
-import { deleteAllData } from '../import/importer'
+
+export type BackupExportHandler = () => Promise<{
+  bytes: Uint8Array
+  manifest: BackupManifest
+}>
+export type BackupInspectHandler = (buffer: ArrayBuffer) => Promise<BackupInspection>
+export type BackupRestoreHandler = (
+  inspection: BackupInspection,
+  mode: RestoreMode,
+) => Promise<RestoreResult>
+
+export interface BackupPageProps {
+  service?: 'local' | 'cloud'
+  exportBackup: BackupExportHandler
+  inspectBackup: BackupInspectHandler
+  restoreBackup: BackupRestoreHandler
+  /** Nur im lokalen Modus: testweises Zurücksetzen der lokalen Daten. */
+  deleteAllData?: () => Promise<void>
+}
 
 function formatDate(iso: string): string {
   try {
@@ -17,7 +34,14 @@ function formatDate(iso: string): string {
   }
 }
 
-export function BackupPage() {
+export function BackupPage({
+  service = 'local',
+  exportBackup,
+  inspectBackup,
+  restoreBackup,
+  deleteAllData,
+}: BackupPageProps) {
+  const cloud = service === 'cloud'
   const inputRef = useRef<HTMLInputElement>(null)
   const [inspection, setInspection] = useState<BackupInspection | null>(null)
   const [fileName, setFileName] = useState('')
@@ -79,6 +103,7 @@ export function BackupPage() {
   }
 
   async function handleDeleteAll() {
+    if (!deleteAllData) return
     setDeletingAll(true)
     setError('')
     setMessage('')
@@ -131,8 +156,9 @@ export function BackupPage() {
         <div>
           <h1>Backup & Wiederherstellung</h1>
           <p className="muted">
-            Vollständiges ZIP mit Rezepten, Bildern, Tags, Essensplan, Kochvorgängen,
-            Tagesnotizen und Einstellungen.
+            {cloud
+              ? 'Gemeinsame Cloud-Daten als vollständiges ZIP: Rezepte, Bilder, Wochenplanung, Einkaufslisten, Käufe, Zuordnungen und Einstellungen.'
+              : 'Vollständiges ZIP mit Rezepten, Bildern, Tags, Essensplan, Kochvorgängen, Tagesnotizen und Einstellungen.'}
           </p>
         </div>
         <a className="button" href="#/">
@@ -143,9 +169,9 @@ export function BackupPage() {
       <section className="panel">
         <h2>Backup erstellen</h2>
         <p className="muted">
-          Enthält alle Rezepte inklusive Originalangaben, Bilder, Kategorien, Tags, Essensplan,
-          Kochvorgänge, Tagesflags, Tagesnotizen und die Haushaltsgröße. Die Datei bleibt
-          ausschließlich lokal.
+          {cloud
+            ? 'Enthält alle Rezepte inklusive Originalangaben, Bilder aus dem privaten Familienspeicher, Kategorien, Tags, Wochenplanung, Kochvorgänge, Einkaufslisten, Käufe, Zuordnungen und Einstellungen. Die ZIP-Datei wird auf dieses Gerät heruntergeladen.'
+            : 'Enthält alle Rezepte inklusive Originalangaben, Bilder, Kategorien, Tags, Essensplan, Kochvorgänge, Tagesflags, Tagesnotizen und die Haushaltsgröße. Die Datei bleibt ausschließlich lokal.'}
         </p>
         <button type="button" className="button primary" onClick={handleExport} disabled={busy}>
           {busy ? 'Erstelle …' : 'Backup herunterladen'}
@@ -155,9 +181,9 @@ export function BackupPage() {
       <section className="panel">
         <h2>Backup wiederherstellen</h2>
         <p className="muted">
-          Die Datei wird zuerst geprüft und als Vorschau angezeigt. Beim Zusammenführen bleiben
-          lokale Rezepte und Pläne bei Konflikten unverändert; beim Ersetzen wird der lokale Bestand
-          erst nach ausdrücklicher Bestätigung gelöscht.
+          {cloud
+            ? 'Die Datei wird zuerst geprüft und als Vorschau angezeigt. Eine Wiederherstellung ist nur in eine leere Familien-Cloud möglich; vorhandene Daten werden weder zurückgesetzt noch überschrieben.'
+            : 'Die Datei wird zuerst geprüft und als Vorschau angezeigt. Beim Zusammenführen bleiben lokale Rezepte und Pläne bei Konflikten unverändert; beim Ersetzen wird der lokale Bestand erst nach ausdrücklicher Bestätigung gelöscht.'}
         </p>
         <label className="file-picker">
           <input
@@ -211,55 +237,68 @@ export function BackupPage() {
             </div>
           ) : null}
 
-          {conflicts > 0 ? (
-            <div className="notice">
-              <p>
-                <strong>{conflicts} Konflikt(e):</strong> {inspection.conflicts.recipes} Rezepte,{' '}
-                {inspection.conflicts.mealPlans} Essenstermine, {inspection.conflicts.cookSessions}{' '}
-                Kochvorgänge, {inspection.conflicts.mealDays} Tagesflags,{' '}
-                {inspection.conflicts.dayNotes} Tagesnotizen,{' '}
-                {inspection.conflicts.freeDishes} freie Gerichte,{' '}
-                {inspection.conflicts.settings} Einstellungen existieren bereits
-                {inspection.conflicts.shoppingCycle > 0
-                  ? `, die Einkaufskonfiguration weicht in ${inspection.conflicts.shoppingCycle} Punkt(en) ab`
-                  : ''}
-                {inspection.conflicts.orphanedManualPurchaseReferences > 0
-                  ? `, ${inspection.conflicts.orphanedManualPurchaseReferences} Kauf/Käufe verweisen auf fehlende manuelle Artikel`
-                  : ''}
-                {inspection.conflicts.overlappingStandardPeriods > 0
-                  ? `, ${inspection.conflicts.overlappingStandardPeriods} überlappende Standardperiode(n)`
-                  : ''}
-                .
-              </p>
-              <p className="muted small">
-                „Zusammenführen“ lässt lokale Einträge gewinnen und ergänzt nur fehlende.
-                „Lokal ersetzen“ übernimmt das Backup vollständig.
-              </p>
-            </div>
+          {!cloud && (conflicts > 0 ? (
+              <div className="notice">
+                <p>
+                  <strong>{conflicts} Konflikt(e):</strong> {inspection.conflicts.recipes} Rezepte,{' '}
+                  {inspection.conflicts.mealPlans} Essenstermine, {inspection.conflicts.cookSessions}{' '}
+                  Kochvorgänge, {inspection.conflicts.mealDays} Tagesflags,{' '}
+                  {inspection.conflicts.dayNotes} Tagesnotizen,{' '}
+                  {inspection.conflicts.freeDishes} freie Gerichte,{' '}
+                  {inspection.conflicts.settings} Einstellungen existieren bereits
+                  {inspection.conflicts.shoppingCycle > 0
+                    ? `, die Einkaufskonfiguration weicht in ${inspection.conflicts.shoppingCycle} Punkt(en) ab`
+                    : ''}
+                  {inspection.conflicts.orphanedManualPurchaseReferences > 0
+                    ? `, ${inspection.conflicts.orphanedManualPurchaseReferences} Kauf/Käufe verweisen auf fehlende manuelle Artikel`
+                    : ''}
+                  {inspection.conflicts.overlappingStandardPeriods > 0
+                    ? `, ${inspection.conflicts.overlappingStandardPeriods} überlappende Standardperiode(n)`
+                    : ''}
+                  .
+                </p>
+                <p className="muted small">
+                  „Zusammenführen“ lässt lokale Einträge gewinnen und ergänzt nur fehlende.
+                  „Lokal ersetzen“ übernimmt das Backup vollständig.
+                </p>
+              </div>
           ) : (
             <p className="muted">Keine Konflikte mit dem lokalen Bestand.</p>
-          )}
+          ))}
 
           <div className="notice-actions">
-            <button type="button" className="button primary" onClick={() => void restore('merge')} disabled={busy}>
-              Zusammenführen (lokal gewinnt)
-            </button>
-            {!confirmReplace ? (
-              <button type="button" className="button danger" onClick={() => setConfirmReplace(true)} disabled={busy}>
-                Lokal ersetzen …
+            {cloud ? (
+              <button
+                type="button"
+                className="button primary"
+                onClick={() => void restore('replace')}
+                disabled={busy}
+              >
+                In Familien-Cloud wiederherstellen
               </button>
             ) : (
               <>
-                <button type="button" className="button danger" onClick={() => void restore('replace')} disabled={busy}>
-                  Wirklich alles ersetzen
+                <button type="button" className="button primary" onClick={() => void restore('merge')} disabled={busy}>
+                  Zusammenführen (lokal gewinnt)
                 </button>
-                <button type="button" className="button" onClick={() => setConfirmReplace(false)} disabled={busy}>
-                  Abbrechen
-                </button>
+                {!confirmReplace ? (
+                  <button type="button" className="button danger" onClick={() => setConfirmReplace(true)} disabled={busy}>
+                    Lokal ersetzen …
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" className="button danger" onClick={() => void restore('replace')} disabled={busy}>
+                      Wirklich alles ersetzen
+                    </button>
+                    <button type="button" className="button" onClick={() => setConfirmReplace(false)} disabled={busy}>
+                      Abbrechen
+                    </button>
+                  </>
+                )}
               </>
             )}
           </div>
-          {confirmReplace ? (
+          {!cloud && confirmReplace ? (
             <div className="notice danger">
               <p>
                 Beim Ersetzen werden alle lokalen Rezepte, Bilder, Essenstermine, Kochvorgänge,
@@ -275,7 +314,12 @@ export function BackupPage() {
         <section className="panel">
           <h2>Ergebnis</h2>
           <p>
-            {result.mode === 'replace' ? 'Lokal ersetzt.' : 'Zusammengeführt.'} {result.addedRecipes}{' '}
+            {cloud
+              ? 'In der Familien-Cloud wiederhergestellt.'
+              : result.mode === 'replace'
+                ? 'Lokal ersetzt.'
+                : 'Zusammengeführt.'}{' '}
+            {result.addedRecipes}{' '}
             Rezepte, {result.addedFreeDishes} freie Gerichte, {result.addedImages} Bilder,{' '}
             {result.addedMealPlans} Essenstermine, {result.addedCookSessions} Kochvorgänge,{' '}
             {result.addedDayNotes} Tagesnotizen, {result.addedShoppingManualItems} manuelle
@@ -285,8 +329,8 @@ export function BackupPage() {
           {result.orphanedManualPurchaseReferences > 0 ? (
             <p className="notice danger">
               {result.orphanedManualPurchaseReferences} Kauf/Käufe verweisen auf einen
-              manuellen Artikel, der lokal bzw. im Backup fehlt. Die Käufe bleiben
-              erhalten und werden als Prüfkonflikt ausgewiesen.
+              manuellen Artikel, der {cloud ? 'in der Cloud bzw. im Backup' : 'lokal bzw. im Backup'} fehlt.
+              Die Käufe bleiben erhalten und werden als Prüfkonflikt ausgewiesen.
             </p>
           ) : null}
           {result.detachedMealLinks > 0 ? (
@@ -316,34 +360,36 @@ export function BackupPage() {
         </section>
       ) : null}
 
-      <section className="panel danger-zone">
-        <h2>Datenverwaltung</h2>
-        <p className="muted small">
-          Alle lokalen Rezepte, Bilder, Essenstermine, Kochvorgänge, freien Gerichte, Tagesflags,
-          Tagesnotizen und Einkaufsdaten löschen. Einstellungen wie Haushaltsgröße und
-          Einkaufskonfiguration bleiben erhalten. Ein Backup vorher wird ausdrücklich empfohlen.
-        </p>
-        {confirmDeleteAll ? (
-          <div className="notice danger">
-            <p>
-              Wirklich <strong>alle</strong> Rezeptdaten und Wochenpläne löschen? Das kann nicht
-              rückgängig gemacht werden.
-            </p>
-            <div className="notice-actions">
-              <button type="button" className="button danger" onClick={handleDeleteAll} disabled={deletingAll}>
-                {deletingAll ? 'Lösche …' : 'Endgültig löschen'}
-              </button>
-              <button type="button" className="button" onClick={() => setConfirmDeleteAll(false)}>
-                Abbrechen
-              </button>
+      {deleteAllData ? (
+        <section className="panel danger-zone">
+          <h2>Datenverwaltung</h2>
+          <p className="muted small">
+            Alle lokalen Rezepte, Bilder, Essenstermine, Kochvorgänge, freien Gerichte, Tagesflags,
+            Tagesnotizen und Einkaufsdaten löschen. Einstellungen wie Haushaltsgröße und
+            Einkaufskonfiguration bleiben erhalten. Ein Backup vorher wird ausdrücklich empfohlen.
+          </p>
+          {confirmDeleteAll ? (
+            <div className="notice danger">
+              <p>
+                Wirklich <strong>alle</strong> Rezeptdaten und Wochenpläne löschen? Das kann nicht
+                rückgängig gemacht werden.
+              </p>
+              <div className="notice-actions">
+                <button type="button" className="button danger" onClick={handleDeleteAll} disabled={deletingAll}>
+                  {deletingAll ? 'Lösche …' : 'Endgültig löschen'}
+                </button>
+                <button type="button" className="button" onClick={() => setConfirmDeleteAll(false)}>
+                  Abbrechen
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <button type="button" className="button danger-quiet" onClick={() => setConfirmDeleteAll(true)}>
-            Alle Rezeptdaten löschen
-          </button>
-        )}
-      </section>
+          ) : (
+            <button type="button" className="button danger-quiet" onClick={() => setConfirmDeleteAll(true)}>
+              Alle Rezeptdaten löschen
+            </button>
+          )}
+        </section>
+      ) : null}
     </div>
   )
 }

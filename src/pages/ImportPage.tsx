@@ -3,7 +3,6 @@ import type { ChangeEvent } from 'react'
 import {
   inspectMelaFile,
 } from '../import/mela'
-import { deleteAllData, existingImportIds, importMelaRecipes } from '../import/importer'
 import type {
   ImportIssue,
   ImportProgress,
@@ -16,7 +15,27 @@ import { URL_IMPORT_HASH } from '../routing/routes'
 type PreviewRecipe = { recipe: ParsedMelaRecipe; duplicate: boolean }
 type Status = 'idle' | 'inspecting' | 'ready' | 'importing' | 'done'
 
-export function ImportPage() {
+export type ExistingImportIdsHandler = (ids: string[]) => Promise<Set<string>>
+export type MelaImportHandler = (
+  recipes: ParsedMelaRecipe[],
+  onProgress?: (progress: ImportProgress) => void,
+) => Promise<ImportResult>
+
+export interface ImportPageProps {
+  service?: 'local' | 'cloud'
+  existingImportIds: ExistingImportIdsHandler
+  importRecipes: MelaImportHandler
+  /** Nur im lokalen Modus: testweises Zurücksetzen der lokalen Daten. */
+  deleteAllData?: () => Promise<void>
+}
+
+export function ImportPage({
+  service = 'local',
+  existingImportIds,
+  importRecipes,
+  deleteAllData,
+}: ImportPageProps) {
+  const cloud = service === 'cloud'
   const inputRef = useRef<HTMLInputElement>(null)
   const [status, setStatus] = useState<Status>('idle')
   const [fileName, setFileName] = useState('')
@@ -68,7 +87,7 @@ export function ImportPage() {
     setStatus('importing')
     setProgress({ current: 0, total: candidates.length, title: '' })
     try {
-      const imported = await importMelaRecipes(candidates, setProgress)
+      const imported = await importRecipes(candidates, setProgress)
       setResult({ ...imported, duplicates: imported.duplicates + duplicateCount })
       setStatus('done')
       setPreview((current) => current.map((entry) => ({ ...entry, duplicate: true })))
@@ -79,6 +98,7 @@ export function ImportPage() {
   }
 
   async function handleDeleteAll() {
+    if (!deleteAllData) return
     setDeleting(true)
     try {
       await deleteAllData()
@@ -104,8 +124,9 @@ export function ImportPage() {
         <div>
           <h1>Mela-Import</h1>
           <p className="muted">
-            Datei auswählen, prüfen, importieren. Die Verarbeitung findet vollständig in diesem
-            Browser statt.
+            {cloud
+              ? 'Datei auswählen, prüfen, importieren. Die Datei wird in diesem Browser gelesen; gespeichert wird in der Familien-Cloud.'
+              : 'Datei auswählen, prüfen, importieren. Die Verarbeitung findet vollständig in diesem Browser statt.'}
           </p>
         </div>
         <div className="page-head-actions">
@@ -121,9 +142,9 @@ export function ImportPage() {
       <section className="panel">
         <h2>Webseite statt Datei</h2>
         <p className="muted">
-          Rezepte können auch direkt von einer öffentlichen Webseite importiert werden. Der Abruf
-          läuft über den lokalen Importdienst und wird vor dem Speichern als bearbeitbare Vorschau
-          angezeigt.
+          {cloud
+            ? 'Rezepte können auch direkt von einer öffentlichen Webseite importiert werden. Der Abruf läuft über den abgesicherten Importdienst der Familien-Cloud und wird vor dem Speichern als bearbeitbare Vorschau angezeigt.'
+            : 'Rezepte können auch direkt von einer öffentlichen Webseite importiert werden. Der Abruf läuft über den lokalen Importdienst und wird vor dem Speichern als bearbeitbare Vorschau angezeigt.'}
         </p>
         <a className="button" href={URL_IMPORT_HASH}>
           Rezept per URL importieren
@@ -134,7 +155,8 @@ export function ImportPage() {
         <h2>Datei auswählen</h2>
         <p className="muted">
           Unterstützt <code>.melarecipe</code> (JSON) und <code>.melarecipes</code> (ZIP). Bilder
-          werden als Base64 aus der Datei gelesen und lokal in IndexedDB gespeichert.
+          werden als Base64 aus der Datei gelesen und{' '}
+          {cloud ? 'im privaten Familienspeicher' : 'lokal in IndexedDB'} gespeichert.
         </p>
         <label className="file-picker">
           <input
@@ -267,30 +289,32 @@ export function ImportPage() {
         </section>
       ) : null}
 
-      <section className="panel">
-        <h2>Testdaten</h2>
-        <p className="muted">
-          Alle importierten Rezepte und Bilder liegen ausschließlich in diesem Browser. Zum
-          vollständigen Zurücksetzen kannst du sie hier löschen.
-        </p>
-        {confirmDelete ? (
-          <div className="notice danger">
-            <p>Wirklich alle lokalen Rezepte, Bilder, Planungen, Tagesnotizen und Einkaufsdaten löschen?</p>
-            <div className="notice-actions">
-              <button type="button" className="button danger" onClick={handleDeleteAll} disabled={deleting}>
-                {deleting ? 'Lösche …' : 'Endgültig löschen'}
-              </button>
-              <button type="button" className="button" onClick={() => setConfirmDelete(false)}>
-                Abbrechen
-              </button>
+      {deleteAllData ? (
+        <section className="panel">
+          <h2>Testdaten</h2>
+          <p className="muted">
+            Alle importierten Rezepte und Bilder liegen ausschließlich in diesem Browser. Zum
+            vollständigen Zurücksetzen kannst du sie hier löschen.
+          </p>
+          {confirmDelete ? (
+            <div className="notice danger">
+              <p>Wirklich alle lokalen Rezepte, Bilder, Planungen, Tagesnotizen und Einkaufsdaten löschen?</p>
+              <div className="notice-actions">
+                <button type="button" className="button danger" onClick={handleDeleteAll} disabled={deleting}>
+                  {deleting ? 'Lösche …' : 'Endgültig löschen'}
+                </button>
+                <button type="button" className="button" onClick={() => setConfirmDelete(false)}>
+                  Abbrechen
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <button type="button" className="button danger-quiet" onClick={() => setConfirmDelete(true)}>
-            Alle Testdaten löschen
-          </button>
-        )}
-      </section>
+          ) : (
+            <button type="button" className="button danger-quiet" onClick={() => setConfirmDelete(true)}>
+              Alle Testdaten löschen
+            </button>
+          )}
+        </section>
+      ) : null}
     </div>
   )
 }
