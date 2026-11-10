@@ -173,7 +173,7 @@ export function FamilyPage({ api = defaultApi, baseHref }: FamilyPageProps) {
     try {
       const revoked = await api.revoke(id)
       if (!revoked) {
-        setError('Der Link ist bereits eingelöst oder wurde schon widerrufen.')
+        setError('Der Link wurde bereits widerrufen oder ist nicht mehr aktiv.')
       } else {
         setMessage('Einladungslink widerrufen.')
       }
