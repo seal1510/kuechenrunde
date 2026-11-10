@@ -14,8 +14,6 @@
  */
 
 import { useEffect, useId, useMemo, useReducer, useRef, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../db'
 import { formatPortionCount } from '../lib/format'
 import {
   resolveOriginalServings,
@@ -27,26 +25,13 @@ import {
   type ReferenceIssue,
   type RenderedInstruction,
 } from '../recipe/references'
-import {
-  loadCookProgress,
-  pruneOrphanedCookProgress,
-  saveCookProgress,
-} from '../mealplan/cookProgress'
+import { useCookBackend, type CookData } from '../cook/cookBackend'
 import { Markdown } from '../components/Markdown'
 import { IngredientList } from '../components/RecipeCard'
 import { useCookTimers } from '../cook/useCookTimers'
 import { useWakeLock } from '../cook/useWakeLock'
 import { CookTimerPanel, CookTimerToggle, WakeLockToggle } from './cook/CookTimers'
 import type { Ingredient, Instruction, Recipe } from '../types'
-
-interface CookData {
-  recipe: Recipe | null
-  sessionServings: number | null
-  sessionId: string | null
-  sessionMissing: boolean
-  /** A database/loading failure must not crash the whole app. */
-  loadError: string | null
-}
 
 export type CookView = 'step' | 'overview'
 
@@ -394,33 +379,8 @@ export function CookPage({
   recipeId: string
   cookSessionId: string | null
 }) {
-  const data = useLiveQuery<CookData>(async () => {
-    try {
-      const recipe = await db.recipes.get(recipeId)
-      const session = cookSessionId ? await db.cookSessions.get(cookSessionId) : undefined
-      // A session id must belong to this recipe; never borrow portions from an
-      // unrelated dish just because a stale link contains the id.
-      const validSession = session && session.recipeId === recipeId ? session : undefined
-      return {
-        recipe: recipe ?? null,
-        sessionServings: validSession?.servings ?? null,
-        sessionId: validSession?.id ?? null,
-        sessionMissing: Boolean(cookSessionId) && !validSession,
-        loadError: null,
-      }
-    } catch (cause) {
-      // useLiveQuery would otherwise rethrow into the render tree. There is no
-      // app-level error boundary, so cook mode shows a recoverable message
-      // instead of turning the whole app blank.
-      return {
-        recipe: null,
-        sessionServings: null,
-        sessionId: null,
-        sessionMissing: false,
-        loadError: (cause as Error)?.message || 'Unbekannter Datenbankfehler.',
-      }
-    }
-  }, [recipeId, cookSessionId])
+  const backend = useCookBackend()
+  const data = backend.useCookData(recipeId, cookSessionId)
 
   const [ui, dispatch] = useReducer(cookUiReducer, initialCookUiState)
   const [progressReady, setProgressReady] = useState(false)
@@ -481,8 +441,8 @@ export function CookPage({
     // Entry links can be clicked from far down the plan or recipe page. Start
     // the focused mode at the top so the recipe and first step are visible.
     window.scrollTo(0, 0)
-    void pruneOrphanedCookProgress()
-  }, [])
+    void backend.pruneOrphanedProgress()
+  }, [backend])
 
   useEffect(() => {
     if (!data?.recipe || ui.servings !== null) return
@@ -505,7 +465,7 @@ export function CookPage({
         cancelled = true
       }
     }
-    void loadCookProgress(sessionId).then((stored) => {
+    void backend.loadProgress(sessionId).then((stored) => {
       if (cancelled) return
       dispatch({ type: 'goToStep', index: stored ?? 0, stepCount: steps.length })
       setLoadedSessionId(sessionId)
@@ -528,7 +488,7 @@ export function CookPage({
     // Only persist after the stored step for exactly this session was loaded;
     // otherwise the initial step 0 could overwrite real progress.
     if (!sessionId || loadedSessionId !== sessionId) return
-    void saveCookProgress(sessionId, currentIndex)
+    void backend.saveProgress(sessionId, currentIndex)
   }, [progressReady, loadedSessionId, data?.sessionId, currentIndex])
 
   useEffect(() => {

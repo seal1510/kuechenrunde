@@ -18,13 +18,26 @@ export async function loadCookProgress(cookSessionId: string): Promise<number | 
   return Number.isInteger(row.stepIndex) && row.stepIndex >= 0 ? row.stepIndex : null
 }
 
+export interface SaveCookProgressOptions {
+  /**
+   * Existence check for the cooking event. Local mode keeps the Dexie check;
+   * cloud mode supplies the shared CloudRecordsStore check so progress stays
+   * device-local without reading local plan tables.
+   */
+  sessionExists?: () => boolean | Promise<boolean>
+}
+
 export async function saveCookProgress(
   cookSessionId: string,
   stepIndex: number,
+  options: SaveCookProgressOptions = {},
 ): Promise<void> {
   if (!cookSessionId || !Number.isInteger(stepIndex) || stepIndex < 0) return
   // Never create progress for a cooking event that no longer exists.
-  if (!(await db.cookSessions.get(cookSessionId))) return
+  const exists = options.sessionExists
+    ? await options.sessionExists()
+    : Boolean(await db.cookSessions.get(cookSessionId))
+  if (!exists) return
   await db.cookProgress.put({
     cookSessionId,
     stepIndex,

@@ -81,7 +81,7 @@ describe('Cloud-Rezeptseiten', () => {
     expect(html).not.toContain('Zum Import')
   })
 
-  it('zeigt Cloud-Details mit Bearbeitung und manuellem Einplanen, aber ohne Kochen', () => {
+  it('zeigt Cloud-Details mit Bearbeitung, manuellem Einplanen und Kochen', () => {
     const html = renderToStaticMarkup(
       <CloudRecipeDetailPage
         store={fakeStore([recipe('r1', 'Cloud-Curry')])}
@@ -93,9 +93,11 @@ describe('Cloud-Rezeptseiten', () => {
     expect(html).toContain('Zutaten')
     expect(html).toContain('Zubereitung')
     expect(html).toContain('Bearbeiten')
-    expect(html).toContain('Kochmodus und Einkaufsliste')
+    expect(html).toContain('Timer und Kochfortschritt bleiben auf diesem Gerät')
     expect(html.match(/Einplanen/g)).toHaveLength(2)
-    expect(html).not.toContain('detail-cook')
+    expect(html.match(/Kochen/g)).toHaveLength(2)
+    expect(html).toContain('detail-cook')
+    expect(html).toContain('href="#/recipe/r1/cook"')
     expect(html).not.toMatch(/automatisch/i)
   })
 

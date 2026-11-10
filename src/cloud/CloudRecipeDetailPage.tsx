@@ -7,6 +7,7 @@ import { todayKey } from '../domain/dates'
 import { formatDuration, effectiveDuration } from '../lib/format'
 import { usePlanBackend } from '../mealplan/planBackend'
 import { DishDialog } from '../pages/plan/DishDialog'
+import { cookHash } from '../routing/routes'
 import { calendarSettingsFromRows } from '../settings/calendar'
 import type { Recipe } from '../types'
 import { useCloudImageUrls } from './CloudImageProvider'
@@ -188,6 +189,19 @@ export function CloudRecipeDetailPage({
               </svg>
               Einplanen
             </button>
+            <a className="button warm detail-cook" href={cookHash(recipe.id)}>
+              <svg
+                viewBox="0 0 16 16"
+                width="13"
+                height="13"
+                aria-hidden="true"
+                focusable="false"
+                fill="currentColor"
+              >
+                <path d="M4.4 2.9a.6.6 0 0 1 .9-.5l7 5.1a.6.6 0 0 1 0 1l-7 5.1a.6.6 0 0 1-.9-.5V2.9Z" />
+              </svg>
+              Kochen
+            </a>
           </div>
           {recipe.description ? (
             <div className="recipe-description">
@@ -222,12 +236,24 @@ export function CloudRecipeDetailPage({
         >
           Einplanen
         </button>
+        <a className="button warm" href={cookHash(recipe.id)}>
+          <svg
+            viewBox="0 0 16 16"
+            width="13"
+            height="13"
+            aria-hidden="true"
+            focusable="false"
+            fill="currentColor"
+          >
+            <path d="M4.4 2.9a.6.6 0 0 1 .9-.5l7 5.1a.6.6 0 0 1 0 1l-7 5.1a.6.6 0 0 1-.9-.5V2.9Z" />
+          </svg>
+          Kochen
+        </a>
       </nav>
 
       <p className="muted small">
-        Kochmodus und Einkaufsliste sind im Cloud-Modus noch nicht verfügbar.
-        Rezeptbibliothek, Bilder und Wochenplan funktionieren bereits
-        geräteübergreifend.
+        Rezeptbibliothek, Wochenplan, Einkaufsliste und Kochmodus funktionieren
+        geräteübergreifend. Timer und Kochfortschritt bleiben auf diesem Gerät.
       </p>
 
       {planning ? (

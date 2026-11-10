@@ -937,7 +937,7 @@ function CloudPlanRecipeCover({
 
 export function createCloudPlanBackend(store: CloudRecordsStore): PlanBackend {
   return {
-    cookModeEnabled: false,
+    cookModeEnabled: true,
     renderRecipeCover: (recipe, className) => (
       <CloudPlanRecipeCover
         store={store}

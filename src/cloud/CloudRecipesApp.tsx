@@ -3,10 +3,10 @@
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Rezeptbibliothek, Wochenplan und Einkaufsliste sind im Cloud-Modus
- * freigeschaltet. Der Kochmodus bleibt sichtbar als „noch nicht verfügbar“
- * markiert, bis er korrekt angebunden ist. Die vorhandenen Rezept-, Planungs-
- * und Einkaufskomponenten werden geteilt; nur die Persistenz ist cloudbasiert.
+ * Rezeptbibliothek, Wochenplan, Einkaufsliste und Kochmodus sind im
+ * Cloud-Modus freigeschaltet. Die vorhandenen Rezept-, Planungs-, Einkaufs-
+ * und Kochkomponenten werden geteilt; nur die gemeinsame Persistenz ist
+ * cloudbasiert. Timer, Wake Lock und Kochfortschritt bleiben gerätelokal.
  *
  * Hier wird außerdem die einzige Bild-Laufzeit erzeugt: Signed-URL-Cache,
  * Storage-Zugriff und Metadaten-Service. Beim Logout wird der Cache verworfen.
@@ -20,10 +20,12 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react'
+import { CookBackendProvider } from '../cook/cookBackend'
 import { CloudImageUrlCache } from '../data/cloudImageUrls'
 import { CloudRecipeImageService } from '../data/cloudImages'
 import type { CloudRecordsStore } from '../data/cloudRecords'
 import { PlanBackendProvider } from '../mealplan/planBackend'
+import { CookPage } from '../pages/CookPage'
 import { PlanPage } from '../pages/PlanPage'
 import { ShoppingPage } from '../pages/ShoppingPage'
 import { NavigationGuardProvider } from '../routing/NavigationGuard'
@@ -32,6 +34,7 @@ import { requireSupabase } from '../supabase/client'
 import { createSupabaseImageStorage } from '../supabase/imageStorage'
 import { ShoppingBackendProvider } from '../shopping/shoppingBackend'
 import { CloudImageUrlProvider } from './CloudImageProvider'
+import { createCloudCookBackend } from './cloudCookBackend'
 import { createCloudPlanBackend } from './cloudPlanBackend'
 import { createCloudShoppingBackend } from './cloudShoppingBackend'
 import { CloudLibraryPage } from './CloudLibraryPage'
@@ -49,12 +52,12 @@ function CloudUnavailablePage() {
       <div className="empty-state">
         <p>Dieser Bereich ist im Cloud-Modus noch nicht verfügbar.</p>
         <p className="muted">
-          Der Kochmodus wird in einer der nächsten Etappen angebunden.
-          Rezeptbibliothek, Bilder, Wochenplan und Einkaufsliste funktionieren
-          bereits geräteübergreifend.
+          Rezeptbibliothek, Bilder, Wochenplan, Einkaufsliste und Kochmodus
+          funktionieren bereits geräteübergreifend. Dieser Bereich gehört nicht
+          dazu.
         </p>
-        <a className="button primary" href="#/shopping">
-          Zur Einkaufsliste
+        <a className="button primary" href="#/">
+          Zur Rezeptbibliothek
         </a>
       </div>
     </div>
@@ -65,7 +68,8 @@ const isLibraryArea = (route: Route): boolean =>
   route.name === 'library' ||
   route.name === 'recipe' ||
   route.name === 'recipe-new' ||
-  route.name === 'recipe-edit'
+  route.name === 'recipe-edit' ||
+  route.name === 'cook'
 
 export function CloudRecipesApp({
   store,
@@ -98,6 +102,7 @@ export function CloudRecipesApp({
     () => createCloudShoppingBackend(store),
     [store],
   )
+  const cookBackend = useMemo(() => createCloudCookBackend(store), [store])
   const notice = useSyncExternalStore(
     subscribeCloudImageNotice,
     getCloudImageNotice,
@@ -116,6 +121,14 @@ export function CloudRecipesApp({
     content = <PlanPage />
   } else if (route.name === 'shopping') {
     content = <ShoppingPage />
+  } else if (route.name === 'cook') {
+    content = (
+      <CookPage
+        key={`${route.recipeId}:${route.cookSessionId ?? ''}`}
+        recipeId={route.recipeId}
+        cookSessionId={route.cookSessionId}
+      />
+    )
   } else if (route.name === 'recipe') {
     content = <CloudRecipeDetailPage store={store} id={route.id} />
   } else if (route.name === 'recipe-new') {
@@ -136,58 +149,59 @@ export function CloudRecipesApp({
   return (
     <PlanBackendProvider value={planBackend}>
       <ShoppingBackendProvider value={shoppingBackend}>
-        <NavigationGuardProvider applyRoute={applyRoute}>
-          <nav className="cloud-nav" aria-label="Cloud-Navigation">
-            <a
-              href="#/"
-              className={isLibraryArea(route) ? 'active' : ''}
-              aria-current={isLibraryArea(route) ? 'page' : undefined}
-            >
-              Rezeptbibliothek
-            </a>
-            <a
-              href="#/plan"
-              className={route.name === 'plan' ? 'active' : ''}
-              aria-current={route.name === 'plan' ? 'page' : undefined}
-            >
-              Wochenplan
-            </a>
-            <a
-              href="#/shopping"
-              className={route.name === 'shopping' ? 'active' : ''}
-              aria-current={route.name === 'shopping' ? 'page' : undefined}
-            >
-              Einkaufsliste
-            </a>
-            <span className="cloud-nav-note">Kochen folgt</span>
-            <span className="cloud-user">{email}</span>
-            <button
-              type="button"
-              className="button quiet"
-              onClick={() => {
-                clearCloudImageNotice()
-                void onLogout()
-              }}
-            >
-              Abmelden
-            </button>
-          </nav>
-          {notice ? (
-            <div className="notice cloud-image-notice" role="status">
-              <p>{notice}</p>
-              <div className="notice-actions">
-                <button
-                  type="button"
-                  className="button quiet"
-                  onClick={clearCloudImageNotice}
-                >
-                  Hinweis schließen
-                </button>
+        <CookBackendProvider value={cookBackend}>
+          <NavigationGuardProvider applyRoute={applyRoute}>
+            <nav className="cloud-nav" aria-label="Cloud-Navigation">
+              <a
+                href="#/"
+                className={isLibraryArea(route) ? 'active' : ''}
+                aria-current={isLibraryArea(route) ? 'page' : undefined}
+              >
+                Rezeptbibliothek
+              </a>
+              <a
+                href="#/plan"
+                className={route.name === 'plan' ? 'active' : ''}
+                aria-current={route.name === 'plan' ? 'page' : undefined}
+              >
+                Wochenplan
+              </a>
+              <a
+                href="#/shopping"
+                className={route.name === 'shopping' ? 'active' : ''}
+                aria-current={route.name === 'shopping' ? 'page' : undefined}
+              >
+                Einkaufsliste
+              </a>
+              <span className="cloud-user">{email}</span>
+              <button
+                type="button"
+                className="button quiet"
+                onClick={() => {
+                  clearCloudImageNotice()
+                  void onLogout()
+                }}
+              >
+                Abmelden
+              </button>
+            </nav>
+            {notice ? (
+              <div className="notice cloud-image-notice" role="status">
+                <p>{notice}</p>
+                <div className="notice-actions">
+                  <button
+                    type="button"
+                    className="button quiet"
+                    onClick={clearCloudImageNotice}
+                  >
+                    Hinweis schließen
+                  </button>
+                </div>
               </div>
-            </div>
-          ) : null}
-          <CloudImageUrlProvider cache={imageUrls}>{content}</CloudImageUrlProvider>
-        </NavigationGuardProvider>
+            ) : null}
+            <CloudImageUrlProvider cache={imageUrls}>{content}</CloudImageUrlProvider>
+          </NavigationGuardProvider>
+        </CookBackendProvider>
       </ShoppingBackendProvider>
     </PlanBackendProvider>
   )
