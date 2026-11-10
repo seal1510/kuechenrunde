@@ -7,8 +7,8 @@
  * Es wird ausschließlich der Publishable-/Anon-Key verwendet. Ein
  * service_role-Key wird bereits in config.ts abgelehnt.
  *
- * Dieser Client ist in Etappe A1 noch nicht an die App-Navigation oder an
- * src/db.ts angeschlossen.
+ * Der Client wird ausschließlich im expliziten Cloud-Modus
+ * (VITE_DATA_MODE=cloud) geladen. Ohne diesen Schalter bleibt die App lokal.
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
@@ -23,10 +23,21 @@ export class CloudNotConfiguredError extends Error {
 
 const env = import.meta.env as unknown as Record<string, string | undefined>
 
-export const cloudConfig: CloudConfig | null = parseCloudConfig({
-  VITE_SUPABASE_URL: env.VITE_SUPABASE_URL,
-  VITE_SUPABASE_PUBLISHABLE_KEY: env.VITE_SUPABASE_PUBLISHABLE_KEY,
-})
+let parsedConfig: CloudConfig | null = null
+let parsedConfigError: Error | null = null
+try {
+  parsedConfig = parseCloudConfig({
+    VITE_SUPABASE_URL: env.VITE_SUPABASE_URL,
+    VITE_SUPABASE_PUBLISHABLE_KEY: env.VITE_SUPABASE_PUBLISHABLE_KEY,
+  })
+} catch (cause) {
+  // Nicht beim Modulimport abstürzen: Die Cloud-Oberfläche zeigt eine
+  // verständliche Konfigurationsfehlerseite, ohne Schlüssel zu wiederholen.
+  parsedConfigError =
+    cause instanceof Error
+      ? cause
+      : new CloudConfigError('Die Supabase-Konfiguration ist ungültig.')
+}
 
 function createCloudClient(config: CloudConfig): SupabaseClient {
   try {
@@ -49,12 +60,24 @@ function createCloudClient(config: CloudConfig): SupabaseClient {
   }
 }
 
-export const supabase: SupabaseClient | null = cloudConfig
-  ? createCloudClient(cloudConfig)
-  : null
+let client: SupabaseClient | null = null
+if (parsedConfig) {
+  try {
+    client = createCloudClient(parsedConfig)
+  } catch (cause) {
+    parsedConfigError =
+      cause instanceof Error
+        ? cause
+        : new CloudConfigError('Der Supabase-Client konnte nicht initialisiert werden.')
+  }
+}
+
+export const cloudConfig: CloudConfig | null = parsedConfig
+export const cloudConfigError: Error | null = parsedConfigError
+export const supabase: SupabaseClient | null = client
 
 export function isCloudConfigured(): boolean {
-  return supabase !== null
+  return supabase !== null && cloudConfigError === null
 }
 
 export function requireSupabase(): SupabaseClient {

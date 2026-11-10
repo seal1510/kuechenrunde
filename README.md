@@ -2,17 +2,25 @@
 
 **Rezepte · Wochenplan · Einkaufsliste**
 
-Küchenrunde ist eine kostenlose, lokal laufende Rezept- und Familien-
-Einkaufslisten-WebApp. Rezepte, Wochenplan, Einkaufslisten und Einstellungen
-bleiben im Browser (IndexedDB) gespeichert. Es gibt keine Konten, keine Cloud
-und kein Tracking.
+Küchenrunde ist eine kostenlose Rezept- und Familien-Einkaufslisten-WebApp.
+Standardmäßig läuft sie vollständig lokal: Rezepte, Wochenplan, Einkaufslisten
+und Einstellungen bleiben im Browser (IndexedDB). Ein expliziter Cloud-Modus
+mit Supabase befindet sich in Vorbereitung. Es gibt kein Tracking.
 
 ## Aktueller Entwicklungsstand
 
-Küchenrunde ist derzeit eine **lokale WebApp**. Eine gemeinsame Datenbank und
-Synchronisierung für die Familie sind geplant, aber **noch nicht implementiert**.
-Die App behauptet an keiner Stelle, dass bereits eine Familien-Cloud oder
-Geräte-Synchronisierung existiert.
+Küchenrunde ist standardmäßig weiterhin eine **lokale WebApp**. Der Cloud-Modus
+wird ausschließlich über `VITE_DATA_MODE=cloud` aktiviert; allein vorhandene
+Supabase-Variablen schalten die App nicht um.
+
+Im Cloud-Modus sind derzeit **Anmeldung, Session-Verwaltung und das Laden des
+gemeinsamen Snapshots** implementiert. Danach zeigt die App einen
+Bereitschaftszustand. Die Rezeptbibliothek, Wochenplanung und Einkaufsliste
+sind noch **nicht** an den Cloud-Adapter angeschlossen; lokale Dexie-Daten
+werden dort nicht als Cloud-Bestand angezeigt. Eine Geräte-Synchronisierung
+der Oberfläche ist noch nicht freigegeben.
+
+Details zur Cloud-Grundlage stehen in [`supabase/README.md`](supabase/README.md).
 
 ## Funktionen
 

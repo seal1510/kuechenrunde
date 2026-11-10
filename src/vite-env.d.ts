@@ -2,6 +2,8 @@
 /// <reference types="vite-plugin-pwa/client" />
 
 interface ImportMetaEnv {
+  /** Expliziter Datenmodus: "local" (Standard) oder "cloud". */
+  readonly VITE_DATA_MODE?: string
   /** Öffentliche Supabase-Projekt-URL, z. B. https://abcdefgh.supabase.co */
   readonly VITE_SUPABASE_URL?: string
   /** Öffentlicher Publishable-/Anon-Key. Niemals service_role. */

@@ -108,6 +108,19 @@ Die RLS-Tests liefen direkt auf der Datenbank über
 `BEGIN; SET LOCAL ROLE ...; SET LOCAL request.jwt.claim.sub ...; ROLLBACK;`.
 Es wurden keine Benutzer und keine dauerhaften Daten angelegt.
 
+## Frontend-Modus (A2)
+
+- **Standard:** `VITE_DATA_MODE` fehlt oder ist `local` → die bisherige lokale
+  Dexie-App läuft unverändert.
+- **Cloud:** `VITE_DATA_MODE=cloud` plus `VITE_SUPABASE_URL` und
+  `VITE_SUPABASE_PUBLISHABLE_KEY` → Login, Session-Verwaltung und Laden des
+  gemeinsamen Snapshots. Danach zeigt die App nur einen Bereitschaftszustand.
+- Die Supabase-Variablen allein schalten die App **nicht** um.
+- Im Cloud-Modus werden keine lokalen Dexie-Rezepte als Cloud-Daten angezeigt.
+- Login, Logout, Bootstrap, fehlende Mitgliedschaft und Netzwerkfehler sind
+  durch Unit-Tests abgedeckt. Der echte Login mit einem Familienkonto ist noch
+  offen.
+
 ## Noch nicht enthalten
 
 - Umschaltung der App auf den Cloud-Adapter (`src/db.ts` bleibt lokal).

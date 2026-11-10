@@ -68,7 +68,9 @@ export async function signInWithEmail(email: string, password: string): Promise<
 }
 
 export async function signOut(): Promise<void> {
-  const { error } = await requireSupabase().auth.signOut()
+  // local: entfernt die Sitzung auch dann, wenn der Server gerade nicht
+  // erreichbar ist. Andere Geräte werden bewusst nicht abgemeldet.
+  const { error } = await requireSupabase().auth.signOut({ scope: 'local' })
   if (error) throw new AuthFailure(authErrorMessage(error))
 }
 
