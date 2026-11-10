@@ -77,7 +77,7 @@ describe('Cloud-Rezeptseiten', () => {
   it('zeigt den leeren Cloud-Bestand korrekt', () => {
     const html = renderToStaticMarkup(<CloudLibraryPage store={fakeStore([])} />)
     expect(html).toContain('Noch keine Cloud-Rezepte gespeichert.')
-    expect(html).toContain('Lege ein Rezept ohne Bild an.')
+    expect(html).toContain('Lege dein erstes Rezept an.')
     expect(html).not.toContain('Zum Import')
   })
 
@@ -93,7 +93,7 @@ describe('Cloud-Rezeptseiten', () => {
     expect(html).toContain('Zutaten')
     expect(html).toContain('Zubereitung')
     expect(html).toContain('Bearbeiten')
-    expect(html).toContain('Wochenplan, Kochmodus und Bilder')
+    expect(html).toContain('Wochenplan und Kochmodus')
     expect(html).not.toContain('Einplanen')
     expect(html).not.toContain('detail-cook')
   })

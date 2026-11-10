@@ -222,7 +222,7 @@ export function RecipeLibraryView({
           <p>{cloudMode ? 'Noch keine Cloud-Rezepte gespeichert.' : 'Noch keine Rezepte gespeichert.'}</p>
           <p className="muted">
             {cloudMode
-              ? 'Lege ein Rezept ohne Bild an. Die gemeinsame Bibliothek steht allen Familienmitgliedern zur Verfügung.'
+              ? 'Lege dein erstes Rezept an. Die gemeinsame Bibliothek steht allen Familienmitgliedern zur Verfügung.'
               : 'Importiere eine Mela-Datei (.melarecipe oder .melarecipes) oder lege ein Rezept manuell an. Alles bleibt lokal im Browser.'}
           </p>
           <div className="notice-actions">

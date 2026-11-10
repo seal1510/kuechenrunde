@@ -1,44 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
-import type { RecipeImage } from '../types'
 import { RecipeBody } from '../components/RecipeCard'
-import { Markdown, useImageUrl } from '../components/Markdown'
+import { RecipeImageGallery } from '../components/RecipeImageGallery'
+import { Markdown } from '../components/Markdown'
 import { DEFAULT_WEEK_START_DAY } from '../domain/calendar'
 import { todayKey } from '../domain/dates'
 import { effectiveDuration, formatDuration } from '../lib/format'
+import { useImageUrls } from '../lib/useImageUrl'
 import { cookHash } from '../routing/routes'
 import { getCalendarSettings } from '../settings/calendar'
 import { DishDialog } from './plan/DishDialog'
-
-function ImageThumb({
-  image,
-  active,
-  onSelect,
-}: {
-  image: RecipeImage
-  active: boolean
-  onSelect: () => void
-}) {
-  const url = useImageUrl(image.bytes, image.mimeType)
-  return (
-    <button
-      type="button"
-      className={`thumb${active ? ' active' : ''}`}
-      onClick={onSelect}
-      aria-label={`Bild ${image.position + 1} anzeigen`}
-      aria-pressed={active}
-    >
-      {url ? <img src={url} alt="" /> : null}
-    </button>
-  )
-}
-
-function MainImage({ image }: { image: RecipeImage | undefined }) {
-  const url = useImageUrl(image?.bytes, image?.mimeType)
-  if (!url) return null
-  return <img className="detail-image" src={url} alt="" />
-}
 
 function servingsValue(recipe: { servingsText: string; servingsNumber: number | null }): string {
   const text = recipe.servingsText.trim()
@@ -61,13 +33,11 @@ export function RecipePage({ id }: { id: string }) {
     () => db.images.where('recipeId').equals(id).sortBy('position'),
     [id],
   )
-  const [activeImage, setActiveImage] = useState(0)
   const [planning, setPlanning] = useState(false)
   const [planSaved, setPlanSaved] = useState(false)
   const calendarSettings = useLiveQuery(() => getCalendarSettings(), [])
 
   useEffect(() => {
-    setActiveImage(0)
     setPlanning(false)
     setPlanSaved(false)
   }, [id])
@@ -76,6 +46,15 @@ export function RecipePage({ id }: { id: string }) {
   const sortedImages = useMemo(
     () => [...(images ?? [])].sort((a, b) => a.position - b.position),
     [images],
+  )
+  const imageUrls = useImageUrls(sortedImages)
+  const galleryImages = useMemo(
+    () =>
+      sortedImages.map((image) => ({
+        id: image.id,
+        url: imageUrls[image.id] ?? null,
+      })),
+    [sortedImages, imageUrls],
   )
 
   if (!data) {
@@ -254,21 +233,7 @@ export function RecipePage({ id }: { id: string }) {
 
         {hasImage ? (
           <div className="recipe-cover">
-            <div className="gallery">
-              <MainImage image={sortedImages[activeImage]} />
-              {sortedImages.length > 1 ? (
-                <div className="thumbs">
-                  {sortedImages.map((image, index) => (
-                    <ImageThumb
-                      key={image.id}
-                      image={image}
-                      active={index === activeImage}
-                      onSelect={() => setActiveImage(index)}
-                    />
-                  ))}
-                </div>
-              ) : null}
-            </div>
+            <RecipeImageGallery images={galleryImages} />
           </div>
         ) : null}
       </header>

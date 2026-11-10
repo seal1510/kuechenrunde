@@ -10,7 +10,7 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import type { CloudRecordsStore, RecordRow } from '../data/cloudRecords'
-import type { Recipe } from '../types'
+import type { Recipe, RecipeImageMeta } from '../types'
 
 function useStoreVersion(store: CloudRecordsStore | null): number {
   const subscribe = useCallback(
@@ -45,5 +45,24 @@ export function useCloudRecipe(
   return useMemo(() => {
     if (!store) return undefined
     return store.get<Recipe>('recipes', id) ?? null
+  }, [store, id, version])
+}
+
+/**
+ * Bild-Metadaten eines Rezepts aus der Cloud-Collection `images`. Der Hook
+ * reagiert wie die Rezept-Hooks auf eigene Schreibvorgänge und Realtime.
+ */
+export function useCloudRecipeImages(
+  store: CloudRecordsStore | null,
+  id: string,
+): RecipeImageMeta[] | undefined {
+  const version = useStoreVersion(store)
+  return useMemo(() => {
+    if (!store) return undefined
+    return store
+      .list<RecipeImageMeta>('images')
+      .map((row) => row.data)
+      .filter((image) => image?.recipeId === id)
+      .sort((a, b) => a.position - b.position || a.createdAt - b.createdAt)
   }, [store, id, version])
 }

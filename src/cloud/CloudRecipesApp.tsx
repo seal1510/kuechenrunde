@@ -6,13 +6,33 @@
  * Nur die Rezeptbibliothek ist im Cloud-Modus freigeschaltet. Alle anderen
  * Bereiche bleiben sichtbar als „noch nicht verfügbar“ markiert, bis sie
  * korrekt angebunden sind. Die vorhandenen Rezeptkomponenten werden geteilt.
+ *
+ * Hier wird außerdem die einzige Bild-Laufzeit erzeugt: Signed-URL-Cache,
+ * Storage-Zugriff und Metadaten-Service. Beim Logout wird der Cache verworfen.
  */
 
-import { useCallback, useState, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react'
+import { CloudImageUrlCache } from '../data/cloudImageUrls'
+import { CloudRecipeImageService } from '../data/cloudImages'
 import type { CloudRecordsStore } from '../data/cloudRecords'
 import { NavigationGuardProvider } from '../routing/NavigationGuard'
 import { parseRoute, type Route } from '../routing/routes'
+import { requireSupabase } from '../supabase/client'
+import { createSupabaseImageStorage } from '../supabase/imageStorage'
+import { CloudImageUrlProvider } from './CloudImageProvider'
 import { CloudLibraryPage } from './CloudLibraryPage'
+import {
+  clearCloudImageNotice,
+  getCloudImageNotice,
+  subscribeCloudImageNotice,
+} from './cloudImageNotice'
 import { CloudRecipeDetailPage } from './CloudRecipeDetailPage'
 import { CloudRecipeEditorPage } from './CloudRecipeEditorPage'
 
@@ -23,8 +43,8 @@ function CloudUnavailablePage() {
         <p>Dieser Bereich ist im Cloud-Modus noch nicht verfügbar.</p>
         <p className="muted">
           Wochenplan, Einkaufsliste und Kochmodus werden in den nächsten
-          Etappen angebunden. Die Rezeptbibliothek funktioniert bereits
-          geräteübergreifend.
+          Etappen angebunden. Die Rezeptbibliothek inklusive Bildern funktioniert
+          bereits geräteübergreifend.
         </p>
         <a className="button primary" href="#/">
           Zur Rezeptbibliothek
@@ -54,15 +74,45 @@ export function CloudRecipesApp({
     setRoute(parseRoute(hash))
   }, [])
 
+  const storage = useMemo(
+    () => createSupabaseImageStorage(requireSupabase()),
+    [],
+  )
+  const imageUrls = useMemo(
+    () => new CloudImageUrlCache({ storage }),
+    [storage],
+  )
+  const imageService = useMemo(
+    () => new CloudRecipeImageService({ records: store, storage }),
+    [store, storage],
+  )
+  const notice = useSyncExternalStore(
+    subscribeCloudImageNotice,
+    getCloudImageNotice,
+    getCloudImageNotice,
+  )
+
+  // Signed URLs sind sitzungsgebunden und dürfen nach dem Logout nicht
+  // weiterverwendet werden. `clear()` (statt `dispose()`) bleibt auch bei der
+  // StrictMode-Doppelmontage im Entwicklungsmodus wiederverwendbar.
+  useEffect(() => () => imageUrls.clear(), [imageUrls])
+
   let content: ReactNode
   if (route.name === 'library') {
     content = <CloudLibraryPage store={store} />
   } else if (route.name === 'recipe') {
     content = <CloudRecipeDetailPage store={store} id={route.id} />
   } else if (route.name === 'recipe-new') {
-    content = <CloudRecipeEditorPage key="new" store={store} />
+    content = <CloudRecipeEditorPage key="new" store={store} images={imageService} />
   } else if (route.name === 'recipe-edit') {
-    content = <CloudRecipeEditorPage key={route.id} store={store} id={route.id} />
+    content = (
+      <CloudRecipeEditorPage
+        key={route.id}
+        store={store}
+        images={imageService}
+        id={route.id}
+      />
+    )
   } else {
     content = <CloudUnavailablePage />
   }
@@ -82,12 +132,29 @@ export function CloudRecipesApp({
         <button
           type="button"
           className="button quiet"
-          onClick={() => void onLogout()}
+          onClick={() => {
+            clearCloudImageNotice()
+            void onLogout()
+          }}
         >
           Abmelden
         </button>
       </nav>
-      {content}
+      {notice ? (
+        <div className="notice cloud-image-notice" role="status">
+          <p>{notice}</p>
+          <div className="notice-actions">
+            <button
+              type="button"
+              className="button quiet"
+              onClick={clearCloudImageNotice}
+            >
+              Hinweis schließen
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <CloudImageUrlProvider cache={imageUrls}>{content}</CloudImageUrlProvider>
     </NavigationGuardProvider>
   )
 }

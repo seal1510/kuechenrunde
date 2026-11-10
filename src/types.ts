@@ -98,6 +98,26 @@ export interface RecipeImage {
   bytes: ArrayBuffer
 }
 
+/**
+ * Metadata for one image stored in the private Supabase Storage bucket. The
+ * bytes never live in PostgreSQL and signed URLs are never persisted.
+ *
+ * `storagePath` is the object key inside `recipe-images`, normally
+ * `${recipeId}/${imageId}`. A replacement upload uses a fresh path so the old
+ * object is never overwritten before the metadata transaction succeeds.
+ */
+export interface RecipeImageMeta {
+  id: string
+  recipeId: string
+  position: number
+  mimeType: string
+  /** Exact byte length of the stored object. */
+  size: number
+  storagePath: string
+  createdAt: number
+  updatedAt: number
+}
+
 /** Metadata for a recipe imported from a public web page via JSON-LD. */
 export interface RecipeImportMeta {
   source: 'url'

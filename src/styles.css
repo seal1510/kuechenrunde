@@ -10552,3 +10552,69 @@ body.plan-panel-open {
     margin-left: 0;
   }
 }
+
+/* Cloud images: honest fallbacks instead of empty or broken areas. */
+.image-unavailable {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 12rem;
+  padding: 1rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  color: var(--muted);
+  text-align: center;
+}
+
+.image-unavailable small {
+  max-width: 42ch;
+  font-size: var(--text-xs);
+}
+
+.thumb-unavailable {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.recipe-card-image-error {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.editor-image-error {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.cloud-image-notice {
+  margin: 0 0 1rem;
+}
+
+.cloud-image-notice p {
+  margin: 0;
+}
+
+.recipe-cover .detail-image.image-unavailable {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  color: var(--muted);
+  text-align: center;
+  border-style: dashed;
+}

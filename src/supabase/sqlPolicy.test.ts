@@ -6,6 +6,10 @@
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import {
+  CLOUD_RECIPE_IMAGE_MIME_TYPES,
+  MAX_RECIPE_IMAGE_BYTES,
+} from '../import/image-mime'
 
 const sql = readFileSync(
   new URL('../../supabase/migrations/20261110134755_cloud.sql', import.meta.url),
@@ -135,6 +139,13 @@ describe('Supabase-Migration: Struktur und Rechte', () => {
     expect(storagePolicies).toHaveLength(4)
     expect(normalized).toContain("bucket_id = 'recipe-images'")
     expect(normalized).toContain('public.is_household_member()')
+  })
+
+  it('stimmt bei Bildgröße und MIME-Typen mit dem Frontend überein', () => {
+    expect(normalized).toContain(String(MAX_RECIPE_IMAGE_BYTES))
+    for (const mimeType of CLOUD_RECIPE_IMAGE_MIME_TYPES) {
+      expect(normalized).toContain(`'${mimeType}'`)
+    }
   })
 
   it('aktiviert Realtime für records', () => {

@@ -22,12 +22,24 @@ import {
 import { renderRecipeInstructions } from '../recipe/references'
 import { resolveOriginalServings } from '../domain/scaling'
 import type { EditorImage } from '../recipe/repository'
+import { MAX_RECIPE_IMAGE_BYTES } from '../import/image-mime'
+import { useCloudImageUrl } from '../cloud/CloudImageProvider'
 import { IngredientEditor } from './IngredientEditor'
 import { IngredientReferenceEditor } from './IngredientReferenceEditor'
 
 function EditorThumb({ image, alt }: { image: EditorImage; alt: string }) {
-  const url = useImageUrl(image.bytes, image.mimeType)
-  return url ? <img src={url} alt={alt} /> : <span className="muted">Bild</span>
+  const localUrl = useImageUrl(image.bytes, image.mimeType)
+  const remote = useCloudImageUrl(image.bytes ? null : image.storagePath)
+  const url = localUrl ?? remote.url
+  if (url) return <img src={url} alt={alt} />
+  if (remote.status === 'error') {
+    return (
+      <span className="editor-image-error" title={remote.error}>
+        Bild nicht verfügbar
+      </span>
+    )
+  }
+  return <span className="muted">{remote.status === 'loading' ? 'Lade Bild …' : 'Bild'}</span>
 }
 
 function TagEditor({
@@ -100,8 +112,9 @@ export interface RecipeFormProps {
   onChange: (draft: RecipeDraft) => void
   images: EditorImage[]
   onImagesChange: (images: EditorImage[]) => void
-  /** Im Cloud-Modus werden Bilder noch nicht gespeichert. */
   imagesEnabled?: boolean
+  /** Optional allow-list of the backing storage (cloud bucket). */
+  allowedImageTypes?: readonly string[]
   onSubmit: (event: FormEvent) => void
   error?: string
   categoriesNote?: string
@@ -115,6 +128,7 @@ export function RecipeForm({
   images,
   onImagesChange,
   imagesEnabled = true,
+  allowedImageTypes,
   onSubmit,
   error,
   categoriesNote,
@@ -187,18 +201,24 @@ export function RecipeForm({
     const added: EditorImage[] = []
     setImageError('')
     for (const file of Array.from(files)) {
+      const mimeType = file.type || 'image/jpeg'
       if (!file.type.startsWith('image/')) {
         setImageError(`„${file.name}“ ist keine Bilddatei.`)
         continue
       }
-      if (file.size > 10 * 1024 * 1024) {
+      if (allowedImageTypes && !allowedImageTypes.includes(mimeType)) {
+        setImageError(`„${file.name}“ hat einen nicht unterstützten Bildtyp.`)
+        continue
+      }
+      if (file.size > MAX_RECIPE_IMAGE_BYTES) {
         setImageError(`„${file.name}“ ist größer als 10 MB.`)
         continue
       }
       added.push({
         id: randomId(),
+        name: file.name,
         bytes: await file.arrayBuffer(),
-        mimeType: file.type || 'image/jpeg',
+        mimeType,
       })
     }
     if (added.length > 0) onImagesChange([...images, ...added])
@@ -549,7 +569,7 @@ export function RecipeForm({
                 <input
                   ref={fileRef}
                   type="file"
-                  accept="image/*"
+                  accept={allowedImageTypes?.join(',') ?? 'image/*'}
                   multiple
                   onChange={(event: ChangeEvent<HTMLInputElement>) =>
                     void handleImages(event.target.files)
@@ -568,7 +588,7 @@ export function RecipeForm({
                 <h2>Bilder</h2>
               </div>
               <p className="muted small">
-                Bilder werden im Cloud-Modus noch nicht unterstützt. Rezepte
+                Bilder werden in diesem Datenmodus nicht unterstützt. Rezepte
                 ohne Bilder funktionieren vollständig.
               </p>
             </section>

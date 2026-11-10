@@ -29,3 +29,35 @@ export function useImageUrl(
 
   return url
 }
+
+export interface ImageBytesSource {
+  id: string
+  bytes?: ArrayBuffer
+  mimeType?: string
+}
+
+/**
+ * Object URLs for a list of stored image byte arrays. All URLs are revoked
+ * together when the list changes or the component unmounts.
+ */
+export function useImageUrls(
+  images: readonly ImageBytesSource[],
+): Record<string, string> {
+  const [urls, setUrls] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const next: Record<string, string> = {}
+    for (const image of images) {
+      if (!image.bytes || !image.mimeType) continue
+      next[image.id] = URL.createObjectURL(
+        new Blob([image.bytes], { type: image.mimeType }),
+      )
+    }
+    setUrls(next)
+    return () => {
+      for (const url of Object.values(next)) URL.revokeObjectURL(url)
+    }
+  }, [images])
+
+  return urls
+}

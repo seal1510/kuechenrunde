@@ -96,9 +96,8 @@ Angewendete Migrationen:
 - `records` ist leer; `household_members` enthält das freigeschaltete
   Betreiberkonto, `auth.users` genau diesen Benutzer.
 
-**Noch offen (A3.1):**
+**Weiterhin offen:**
 
-- Storage-Upload/Download und signed URLs für Rezeptbilder.
 - Wochenplan, Einkaufsliste und Kochmodus im Cloud-Modus.
 
 Die RLS-Tests liefen direkt auf der Datenbank über
@@ -106,13 +105,13 @@ Die RLS-Tests liefen direkt auf der Datenbank über
 `BEGIN; SET LOCAL ROLE ...; SET LOCAL request.jwt.claim.sub ...; ROLLBACK;`.
 Es wurden keine Benutzer und keine dauerhaften Daten angelegt.
 
-## Frontend-Modus (A2/A3.1)
+## Frontend-Modus (A2/A3.1/A3.2)
 
 - **Standard:** `VITE_DATA_MODE` fehlt oder ist `local` → die bisherige lokale
   Dexie-App läuft unverändert.
 - **Cloud:** `VITE_DATA_MODE=cloud` plus `VITE_SUPABASE_URL` und
   `VITE_SUPABASE_PUBLISHABLE_KEY` → Login, Session-Verwaltung und gemeinsame
-  Rezeptbibliothek (ohne Bilder).
+  Rezeptbibliothek inklusive Bildern.
 - Die Supabase-Variablen allein schalten die App **nicht** um.
 - Im Cloud-Modus werden keine lokalen Dexie-Rezepte als Cloud-Daten angezeigt.
 - Login, Logout, Bootstrap, fehlende Mitgliedschaft und Netzwerkfehler sind
@@ -120,19 +119,47 @@ Es wurden keine Benutzer und keine dauerhaften Daten angelegt.
 
 ## Rezeptbibliothek im Cloud-Modus (A3.1)
 
-- Bibliothek, Detail und Editor verwenden die bestehenden React-Komponenten;
-  die Bildbearbeitung ist im Cloud-Modus deaktiviert.
+- Bibliothek, Detail und Editor verwenden die bestehenden React-Komponenten.
 - **Live im Browser bestanden:** Rezept anlegen, bearbeiten und löschen;
   Realtime für INSERT/UPDATE/DELETE zwischen zwei gleichzeitig geöffneten
   Tabs; Konflikt beim gleichzeitigen Bearbeiten (`PT409`, kein Overwrite);
   Testrezept anschließend gelöscht (`records = 0`).
-- **Nicht live getestet:** Storage/Bilder, Wochenplan, Einkauf und Kochmodus.
+- **Nicht live getestet:** Wochenplan, Einkauf und Kochmodus.
+
+## Rezeptbilder im Cloud-Modus (A3.2)
+
+- Bilddateien liegen ausschließlich im privaten Bucket `recipe-images` unter
+  `{recipeId}/{imageId}`. Eine Ersetzung nutzt einen neuen Pfad mit
+  Generationssuffix; die alte Datei wird erst nach erfolgreichem
+  Metadaten-Schreiben gelöscht.
+- Bild-Metadaten (`id`, `recipeId`, `position`, `mimeType`, `size`,
+  `storagePath`, `createdAt`, `updatedAt`) liegen in der Cloud-Collection
+  `images` in `public.records`. Signed URLs werden nie in der Datenbank
+  gespeichert.
+- Anzeige ausschließlich über authentifizierte Signed URLs (eine Stunde
+  gültig, Erneuerung fünf Minuten vor Ablauf). Der URL-Cache lebt nur im
+  Arbeitsspeicher und wird beim Logout verworfen.
+- Rezept und Bild-Metadaten werden in einem atomaren `apply_ops`-Aufruf
+  gespeichert. Neue Dateien werden vorher hochgeladen und bei einem Fehler
+  bestmöglich wieder entfernt. Schlägt das Löschen einer nicht mehr
+  referenzierten Datei fehl, zeigt die Oberfläche einen Hinweis.
+- **Unit-getestet:** Upload, mehrere Bilder, Reihenfolge, Entfernen, Ersetzen,
+  fehlgeschlagene Uploads/Metadaten-Transaktionen/Löschvorgänge, Konflikte,
+  Realtime-Metadaten, Signed-URL-Cache und unveränderte lokale Bildverwaltung.
+- **Live geprüft:** Bucket ist privat, 10 MiB groß und akzeptiert nur
+  JPEG/PNG/WebP/GIF/AVIF; die vier Storage-Policies gelten für
+  `authenticated`; ein authentifiziertes Haushaltsmitglied konnte in einer
+  Transaktion (`ROLLBACK`) eine Objektzeile einfügen und lesen; ein
+  authentifizierter Nicht-Mitglieds-Aufruf sah 0 Objekte. Ein Signed-URL-Aufruf
+  ohne Sitzung wurde mit HTTP 400 abgelehnt. **Nicht live geprüft:** der
+  vollständige Browser-Upload/-Download mit einem echten Familienkonto.
+- Temporäre SQL-Proben wurden zurückgerollt und entfernt; es blieben keine
+  Testobjekte oder Testrezepte zurück.
 
 ## Noch nicht enthalten
 
 - Anbindung von Wochenplan, Einkaufsliste und Kochmodus (`src/db.ts` bleibt
   für diese Bereiche lokal).
-- Bild-Upload/Download und signed URLs.
 - ZIP-Migration der lokalen Daten.
 - Cloudflare-Pages-Deployment und URL-Import-Function.
 

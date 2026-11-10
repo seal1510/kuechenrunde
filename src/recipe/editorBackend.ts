@@ -8,12 +8,12 @@
  * Navigationsschutz bleiben identisch.
  */
 
-import type { Recipe, RecipeImage } from '../types'
+import type { Recipe } from '../types'
 import type { EditorImage } from './repository'
 
 export interface RecipeEditorLoad {
   recipe: Recipe | null
-  images: RecipeImage[]
+  images: EditorImage[]
   /** Nur im Cloud-Modus: Revision für Compare-and-Swap. */
   rev?: number
 }
@@ -23,9 +23,19 @@ export interface RecipeEditorSaveContext {
   expectedRev?: number
 }
 
+/**
+ * Non-fatal problems after a successful metadata write. The recipe is saved,
+ * but leftover storage objects could not be removed. The UI must show this
+ * instead of reporting a completely clean success.
+ */
+export interface RecipeEditorSaveResult {
+  warnings: string[]
+}
+
 export interface RecipeEditorBackend {
-  /** Bilder sind im Cloud-Modus noch nicht angebunden. */
   supportsImages: boolean
+  /** Optional allow-list enforced by the backing storage bucket. */
+  imageMimeTypes?: readonly string[]
   storageHint: string
   deleteHint: string
   load(id?: string): Promise<RecipeEditorLoad | null>
@@ -33,6 +43,6 @@ export interface RecipeEditorBackend {
     recipe: Recipe,
     images: EditorImage[],
     context: RecipeEditorSaveContext,
-  ): Promise<void>
-  remove(id: string, expectedRev?: number): Promise<void>
+  ): Promise<RecipeEditorSaveResult | void>
+  remove(id: string, expectedRev?: number): Promise<RecipeEditorSaveResult | void>
 }

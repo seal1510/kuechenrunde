@@ -1,9 +1,12 @@
+import { useMemo } from 'react'
 import { Markdown } from '../components/Markdown'
 import { RecipeBody } from '../components/RecipeCard'
+import { RecipeImageGallery } from '../components/RecipeImageGallery'
 import type { CloudRecordsStore } from '../data/cloudRecords'
 import { formatDuration, effectiveDuration } from '../lib/format'
 import type { Recipe } from '../types'
-import { useCloudRecipe } from './useCloudRecipes'
+import { useCloudImageUrls } from './CloudImageProvider'
+import { useCloudRecipe, useCloudRecipeImages } from './useCloudRecipes'
 
 function servingsValue(recipe: Recipe): string {
   const text = recipe.servingsText.trim()
@@ -22,6 +25,22 @@ export function CloudRecipeDetailPage({
   id: string
 }) {
   const row = useCloudRecipe(store, id)
+  const images = useCloudRecipeImages(store, id)
+  const imagePaths = useMemo(
+    () => (images ?? []).map((image) => image.storagePath),
+    [images],
+  )
+  const imageUrls = useCloudImageUrls(imagePaths)
+  const galleryImages = useMemo(
+    () =>
+      (images ?? []).map((image) => ({
+        id: image.id,
+        url: imageUrls[image.storagePath]?.url ?? null,
+        error: imageUrls[image.storagePath]?.error,
+        status: imageUrls[image.storagePath]?.status ?? 'loading',
+      })),
+    [images, imageUrls],
+  )
 
   if (row === undefined) {
     return (
@@ -90,7 +109,7 @@ export function CloudRecipeDetailPage({
         </div>
       </div>
 
-      <header className="recipe-header no-image">
+      <header className={`recipe-header${galleryImages.length > 0 ? '' : ' no-image'}`}>
         <div className="recipe-heading">
           {labels.length > 0 ? <p className="recipe-kicker">{labels.join(' · ')}</p> : null}
           <h1>{recipe.title}</h1>
@@ -110,14 +129,19 @@ export function CloudRecipeDetailPage({
             </div>
           ) : null}
         </div>
+
+        {galleryImages.length > 0 ? (
+          <div className="recipe-cover">
+            <RecipeImageGallery images={galleryImages} />
+          </div>
+        ) : null}
       </header>
 
       <RecipeBody recipe={recipe} />
 
       <p className="muted small">
-        Wochenplan, Kochmodus und Bilder sind im Cloud-Modus noch nicht
-        verfügbar. Die Rezeptdetails und die Bearbeitung funktionieren bereits
-        geräteübergreifend.
+        Wochenplan und Kochmodus sind im Cloud-Modus noch nicht verfügbar.
+        Rezepte und Bilder funktionieren bereits geräteübergreifend.
       </p>
     </div>
   )

@@ -37,3 +37,11 @@ export class CloudNotLoadedError extends CloudDataError {
     this.name = 'CloudNotLoadedError'
   }
 }
+
+/** Ein privates Rezeptbild konnte nicht gespeichert, geladen oder gelöscht werden. */
+export class CloudImageError extends CloudDataError {
+  constructor(message: string, code?: string) {
+    super(message, code)
+    this.name = 'CloudImageError'
+  }
+}

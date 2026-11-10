@@ -72,4 +72,18 @@ describe('recipe image repository', () => {
   it('returns null for a missing recipe', async () => {
     expect(await loadRecipeEditorData('missing')).toBeNull()
   })
+
+  it('bleibt bytebasiert und löscht vorhandene lokale Bilder bei ungültigen Daten nicht', async () => {
+    await saveRecipeWithImages(makeRecipe(), [
+      { id: 'img-a', bytes: bytes([1, 2]), mimeType: 'image/png' },
+    ])
+
+    await expect(
+      saveRecipeWithImages(makeRecipe(), [{ id: 'img-a', mimeType: 'image/png' }]),
+    ).rejects.toThrow(/keine Bilddaten/)
+
+    const loaded = await loadRecipeEditorData('r1')
+    expect(loaded?.images.map((image) => image.id)).toEqual(['img-a'])
+    expect(new Uint8Array(loaded!.images[0]!.bytes)).toEqual(new Uint8Array([1, 2]))
+  })
 })

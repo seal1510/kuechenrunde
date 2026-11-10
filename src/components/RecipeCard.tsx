@@ -9,9 +9,12 @@ import { Markdown } from './Markdown'
 export function RecipeCard({
   recipe,
   coverUrl,
+  coverError,
 }: {
   recipe: Recipe
   coverUrl: string | null
+  /** Shown when a stored cover exists but could not be loaded. */
+  coverError?: string
 }) {
   const duration = effectiveDuration(recipe)
   const labels = Array.from(
@@ -40,6 +43,11 @@ export function RecipeCard({
                   <path d="M8 4.6V8l2.35 1.45" />
                 </svg>
                 <span>{duration}</span>
+              </p>
+            ) : null}
+            {coverError && !coverUrl ? (
+              <p className="recipe-card-image-error" title={coverError}>
+                Bild nicht verfügbar
               </p>
             ) : null}
             {labels.length > 0 || recipe.favorite || recipe.wantToCook ? (

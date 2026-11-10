@@ -12,6 +12,7 @@ import type {
   RecipeEditorBackend,
   RecipeEditorLoad,
 } from '../recipe/editorBackend'
+import { setCloudImageNotice } from '../cloud/cloudImageNotice'
 import { editorFingerprint, hasEditorChanges } from '../recipe/editorSession'
 import { localRecipeEditorBackend } from '../recipe/localEditorBackend'
 import type { EditorImage } from '../recipe/repository'
@@ -85,6 +86,9 @@ export function RecipeEditorPage({
       id: image.id,
       bytes: image.bytes,
       mimeType: image.mimeType,
+      name: image.name,
+      storagePath: image.storagePath,
+      size: image.size,
     }))
     baselineRef.current = editorFingerprint(nextDraft, nextImages)
     setDraft(nextDraft)
@@ -115,7 +119,10 @@ export function RecipeEditorPage({
     setDeleting(true)
     setError('')
     try {
-      await backend.remove(id, data?.rev)
+      const result = await backend.remove(id, data?.rev)
+      if (result && result.warnings.length > 0) {
+        setCloudImageNotice(result.warnings.join(' '))
+      }
       allowNextNavigation('#/')
       baselineRef.current = null
       window.location.hash = '#/'
@@ -143,10 +150,13 @@ export function RecipeEditorPage({
       const existing = data?.recipe ?? undefined
       if (id && !existing) throw new Error('Das Rezept wurde nicht gefunden.')
       const recipe = buildRecipeFromDraft(draft, existing)
-      await backend.save(recipe, images, {
+      const result = await backend.save(recipe, images, {
         isNew: !id,
         expectedRev: data?.rev,
       })
+      if (result && result.warnings.length > 0) {
+        setCloudImageNotice(result.warnings.join(' '))
+      }
       const targetHash = `#/recipe/${encodeURIComponent(recipe.id)}`
       allowNextNavigation(targetHash)
       baselineRef.current = editorFingerprint(draft, images)
@@ -230,6 +240,7 @@ export function RecipeEditorPage({
         images={images}
         onImagesChange={setImages}
         imagesEnabled={backend.supportsImages}
+        allowedImageTypes={backend.imageMimeTypes}
         onSubmit={handleSubmit}
         error={error}
         categoriesNote={data?.recipe?.categories.join(', ')}

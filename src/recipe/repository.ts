@@ -4,8 +4,19 @@ import type { Recipe, RecipeImage } from '../types'
 
 export interface EditorImage {
   id: string
-  bytes: ArrayBuffer
+  /**
+   * Local bytes. Always present for the local mode and for newly added files;
+   * absent for an already stored cloud image that is shown through a signed
+   * URL.
+   */
+  bytes?: ArrayBuffer
   mimeType: string
+  /** Original file name, used only for a helpful upload error message. */
+  name?: string
+  /** Private bucket object key for an already stored cloud image. */
+  storagePath?: string
+  /** Stored object size in bytes, when known. */
+  size?: number
 }
 
 export interface RecipeEditorData {
@@ -26,13 +37,18 @@ export async function loadRecipeEditorData(id: string): Promise<RecipeEditorData
  * The image at position 0 is the cover / primary image.
  */
 export async function saveRecipeWithImages(recipe: Recipe, images: EditorImage[]): Promise<void> {
-  const rows: RecipeImage[] = images.map((image, index) => ({
-    id: image.id || randomId(),
-    recipeId: recipe.id,
-    position: index,
-    mimeType: image.mimeType,
-    bytes: image.bytes,
-  }))
+  const rows: RecipeImage[] = images.map((image, index) => {
+    if (!image.bytes) {
+      throw new Error('Ein lokales Bild hat keine Bilddaten.')
+    }
+    return {
+      id: image.id || randomId(),
+      recipeId: recipe.id,
+      position: index,
+      mimeType: image.mimeType,
+      bytes: image.bytes,
+    }
+  })
 
   await db.transaction('rw', db.recipes, db.images, async () => {
     await db.recipes.put(recipe)

@@ -68,3 +68,15 @@ export const SAFE_REMOTE_IMAGE_MIME_TYPES = new Set([
   'image/gif',
   'image/avif',
 ])
+
+/**
+ * Bucket limit for `recipe-images` (10 MiB). The bucket enforces the same
+ * value; the editor checks it before reading the whole file into memory.
+ */
+export const MAX_RECIPE_IMAGE_BYTES = 10 * 1024 * 1024
+
+/**
+ * MIME types accepted by the private `recipe-images` bucket. Must stay in sync
+ * with `allowed_mime_types` in the Supabase migration.
+ */
+export const CLOUD_RECIPE_IMAGE_MIME_TYPES = [...SAFE_REMOTE_IMAGE_MIME_TYPES]
