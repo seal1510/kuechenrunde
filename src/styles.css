@@ -8219,6 +8219,15 @@ body.calendar-dragging * {
     gap: 0.85rem;
   }
 
+  /*
+   * `.cook-heading` uses a 20rem flex-basis for the horizontal desktop row.
+   * In the column layout that basis would become a 20rem-tall empty block
+   * between the title and the servings control, so reset it to content height.
+   */
+  .cook-heading {
+    flex: 0 0 auto;
+  }
+
   .cook-heading h1 {
     font-size: clamp(1.45rem, 6vw, 1.8rem);
   }

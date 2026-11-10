@@ -12,6 +12,7 @@ import {
   CookOverview,
   CookPage,
   CookStepView,
+  cookExitHref,
   cookServingsAfterDelta,
   cookUiReducer,
   initialCookUiState,
@@ -251,6 +252,7 @@ function stepMarkup(value: Recipe = recipe, currentIndex = 0) {
       currentIndex={currentIndex}
       onPrevious={() => undefined}
       onNext={() => undefined}
+      onFinish={() => undefined}
       onSelectStep={() => undefined}
     />,
   )
@@ -285,6 +287,8 @@ describe('cook mode entry and display', () => {
     live.reset(cookData(6))
     const html = renderToStaticMarkup(<CookPage recipeId="r1" cookSessionId="cook-1" />)
     expect(html).toContain('Schritt 1 von 2')
+    expect(html).toContain('href="#/plan"')
+    expect(html).toContain('Zum Essensplan')
     expect(html).toContain('Die 3 Zwiebeln fein würfeln.')
     expect(html).toContain('cook-step-ingredient-chip')
     expect(html).toContain('cook-step-ingredient-name">Zwiebeln')
@@ -326,6 +330,8 @@ describe('cook mode entry and display', () => {
     expect(html).toContain('Der geplante Kochvorgang wurde nicht gefunden')
     expect(html).toContain('Die 2 Zwiebeln fein würfeln.')
     expect(html).not.toContain('automatisch als gekocht')
+    expect(html).toContain('href="#/recipe/r1"')
+    expect(html).not.toContain('href="#/plan"')
   })
 
   it('shows a recoverable error instead of crashing when loading fails', () => {
@@ -372,6 +378,19 @@ describe('cook mode entry and display', () => {
     expect(html).toContain('Schritt 1 von 1')
     expect(html).toContain('Die 2 Zwiebeln fein würfeln.')
     expect(html).not.toContain('In diesem Schritt')
+  })
+})
+
+describe('cook mode exit target', () => {
+  it('returns to the week plan for a valid planned cooking event', () => {
+    expect(cookExitHref('r1', true)).toBe('#/plan')
+  })
+
+  it('returns to the recipe for a direct start or missing entry context', () => {
+    expect(cookExitHref('r1', false)).toBe('#/recipe/r1')
+    expect(cookExitHref('rezept/mit slash', false)).toBe(
+      '#/recipe/rezept%2Fmit%20slash',
+    )
   })
 })
 
@@ -482,15 +501,19 @@ describe('cook mode views', () => {
     expect(cookServingsAfterDelta(1, -5)).toBe(MIN_COOK_SERVINGS)
   })
 
-  it('uses meaningful navigation states on the first and last step', () => {
+  it('uses meaningful navigation states on the first, middle and last step', () => {
     const first = stepMarkup(recipe, 0)
     expect(first).toMatch(/<button[^>]*disabled[^>]*>← Zurück<\/button>/)
+    expect(first).toMatch(/<button[^>]*>Weiter →<\/button>/)
     expect(first).not.toMatch(/<button[^>]*disabled[^>]*>Weiter →<\/button>/)
+    expect(first).not.toContain('>Beenden<')
 
     const last = stepMarkup(recipe, recipe.instructions.length - 1)
     expect(last).toContain('Letzter Schritt')
     expect(last).not.toMatch(/<button[^>]*disabled[^>]*>← Zurück<\/button>/)
-    expect(last).toMatch(/<button[^>]*disabled[^>]*>Weiter →<\/button>/)
+    expect(last).toMatch(/<button[^>]*>Beenden<\/button>/)
+    expect(last).not.toMatch(/<button[^>]*disabled[^>]*>Beenden<\/button>/)
+    expect(last).not.toContain('Weiter →')
   })
 
   it('renders the same ingredient highlighting in both cook views', () => {

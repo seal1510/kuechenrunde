@@ -62,6 +62,20 @@ export function clampCookStepIndex(index: number, stepCount: number): number {
   return Math.max(0, Math.min(Math.trunc(index), Math.trunc(stepCount) - 1))
 }
 
+/**
+ * Exit target of cook mode. A valid planned cooking event returns to the week
+ * plan; a direct recipe start (or a missing/invalid session context) returns to
+ * the recipe detail page.
+ */
+export function cookExitHref(
+  recipeId: string,
+  hasPlanContext: boolean,
+): string {
+  return hasPlanContext
+    ? '#/plan'
+    : `#/recipe/${encodeURIComponent(recipeId)}`
+}
+
 function normalizeCookServings(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return MIN_COOK_SERVINGS
   return Math.max(MIN_COOK_SERVINGS, Math.round(value * 100) / 100)
@@ -194,6 +208,7 @@ interface CookStepViewProps {
   currentIndex: number
   onPrevious: () => void
   onNext: () => void
+  onFinish: () => void
   onSelectStep: (index: number) => void
 }
 
@@ -203,6 +218,7 @@ export function CookStepView({
   currentIndex: rawCurrentIndex,
   onPrevious,
   onNext,
+  onFinish,
   onSelectStep,
 }: CookStepViewProps) {
   if (steps.length === 0) {
@@ -242,14 +258,15 @@ export function CookStepView({
           <button type="button" className="button" onClick={onPrevious} disabled={isFirst}>
             ← Zurück
           </button>
-          <button
-            type="button"
-            className="button primary"
-            onClick={onNext}
-            disabled={isLast}
-          >
-            Weiter →
-          </button>
+          {isLast ? (
+            <button type="button" className="button primary" onClick={onFinish}>
+              Beenden
+            </button>
+          ) : (
+            <button type="button" className="button primary" onClick={onNext}>
+              Weiter →
+            </button>
+          )}
         </div>
       </section>
 
@@ -603,7 +620,7 @@ export function CookPage({
     )
   }
 
-  const exitHref = cookSessionId ? '#/plan' : `#/recipe/${encodeURIComponent(recipe.id)}`
+  const exitHref = cookExitHref(recipe.id, Boolean(data?.sessionId))
   const isOverview = ui.view === 'overview'
   const progressPercent =
     steps.length === 0 ? 0 : Math.round(((currentIndex + 1) / steps.length) * 100)
@@ -619,7 +636,7 @@ export function CookPage({
     <div className={`page cook-page ${isOverview ? 'is-overview' : 'is-step'}`}>
       <div className="cook-topbar">
         <a className="button quiet cook-exit" href={exitHref}>
-          ← {cookSessionId ? 'Zum Essensplan' : 'Zum Rezept'}
+          ← {data?.sessionId ? 'Zum Essensplan' : 'Zum Rezept'}
         </a>
         <div className="cook-topbar-tools">
           <CookTimerToggle
@@ -776,6 +793,9 @@ export function CookPage({
           currentIndex={currentIndex}
           onPrevious={() => goToStep(currentIndex - 1)}
           onNext={() => goToStep(currentIndex + 1)}
+          onFinish={() => {
+            window.location.hash = exitHref
+          }}
           onSelectStep={goToStep}
         />
       )}
