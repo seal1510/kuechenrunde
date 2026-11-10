@@ -13,6 +13,7 @@
  * binary floating point rounding.
  */
 
+import { catalogShoppingKey } from './ingredientCatalog'
 import type { ShoppingAllocationMode, ShoppingDemandAllocation, ShoppingList } from '../types'
 import { addDays, dayNumber, formatWeekRange, startOfWeekOn } from './dates'
 import type { ShoppingAmountPosition } from './shopping'
@@ -501,9 +502,12 @@ export function resolveShoppingDistribution(
       continue
     }
     if (allocation.periodStart !== period.start) continue
-    const list = allocationsByItem.get(allocation.itemKey) ?? []
+    // Older rows may use a synonym or a former form key of the same catalogue
+    // product. Both describe one shopping identity, so they are grouped here.
+    const itemKey = catalogShoppingKey(allocation.itemKey)
+    const list = allocationsByItem.get(itemKey) ?? []
     list.push(allocation)
-    allocationsByItem.set(allocation.itemKey, list)
+    allocationsByItem.set(itemKey, list)
   }
 
   const demandKeys = new Set(input.demand.map((item) => item.key))
@@ -950,8 +954,6 @@ export interface ShoppingOpenPosition {
   purchaseIds: string[]
 }
 
-export type ShoppingUnmatchedPurchaseReason = 'no-demand' | 'non-numeric'
-
 export interface ShoppingUnmatchedPurchase {
   purchaseId: string
   listId: string
@@ -960,33 +962,69 @@ export interface ShoppingUnmatchedPurchase {
   lower: number
   upper: number
   qualitative: boolean
-  reason: ShoppingUnmatchedPurchaseReason
 }
 
 export interface ShoppingOpenResult {
   positions: ShoppingOpenPosition[]
   unmatchedPurchases: ShoppingUnmatchedPurchase[]
+  /** Effective list per purchase after unambiguous cross-list attribution. */
+  purchaseListIds: Map<string, string>
+}
+
+function itemListKey(listId: string, itemKey: string): string {
+  return `${listId}\u0000${itemKey}`
 }
 
 function purchaseKey(listId: string, itemKey: string, dimension: string): string {
-  return `${listId}\u0000${itemKey}\u0000${dimension}`
+  return `${itemListKey(listId, itemKey)}\u0000${dimension}`
 }
 
 /**
- * Subtract purchases per list exactly once. Purchases stay on the list where
- * they were recorded; a moved allocation never silently moves a purchase.
+ * Subtract purchases per list exactly once. The persisted purchase keeps its
+ * recorded list; when that list no longer carries the item and exactly one
+ * other list does, the purchase is applied there instead of becoming a review
+ * conflict. Several possible target lists stay ambiguous and are reported.
  */
 export function resolveOpenShoppingAmounts(
-  distribution: Pick<ShoppingDistributionResult, 'positions'>,
+  distribution: Pick<ShoppingDistributionResult, 'positions' | 'unquantified'>,
   purchases: readonly ShoppingPurchaseContribution[],
 ): ShoppingOpenResult {
+  const demandListsByItem = new Map<string, Set<string>>()
+  const addDemandList = (itemKey: string, listId: string) => {
+    const lists = demandListsByItem.get(itemKey) ?? new Set<string>()
+    lists.add(listId)
+    demandListsByItem.set(itemKey, lists)
+  }
+  for (const position of distribution.positions) {
+    for (const amount of position.amounts) {
+      if (amount.lower <= 0 && amount.upper <= 0) continue
+      addDemandList(position.itemKey, amount.listId)
+    }
+  }
+  for (const placement of distribution.unquantified) {
+    addDemandList(placement.itemKey, placement.listId)
+  }
+
+  // A purchase recorded on a list that no longer carries the item still
+  // belongs to the item when there is exactly one possible target list. This
+  // keeps normal plan/reset changes from turning a bought article into a
+  // review conflict; multiple targets stay ambiguous and are reported.
+  const purchaseListIds = new Map<string, string>()
+  const effectiveListId = (purchase: ShoppingPurchaseContribution): string => {
+    const lists = demandListsByItem.get(purchase.itemKey)
+    if (!lists || lists.size === 0 || lists.has(purchase.listId)) return purchase.listId
+    return lists.size === 1 ? (lists.values().next().value ?? purchase.listId) : purchase.listId
+  }
+
   const purchased = new Map<
     string,
     { lower: number; upper: number; purchaseIds: string[] }
   >()
   for (const purchase of purchases) {
+    const listId = effectiveListId(purchase)
+    purchaseListIds.set(purchase.id, listId)
     if (!purchase.dimension) continue
-    const key = purchaseKey(purchase.listId, purchase.itemKey, purchase.dimension)
+    const key = purchaseKey(listId, purchase.itemKey, purchase.dimension)
     const existing = purchased.get(key) ?? {
       lower: 0,
       upper: 0,
@@ -1040,23 +1078,21 @@ export function resolveOpenShoppingAmounts(
     }
   }
 
+  // A purchase is only unmatched when the item has no visible demand on the
+  // effective list at all. A qualitative article is demanded even without a
+  // number, and a numeric purchase whose dimension changed is still a valid
+  // purchase of a needed item; both stay part of the normal row instead of a
+  // review conflict.
   const unmatchedPurchases: ShoppingUnmatchedPurchase[] = []
   for (const purchase of purchases) {
+    const listId = purchaseListIds.get(purchase.id) ?? purchase.listId
+    const hasDemand = demandListsByItem.get(purchase.itemKey)?.has(listId) === true
     if (!purchase.dimension) {
-      unmatchedPurchases.push({
-        purchaseId: purchase.id,
-        listId: purchase.listId,
-        itemKey: purchase.itemKey,
-        dimension: null,
-        lower: purchase.lower,
-        upper: purchase.upper,
-        qualitative: purchase.qualitative,
-        reason: 'non-numeric',
-      })
-      continue
+      if (hasDemand) continue
+    } else {
+      const key = purchaseKey(listId, purchase.itemKey, purchase.dimension)
+      if (matched.has(key) || hasDemand) continue
     }
-    const key = purchaseKey(purchase.listId, purchase.itemKey, purchase.dimension)
-    if (matched.has(key)) continue
     unmatchedPurchases.push({
       purchaseId: purchase.id,
       listId: purchase.listId,
@@ -1065,11 +1101,10 @@ export function resolveOpenShoppingAmounts(
       lower: purchase.lower,
       upper: purchase.upper,
       qualitative: purchase.qualitative,
-      reason: 'no-demand',
     })
   }
 
-  return { positions, unmatchedPurchases }
+  return { positions, unmatchedPurchases, purchaseListIds }
 }
 
 /** Open amount for one assigned quantity, clamped at zero. */

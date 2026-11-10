@@ -8,6 +8,7 @@ import { UrlImportPage } from './pages/UrlImportPage'
 import { PlanPage } from './pages/PlanPage'
 import { ShoppingPage } from './pages/ShoppingPage'
 import { BackupPage } from './pages/BackupPage'
+import { AboutPage } from './pages/AboutPage'
 import { NavigationGuardProvider } from './routing/NavigationGuard'
 import { parseRoute, type Route } from './routing/routes'
 
@@ -34,11 +35,11 @@ export default function App() {
           <div className="app-header-inner">
             <a className="brand" href="#/">
               <span className="brand-mark" aria-hidden="true">
-                oc
+                kr
               </span>
               <span>
-                <strong>openCook</strong>
-                <small>Web</small>
+                <strong>Küchenrunde</strong>
+                <small className="brand-subtitle">Rezepte · Wochenplan · Einkaufsliste</small>
               </span>
             </a>
             <nav className="main-nav" aria-label="Hauptnavigation">
@@ -99,13 +100,14 @@ export default function App() {
           {route.name === 'import' ? <ImportPage /> : null}
           {route.name === 'import-url' ? <UrlImportPage /> : null}
           {route.name === 'backup' ? <BackupPage /> : null}
+          {route.name === 'about' ? <AboutPage /> : null}
         </main>
 
         {focused ? null : (
         <footer className="app-footer">
           <span>Lokal im Browser gespeichert · keine Cloud, keine Konten</span>
           <span>
-            GPLv3 · basiert auf{' '}
+            <a href="#/about">Über Küchenrunde</a> · GPL-3.0-or-later · basiert auf{' '}
             <a href="https://github.com/oliexdev/openCook" target="_blank" rel="noreferrer noopener">
               openCook
             </a>

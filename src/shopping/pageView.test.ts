@@ -203,6 +203,60 @@ function tomatoKey(): string {
   return shoppingItemKey('Tomaten')
 }
 
+function ingredientWithoutQuantity(name: string, position = 0): Ingredient {
+  return ingredient({
+    name,
+    raw: name,
+    quantity: null,
+    quantityText: null,
+    unit: null,
+    position,
+  })
+}
+
+function rowNamed(
+  view: Awaited<ReturnType<typeof loadView>>,
+  listId: string,
+  name: string,
+): ShoppingPageRow | undefined {
+  return rowsFor(view, listId).find((row) => row.name === name)
+}
+
+async function buyQualitative(
+  itemKey: string,
+  listId: string,
+  shoppingDate = PERIOD,
+): Promise<void> {
+  await addShoppingPurchase({
+    shoppingDate,
+    itemKey,
+    listId,
+    periodStart: PERIOD,
+    amounts: [],
+    snapshot: [],
+    qualitative: true,
+  })
+}
+
+async function buyQuantity(
+  itemKey: string,
+  listId: string,
+  lower: number,
+  upper: number,
+  snapshot: ShoppingPageRow['requiredPositions'],
+  dimension = 'count',
+  shoppingDate = PERIOD,
+): Promise<void> {
+  await addShoppingPurchase({
+    shoppingDate,
+    itemKey,
+    listId,
+    periodStart: PERIOD,
+    amounts: [{ dimension, lower, upper }],
+    snapshot,
+  })
+}
+
 beforeEach(async () => {
   await clearAll()
 })
@@ -230,6 +284,167 @@ describe('shopping page view', () => {
     expect(rowsFor(view, view.standardListId).some((row) => row.name === 'Tomaten')).toBe(
       true,
     )
+  })
+
+  it('hides staple ingredients from automatic demand only and keeps counters exact', async () => {
+    const staples = [
+      'Salz',
+      'Pfeffer',
+      'Wasser',
+      'Olivenöl',
+      'Zucker',
+    ]
+    const visible = ['Tomaten', 'Cayennepfeffer', 'Chiliöl', 'Sesamöl', 'Koriander gemahlen']
+    await db.recipes.put(
+      recipe({
+        ingredients: [...staples, ...visible].map((name, position) =>
+          ingredient({
+            name,
+            raw: `1 ${name}`,
+            quantityText: '1',
+            unit: 'Stück',
+            position,
+          }),
+        ),
+      }),
+    )
+    await db.cookSessions.put(session())
+    const list = await createFreeShoppingList({ name: 'Gewürze' })
+    await createManualListItem({
+      listId: list.id,
+      name: 'Salz',
+      quantityText: '1',
+      unit: 'Stück',
+      shoppingDate: PERIOD,
+    })
+
+    const view = await loadView()
+    const standardRows = rowsFor(view, view.standardListId)
+    expect(standardRows.map((row) => row.name).sort()).toEqual([...visible].sort())
+    expect(rowsFor(view, list.id).map((row) => row.name)).toEqual(['Salz'])
+    expect(view.reviewRowsByList[view.standardListId] ?? []).toHaveLength(0)
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+    expect(view.lists.find((entry) => entry.id === view.standardListId)).toMatchObject({
+      openCount: visible.length,
+      doneCount: 0,
+      reviewCount: 0,
+      requiresReview: false,
+    })
+    expect(view.lists.find((entry) => entry.id === list.id)).toMatchObject({
+      openCount: 1,
+      doneCount: 0,
+      reviewCount: 0,
+      requiresReview: false,
+    })
+  })
+
+  it('hides descriptive staple variants but keeps flavoured oils and preserves', async () => {
+    await db.recipes.put(
+      recipe({
+        ingredients: [
+          ingredient({
+            name: 'Olivenöl (nach Bedarf)',
+            raw: '1 EL Olivenöl (nach Bedarf)',
+            quantity: 1,
+            quantityText: '1',
+            unit: 'EL',
+            position: 0,
+          }),
+          ingredient({
+            name: 'Öl (neutral)',
+            raw: '1 EL Öl (neutral)',
+            quantity: 1,
+            quantityText: '1',
+            unit: 'EL',
+            position: 1,
+          }),
+          ingredient({
+            name: 'Pfeffer, frisch gemahlen',
+            raw: '1 Prise Pfeffer, frisch gemahlen',
+            quantity: 1,
+            quantityText: '1',
+            unit: 'Prise',
+            position: 2,
+          }),
+          ingredient({
+            name: 'Wasser, kochend heiß',
+            raw: '450 ml Wasser, kochend heiß',
+            quantity: 450,
+            quantityText: '450',
+            unit: 'ml',
+            position: 3,
+          }),
+          ingredient({
+            name: 'Chiliöl',
+            raw: '1 TL Chiliöl',
+            quantity: 1,
+            quantityText: '1',
+            unit: 'TL',
+            position: 4,
+          }),
+          ingredient({
+            name: 'Sesamöl',
+            raw: '1 TL Sesamöl',
+            quantity: 1,
+            quantityText: '1',
+            unit: 'TL',
+            position: 5,
+          }),
+          ingredient({
+            name: 'Mangos',
+            raw: '1 Mango(s), frische',
+            quantity: 1,
+            quantityText: '1',
+            unit: null,
+            position: 6,
+          }),
+          ingredient({
+            name: 'Mangos, in Spalten, in Flüssigkeit',
+            raw: '1 Dose Mango(s), in Spalten, in Flüssigkeit',
+            quantity: 1,
+            quantityText: '1',
+            unit: 'Dose',
+            position: 7,
+          }),
+        ],
+      }),
+    )
+    await db.cookSessions.put(session())
+    const list = await createFreeShoppingList({ name: 'Vorrat' })
+    await createManualListItem({
+      listId: list.id,
+      name: 'Olivenöl',
+      quantityText: '1',
+      unit: 'Flasche',
+      shoppingDate: PERIOD,
+    })
+
+    const view = await loadView()
+    const standardRows = rowsFor(view, view.standardListId)
+    const standardNames = standardRows.map((row) => row.name)
+    expect(standardNames).not.toContain('Olivenöl')
+    expect(standardNames).not.toContain('Öl')
+    expect(standardNames).not.toContain('Pfeffer')
+    expect(standardNames).not.toContain('Wasser')
+    expect(standardNames).toContain('Chiliöl')
+    expect(standardNames).toContain('Sesamöl')
+    expect(standardRows.filter((row) => row.name === 'Mangos')).toHaveLength(2)
+    expect(
+      standardRows
+        .filter((row) => row.name === 'Mangos')
+        .map((row) => row.categoryId)
+        .sort(),
+    ).toEqual(['canned', 'produce'])
+    expect(rowsFor(view, list.id).map((row) => row.name)).toEqual(['Olivenöl'])
+    expect(view.reviewRowsByList[view.standardListId] ?? []).toHaveLength(0)
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+    expect(view.lists.find((entry) => entry.id === view.standardListId)).toMatchObject({
+      openCount: 4,
+      doneCount: 0,
+      reviewCount: 0,
+    })
   })
 
   it('creates, renames and deletes a free list with explicit confirmation', async () => {
@@ -333,6 +548,626 @@ describe('shopping page view', () => {
     view = await loadView()
     automatic = rowsFor(view, view.standardListId).find((row) => row.name === 'Tomaten')
     expect(automatic?.status).toBe('open')
+  })
+
+  it('checks and reopens an automatic ingredient without a quantity', async () => {
+    await db.recipes.put(
+      recipe({
+        ingredients: [
+          ingredient({
+            name: 'Mozzarella',
+            raw: 'Mozzarella',
+            quantity: null,
+            quantityText: '',
+            unit: null,
+          }),
+        ],
+      }),
+    )
+    await db.cookSessions.put(session())
+    const key = shoppingItemKey('Mozzarella')
+
+    let view = await loadView()
+    let row = rowsFor(view, view.standardListId).find((entry) => entry.name === 'Mozzarella')
+    expect(row).toMatchObject({
+      status: 'open',
+      missingQuantity: true,
+      requiredPositions: [],
+      openPositions: [],
+    })
+
+    await addShoppingPurchase({
+      shoppingDate: PERIOD,
+      itemKey: key,
+      listId: view.standardListId,
+      amounts: [],
+      snapshot: [],
+      qualitative: true,
+    })
+
+    view = await loadView()
+    row = rowsFor(view, view.standardListId).find((entry) => entry.name === 'Mozzarella')
+    expect(row?.status).toBe('done')
+    expect(row?.purchaseIds).toHaveLength(1)
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.reviewRowsByList[view.standardListId] ?? []).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+    expect(
+      view.lists.find((entry) => entry.id === view.standardListId),
+    ).toMatchObject({ openCount: 0, doneCount: 1, reviewCount: 0 })
+
+    await removeShoppingPurchase(row!.purchaseIds[0]!)
+    view = await loadView()
+    row = rowsFor(view, view.standardListId).find((entry) => entry.name === 'Mozzarella')
+    expect(row?.status).toBe('open')
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+  })
+
+  it('checks an ingredient with a verbal quantity without a review warning', async () => {
+    await db.recipes.put(
+      recipe({
+        ingredients: [
+          ingredient({
+            name: 'Kapern',
+            raw: 'etwas Kapern',
+            quantity: null,
+            quantityText: 'etwas',
+            unit: null,
+          }),
+        ],
+      }),
+    )
+    await db.cookSessions.put(session())
+
+    let view = await loadView()
+    const listId = view.standardListId
+    expect(rowNamed(view, listId, 'Kapern')).toMatchObject({
+      status: 'open',
+      unparsedAmounts: ['etwas'],
+      missingQuantity: false,
+    })
+
+    await buyQualitative(shoppingItemKey('Kapern'), listId)
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Kapern')?.status).toBe('done')
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.reviewRowsByList[listId] ?? []).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+  })
+
+  it('checks several ingredients without quantities independently', async () => {
+    await db.recipes.put(
+      recipe({
+        ingredients: [
+          ingredientWithoutQuantity('Mozzarella', 0),
+          ingredientWithoutQuantity('Basilikum', 1),
+          ingredientWithoutQuantity('Kapern', 2),
+        ],
+      }),
+    )
+    await db.cookSessions.put(session())
+
+    let view = await loadView()
+    const listId = view.standardListId
+    expect(rowsFor(view, listId).map((row) => row.name).sort()).toEqual([
+      'Basilikum',
+      'Kapern',
+      'Mozzarella',
+    ])
+    for (const row of rowsFor(view, listId)) {
+      expect(row).toMatchObject({
+        status: 'open',
+        missingQuantity: true,
+        requiredPositions: [],
+        openPositions: [],
+      })
+    }
+
+    await buyQualitative(shoppingItemKey('Mozzarella'), listId)
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Mozzarella')?.status).toBe('done')
+    expect(rowNamed(view, listId, 'Basilikum')?.status).toBe('open')
+    expect(rowNamed(view, listId, 'Kapern')?.status).toBe('open')
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.reviewRowsByList[listId] ?? []).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+
+    await buyQualitative(shoppingItemKey('Basilikum'), listId)
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Mozzarella')?.status).toBe('done')
+    expect(rowNamed(view, listId, 'Basilikum')?.status).toBe('done')
+    expect(rowNamed(view, listId, 'Kapern')?.status).toBe('open')
+    expect(view.requiresReview).toBe(false)
+
+    const mozzarella = rowNamed(view, listId, 'Mozzarella')
+    await removeShoppingPurchase(mozzarella!.purchaseIds[0]!)
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Mozzarella')?.status).toBe('open')
+    expect(rowNamed(view, listId, 'Basilikum')?.status).toBe('done')
+    expect(view.serviceConflicts).toHaveLength(0)
+  })
+
+  it('keeps quantity-bearing demand unchanged when a quantity-less ingredient is checked', async () => {
+    await db.recipes.put(
+      recipe({
+        ingredients: [
+          ingredient({
+            name: 'Tomaten',
+            raw: '2 Tomaten',
+            quantity: 2,
+            quantityText: '2',
+            unit: 'Stück',
+            position: 0,
+          }),
+          ingredientWithoutQuantity('Mozzarella', 1),
+        ],
+      }),
+    )
+    await db.cookSessions.put(session())
+
+    let view = await loadView()
+    const listId = view.standardListId
+    const tomatoes = rowNamed(view, listId, 'Tomaten')
+    expect(tomatoes?.openPositions[0]).toMatchObject({ lower: 2, upper: 2 })
+    expect(rowNamed(view, listId, 'Mozzarella')?.missingQuantity).toBe(true)
+
+    await buyQualitative(shoppingItemKey('Mozzarella'), listId)
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Mozzarella')?.status).toBe('done')
+    expect(rowNamed(view, listId, 'Tomaten')?.status).toBe('open')
+    expect(rowNamed(view, listId, 'Tomaten')?.openPositions[0]).toMatchObject({
+      lower: 2,
+      upper: 2,
+    })
+    expect(view.serviceConflicts).toHaveLength(0)
+
+    await buyQuantity(
+      tomatoKey(),
+      listId,
+      2,
+      2,
+      rowNamed(view, listId, 'Tomaten')?.requiredPositions ?? [],
+    )
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Tomaten')?.status).toBe('done')
+    expect(rowNamed(view, listId, 'Mozzarella')?.status).toBe('done')
+    expect(view.reviewRowsByList[listId] ?? []).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+  })
+
+  it('merges the same ingredient from several recipes into one demand', async () => {
+    await db.recipes.bulkPut([
+      recipe({
+        id: 'r1',
+        title: 'Tomaten A',
+        ingredients: [
+          ingredient({ name: 'Tomaten', raw: '3 Tomaten', quantity: 3, quantityText: '3', unit: 'Stück' }),
+        ],
+      }),
+      recipe({
+        id: 'r2',
+        importId: 'mela-r2',
+        title: 'Tomaten B',
+        ingredients: [
+          ingredient({ name: 'Tomaten', raw: '5 Tomaten', quantity: 5, quantityText: '5', unit: 'Stück' }),
+        ],
+      }),
+    ])
+    await db.cookSessions.bulkPut([
+      session({ id: 's1', recipeId: 'r1', date: PERIOD }),
+      session({ id: 's2', recipeId: 'r2', date: '2026-11-06' }),
+    ])
+
+    let view = await loadView()
+    const listId = view.standardListId
+    expect(rowsFor(view, listId).filter((row) => row.name === 'Tomaten')).toHaveLength(1)
+    const tomatoes = rowNamed(view, listId, 'Tomaten')
+    expect(tomatoes?.requiredPositions).toHaveLength(1)
+    expect(tomatoes?.requiredPositions[0]).toMatchObject({ lower: 8, upper: 8 })
+    expect(tomatoes?.openPositions[0]).toMatchObject({ lower: 8, upper: 8 })
+    expect(view.serviceConflicts).toHaveLength(0)
+
+    await buyQuantity(tomatoKey(), listId, 8, 8, tomatoes?.requiredPositions ?? [])
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Tomaten')?.status).toBe('done')
+    expect(view.requiresReview).toBe(false)
+  })
+
+  it('combines a quantified and a quantity-less contribution of the same ingredient', async () => {
+    await db.recipes.bulkPut([
+      recipe({
+        id: 'r1',
+        title: 'Tomaten A',
+        ingredients: [
+          ingredient({ name: 'Tomaten', raw: '2 Tomaten', quantity: 2, quantityText: '2', unit: 'Stück' }),
+        ],
+      }),
+      recipe({
+        id: 'r2',
+        importId: 'mela-r2',
+        title: 'Tomaten B',
+        ingredients: [ingredientWithoutQuantity('Tomaten')],
+      }),
+    ])
+    await db.cookSessions.bulkPut([
+      session({ id: 's1', recipeId: 'r1', date: PERIOD }),
+      session({ id: 's2', recipeId: 'r2', date: '2026-11-06' }),
+    ])
+
+    let view = await loadView()
+    const listId = view.standardListId
+    const tomatoes = rowNamed(view, listId, 'Tomaten')
+    expect(tomatoes?.requiredPositions[0]).toMatchObject({ lower: 2, upper: 2 })
+    expect(tomatoes?.missingQuantity).toBe(true)
+    expect(tomatoes?.unparsedAmounts).toEqual([])
+    expect(view.requiresReview).toBe(false)
+
+    await buyQuantity(tomatoKey(), listId, 2, 2, tomatoes?.requiredPositions ?? [])
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Tomaten')?.status).toBe('done')
+    expect(view.serviceConflicts).toHaveLength(0)
+  })
+
+  it('keeps a quantity-less ingredient checked on its free list', async () => {
+    await db.recipes.put(
+      recipe({ ingredients: [ingredientWithoutQuantity('Mozzarella')] }),
+    )
+    await db.cookSessions.put(session())
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const key = shoppingItemKey('Mozzarella')
+    await moveShoppingItem({ periodStart: PERIOD, itemKey: key, targetListId: market.id })
+
+    let view = await loadView()
+    expect(rowNamed(view, view.standardListId, 'Mozzarella')).toBeUndefined()
+    const marketRow = rowNamed(view, market.id, 'Mozzarella')
+    expect(marketRow).toMatchObject({ status: 'open', missingQuantity: true })
+
+    await buyQualitative(key, market.id)
+    view = await loadView()
+    expect(rowNamed(view, market.id, 'Mozzarella')?.status).toBe('done')
+    expect(rowNamed(view, view.standardListId, 'Mozzarella')).toBeUndefined()
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.reviewRowsByList[market.id] ?? []).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+
+    const done = rowNamed(view, market.id, 'Mozzarella')
+    await removeShoppingPurchase(done!.purchaseIds[0]!)
+    view = await loadView()
+    expect(rowNamed(view, market.id, 'Mozzarella')?.status).toBe('open')
+  })
+
+  it('attributes a purchase to the only list that still needs the item', async () => {
+    await db.recipes.put(
+      recipe({ ingredients: [ingredientWithoutQuantity('Mozzarella')] }),
+    )
+    await db.cookSessions.put(session())
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const key = shoppingItemKey('Mozzarella')
+    await moveShoppingItem({ periodStart: PERIOD, itemKey: key, targetListId: market.id })
+
+    let view = await loadView()
+    // The purchase was recorded before the item was moved and still carries
+    // the old list reference. There is only one possible target list, so it
+    // must count there without a review conflict.
+    await buyQualitative(key, view.standardListId)
+    view = await loadView()
+    expect(rowNamed(view, market.id, 'Mozzarella')?.status).toBe('done')
+    expect(rowNamed(view, view.standardListId, 'Mozzarella')).toBeUndefined()
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.reviewRowsByList[market.id] ?? []).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+  })
+
+  it('keeps a purchase in review when several lists need the same item', async () => {
+    await seed()
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const organic = await createFreeShoppingList({ name: 'Bioladen' })
+    const third = await createFreeShoppingList({ name: 'Dritte Liste' })
+    await assignShoppingSubquantity({
+      periodStart: PERIOD,
+      itemKey: tomatoKey(),
+      dimension: 'count',
+      targetListId: market.id,
+      quantity: 4,
+    })
+    await assignShoppingSubquantity({
+      periodStart: PERIOD,
+      itemKey: tomatoKey(),
+      dimension: 'count',
+      targetListId: organic.id,
+      quantity: 4,
+    })
+    await buyQuantity(tomatoKey(), third.id, 4, 4, [])
+
+    const view = await loadView()
+    expect(view.serviceConflicts.filter((entry) => entry.code === 'unmatched-purchase')).toHaveLength(1)
+    expect(view.reviewRowsByList[third.id]?.[0]?.purchaseIds).toHaveLength(1)
+    expect(view.requiresReview).toBe(true)
+    expect(rowNamed(view, market.id, 'Tomaten')?.openPositions[0]).toMatchObject({
+      lower: 4,
+      upper: 4,
+    })
+    expect(rowNamed(view, organic.id, 'Tomaten')?.openPositions[0]).toMatchObject({
+      lower: 4,
+      upper: 4,
+    })
+    expect(view.reviewRowsByList[market.id] ?? []).toHaveLength(0)
+  })
+
+  it('does not carry a quantity-less purchase into another shopping period', async () => {
+    await db.recipes.put(
+      recipe({ ingredients: [ingredientWithoutQuantity('Mozzarella')] }),
+    )
+    await db.cookSessions.put(session())
+    const key = shoppingItemKey('Mozzarella')
+
+    let current = await loadView(PERIOD)
+    await buyQualitative(key, current.standardListId)
+    current = await loadView(PERIOD)
+    expect(rowNamed(current, current.standardListId, 'Mozzarella')?.status).toBe('done')
+
+    const next = await loadView(NEXT_PERIOD)
+    expect(rowNamed(next, next.standardListId, 'Mozzarella')).toBeUndefined()
+    expect(next.serviceConflicts).toHaveLength(0)
+    expect(next.requiresReview).toBe(false)
+
+    current = await loadView(PERIOD)
+    expect(rowNamed(current, current.standardListId, 'Mozzarella')?.status).toBe('done')
+  })
+
+  it('keeps a numeric purchase valid when the recipe loses its quantity', async () => {
+    await db.recipes.put(
+      recipe({
+        ingredients: [
+          ingredient({ name: 'Tomaten', raw: '8 Tomaten', quantity: 8, quantityText: '8', unit: 'Stück' }),
+        ],
+      }),
+    )
+    await db.cookSessions.put(session())
+
+    let view = await loadView()
+    const listId = view.standardListId
+    const tomatoes = rowNamed(view, listId, 'Tomaten')
+    await buyQuantity(tomatoKey(), listId, 8, 8, tomatoes?.requiredPositions ?? [])
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Tomaten')?.status).toBe('done')
+
+    await db.recipes.put(
+      recipe({ ingredients: [ingredientWithoutQuantity('Tomaten')] }),
+    )
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Tomaten')).toMatchObject({
+      status: 'done',
+      missingQuantity: true,
+      requiredPositions: [],
+    })
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.reviewRowsByList[listId] ?? []).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+  })
+
+  it('does not report a qualitative purchase as orphaned when a quantity is added', async () => {
+    await db.recipes.put(
+      recipe({ ingredients: [ingredientWithoutQuantity('Tomaten')] }),
+    )
+    await db.cookSessions.put(session())
+
+    let view = await loadView()
+    const listId = view.standardListId
+    await buyQualitative(tomatoKey(), listId)
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Tomaten')?.status).toBe('done')
+
+    await db.recipes.put(
+      recipe({
+        ingredients: [
+          ingredient({ name: 'Tomaten', raw: '8 Tomaten', quantity: 8, quantityText: '8', unit: 'Stück' }),
+        ],
+      }),
+    )
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Tomaten')?.status).toBe('open')
+    expect(rowNamed(view, listId, 'Tomaten')?.openPositions[0]).toMatchObject({
+      lower: 8,
+      upper: 8,
+    })
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.reviewRowsByList[listId] ?? []).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+  })
+
+  it('keeps an existing purchase when only the demand quantity changes', async () => {
+    await db.recipes.put(
+      recipe({
+        ingredients: [
+          ingredient({ name: 'Tomaten', raw: '4 Tomaten', quantity: 4, quantityText: '4', unit: 'Stück' }),
+        ],
+      }),
+    )
+    await db.cookSessions.put(session())
+
+    let view = await loadView()
+    const listId = view.standardListId
+    const tomatoes = rowNamed(view, listId, 'Tomaten')
+    await buyQuantity(tomatoKey(), listId, 4, 4, tomatoes?.requiredPositions ?? [])
+    view = await loadView()
+    expect(rowNamed(view, listId, 'Tomaten')?.status).toBe('done')
+
+    await db.recipes.put(
+      recipe({
+        ingredients: [
+          ingredient({ name: 'Tomaten', raw: '6 Tomaten', quantity: 6, quantityText: '6', unit: 'Stück' }),
+        ],
+      }),
+    )
+    view = await loadView()
+    const updated = rowNamed(view, listId, 'Tomaten')
+    expect(updated?.status).toBe('open')
+    expect(updated?.openPositions[0]).toMatchObject({ lower: 2, upper: 2 })
+    expect(updated?.purchaseIds).toHaveLength(1)
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+  })
+
+  it('checks and reopens a manual article without a quantity', async () => {
+    const list = await createFreeShoppingList({ name: 'Drogerie' })
+    const item = await createManualListItem({
+      listId: list.id,
+      name: 'Spülmittel',
+      quantityText: null,
+      unit: null,
+      shoppingDate: PERIOD,
+    })
+
+    let view = await loadView()
+    expect(rowNamed(view, list.id, 'Spülmittel')).toMatchObject({
+      status: 'open',
+      missingQuantity: true,
+    })
+
+    await setManualItemPurchased(item.id, true)
+    view = await loadView()
+    expect(rowNamed(view, list.id, 'Spülmittel')?.status).toBe('done')
+    expect(view.serviceConflicts).toHaveLength(0)
+
+    await setManualItemPurchased(item.id, false)
+    view = await loadView()
+    expect(rowNamed(view, list.id, 'Spülmittel')?.status).toBe('open')
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+  })
+
+  it('keeps a bought manual article checked when its quantity is removed', async () => {
+    const list = await createFreeShoppingList({ name: 'Drogerie' })
+    const item = await createManualListItem({
+      listId: list.id,
+      name: 'Zahnpasta',
+      quantityText: '1',
+      unit: 'Stück',
+      shoppingDate: PERIOD,
+    })
+    await setManualItemPurchased(item.id, true)
+    let view = await loadView()
+    expect(rowNamed(view, list.id, 'Zahnpasta')?.status).toBe('done')
+
+    await updateManualListItem(item.id, { quantityText: null, unit: null })
+    view = await loadView()
+    expect(rowNamed(view, list.id, 'Zahnpasta')).toMatchObject({
+      status: 'done',
+      missingQuantity: true,
+    })
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+
+    await setManualItemPurchased(item.id, false)
+    view = await loadView()
+    expect(rowNamed(view, list.id, 'Zahnpasta')?.status).toBe('open')
+
+    await setManualItemPurchased(item.id, true)
+    view = await loadView()
+    expect(rowNamed(view, list.id, 'Zahnpasta')?.status).toBe('done')
+  })
+
+  it('checks a manual article after its quantity is added', async () => {
+    const list = await createFreeShoppingList({ name: 'Drogerie' })
+    const item = await createManualListItem({
+      listId: list.id,
+      name: 'Zahnpasta',
+      quantityText: null,
+      unit: null,
+      shoppingDate: PERIOD,
+    })
+    await setManualItemPurchased(item.id, true)
+    let view = await loadView()
+    expect(rowNamed(view, list.id, 'Zahnpasta')?.status).toBe('done')
+
+    await updateManualListItem(item.id, { quantityText: '1', unit: 'Stück' })
+    view = await loadView()
+    expect(rowNamed(view, list.id, 'Zahnpasta')?.status).toBe('open')
+    expect(rowNamed(view, list.id, 'Zahnpasta')?.openPositions[0]).toMatchObject({
+      lower: 1,
+      upper: 1,
+    })
+
+    await setManualItemPurchased(item.id, true)
+    view = await loadView()
+    expect(rowNamed(view, list.id, 'Zahnpasta')?.status).toBe('done')
+    expect(
+      await db.shoppingPurchases.where('manualItemId').equals(item.id).count(),
+    ).toBe(2)
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+  })
+
+  it('keeps a checked article checked when its distribution is reset', async () => {
+    await seed()
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    await moveShoppingItem({
+      periodStart: PERIOD,
+      itemKey: tomatoKey(),
+      targetListId: market.id,
+    })
+
+    let view = await loadView()
+    const marketRow = rowNamed(view, market.id, 'Tomaten')
+    expect(marketRow?.status).toBe('open')
+    await buyQuantity(
+      tomatoKey(),
+      market.id,
+      8,
+      8,
+      marketRow?.requiredPositions ?? [],
+    )
+    view = await loadView()
+    expect(rowNamed(view, market.id, 'Tomaten')?.status).toBe('done')
+
+    await resetShoppingAllocations({ periodStart: PERIOD, itemKey: tomatoKey() })
+
+    view = await loadView()
+    expect(rowNamed(view, view.standardListId, 'Tomaten')?.status).toBe('done')
+    expect(rowNamed(view, market.id, 'Tomaten')).toBeUndefined()
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.reviewRowsByList[market.id] ?? []).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
+  })
+
+  it('keeps a checked share counted when its last allocation is removed', async () => {
+    await seed()
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    await assignShoppingSubquantity({
+      periodStart: PERIOD,
+      itemKey: tomatoKey(),
+      dimension: 'count',
+      targetListId: market.id,
+      quantity: 5,
+    })
+
+    let view = await loadView()
+    const marketRow = rowNamed(view, market.id, 'Tomaten')
+    expect(marketRow?.openPositions[0]).toMatchObject({ lower: 5, upper: 5 })
+    await buyQuantity(tomatoKey(), market.id, 5, 5, marketRow?.requiredPositions ?? [])
+    view = await loadView()
+    expect(rowNamed(view, market.id, 'Tomaten')?.status).toBe('done')
+
+    const allocation = view.distribution?.positions
+      .find((position) => position.itemKey === tomatoKey())
+      ?.allocations.find(
+        (entry) =>
+          entry.allocation.listId === market.id && entry.allocation.mode === 'partial',
+      )?.allocation
+    expect(allocation).toBeTruthy()
+    await removeShoppingAllocation(allocation!.id)
+
+    view = await loadView()
+    expect(rowNamed(view, market.id, 'Tomaten')).toBeUndefined()
+    const standardRow = rowNamed(view, view.standardListId, 'Tomaten')
+    expect(standardRow?.status).toBe('open')
+    expect(standardRow?.purchasedPositions[0]).toMatchObject({ lower: 5, upper: 5 })
+    expect(standardRow?.openPositions[0]).toMatchObject({ lower: 3, upper: 3 })
+    expect(view.serviceConflicts).toHaveLength(0)
+    expect(view.reviewRowsByList[market.id] ?? []).toHaveLength(0)
+    expect(view.requiresReview).toBe(false)
   })
 
   it('keeps purchase status on the list where it was recorded', async () => {

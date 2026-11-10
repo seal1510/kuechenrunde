@@ -1,22 +1,150 @@
-openCook Web
+Küchenrunde (vormals openCook Web)
+==================================
+
+Copyright (C) 2026 openCook Web contributors
+
+Küchenrunde ist die fortgeführte Bezeichnung dieses Projekts. Die Umbenennung
+ändert die Urheberrechtsinhaberschaft an den bisherigen Beiträgen nicht.
+
+Dieses Programm ist freie Software: Sie können es unter den Bedingungen der
+GNU General Public License, Version 3 oder später, weitergeben und/oder
+verändern. Vollständiger Lizenztext: LICENSE.
+
+Dieses Programm wird ohne jede Gewährleistung bereitgestellt, soweit dies die
+Lizenz zulässt. Einzelheiten regelt die GPL-3.0-or-later.
+
+1. Herkunft: openCook
+=====================
+
+https://github.com/oliexdev/openCook
+Copyright (C) 2026 olie.xdev <olie.xdeveloper@googlemail.com>
+GPL-3.0-or-later
+
+Küchenrunde ist eine eigenständige Weiterentwicklung auf Basis von openCook.
+Es ist kein offizielles openCook-Projekt und wird von den openCook-Autoren
+nicht unterstützt.
+
+Nachweislich portierte bzw. abgeleitete Dateien:
+
+- src/domain/planner.ts
+  Portierung von openCook's MealPlanner.kt. Enthält außerdem die Datenlisten
+  aus IngredientStaples.kt und ProteinGroups.kt sowie die Logik von
+  RecipeCategories.varietyKeys.
+- src/domain/reconciler.ts
+  Portierung von openCook's MealPlanReconciler.kt.
+- src/import/ingredients.ts
+  Abgeleitet vom Verhalten von openCook's IngredientLineParser.kt; um
+  nachgestellte Mengen, Markdown-Links und die Reparatur gespeicherter Zeilen
+  erweitert.
+- src/domain/planner.test.ts
+- src/domain/reconciler.test.ts
+  Portierte bzw. an die Portierung angelehnte Tests.
+
+Die Portierung ist im Git-Baseline-Commit vom 2026-11-08 enthalten. Die
+Dateien wurden von Kotlin nach TypeScript übertragen und an React, Dexie und
+das Datenmodell dieser WebApp angepasst. Am 2026-11-10 wurde das Projekt von
+„openCook Web“ in „Küchenrunde“ umbenannt. Die Copyright- und Lizenzhinweise
+des Originals bleiben bestehen.
+
+Eigenständige Weiterentwicklungen sind insbesondere die React-Oberfläche, die
+Dexie-Datenbank, der Mela-Import, der URL-Import, die PWA-Unterstützung, die
+Mehrlisten-Einkaufsliste und die Einkaufszyklen. Sie sind nicht aus openCook
+kopiert.
+
+2. einkaufslisten-card
+======================
+
+custom_components/einkaufsliste/data/kategorien.json
+https://github.com/misterm2310/einkaufslisten-card
+Copyright (c) 2026 misterm2310
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+3. Open Food Facts
+==================
+
+https://world.openfoodfacts.org
+Copyright (C) Open Food Facts contributors
+
+Die OFF-Nutzungsbedingungen nennen für die Datenbank die Open Database
+License (ODbL) 1.0 und für die Einzelinhalte die Database Contents License
+(DbCL) 1.0:
+https://world.openfoodfacts.org/terms-of-use
+
+Der Quellcode des Open-Food-Facts-Servers steht unter AGPL-3.0:
+https://github.com/openfoodfacts/openfoodfacts-server/blob/main/LICENSE
+
+Verwendete Quellen:
+- taxonomies/food/ingredients.txt
+- taxonomies/ingredients_processing.txt
+
+Die Taxonomiedateien liegen im AGPL-3.0-Repository von Open Food Facts, haben
+aber keine eigene, dateispezifische Lizenzangabe. Ihre konkrete Zuordnung zu
+ODbL/DbCL oder AGPL-3.0 ist daher offen. Vor einer öffentlichen
+Veröffentlichung ist diese Frage mit Open Food Facts zu klären. Bis dahin
+behauptet dieses Projekt keine bestimmte Lizenz für diese Taxonomiedateien;
+sie werden als Datenquelle mit Attribution genannt. Siehe auch
+docs/ingredient-catalog.md und public/legal/OFF-DATA-NOTICE.txt.
+
+Der Zutatenkatalog in src/domain/ingredientCatalogData.ts ist eine kuratierte,
+stark reduzierte Auswahl und keine vollständige Kopie der Taxonomien. Für die
+Daten gelten die Bedingungen der genannten Quellen; für den Quellcode dieses
+Projekts gilt die GPL-3.0-or-later.
+
+4. Laufzeitabhängigkeiten
+=========================
+
+Die folgenden Pakete werden in das Browser-Bundle ausgeliefert:
+
+- React 19.3.1, React DOM 19.3.1, scheduler 0.28.0 — MIT
+- Dexie 4.4.7, dexie-react-hooks 4.4.0 — Apache-2.0; die Dexie-NOTICE ist zu beachten
+- DOMPurify 3.4.17 — MPL-2.0 OR Apache-2.0; für dieses Projekt wird Apache-2.0 gewählt
+- fflate 0.8.3 — MIT
+- marked 18.1.3 — MIT; die enthaltene Markdown-Lizenz ist ebenfalls zu beachten
+- workbox-window 7.4.1 — MIT
+
+Die vollständigen Lizenztexte und Copyright-Zeilen stehen in
+public/legal/THIRD-PARTY-LICENSES.txt.
+
+Build-Werkzeuge, die nicht in das Browser-Bundle gelangen: Vite, TypeScript,
+Vitest, fake-indexeddb, vite-plugin-pwa und @vitejs/plugin-react.
+
+5. Mela
+-------
+
+Der Mela-Importer ist eine Eigenentwicklung. Er folgt dem öffentlich
+dokumentierten Mela-Dateiformat:
+https://mela.recipes/fileformat/index.html
+
+Es wurde kein Code aus Mela übernommen. Mela ist eine Bezeichnung eines
+Drittanbieters; Küchenrunde steht in keiner Verbindung zu diesem Anbieter.
+
+6. Quellcode
 ============
 
-This project is a new web application inspired by and based on ideas, data-model
-concepts and algorithms from openCook:
+Quellcode-URL: noch festzulegen. Vor einer öffentlichen Veröffentlichung wird
+hier die URL des Repositorys mit dem exakten Versions-Tag oder Commit
+eingetragen. Bis dahin ist der zur ausgelieferten Version gehörende Quellcode
+auf Anfrage beim Betreiber erhältlich.
 
-  https://github.com/oliexdev/openCook
-  Copyright (C) 2026 olie.xdev <olie.xdeveloper@googlemail.com>
-  Licensed under the GNU General Public License v3 (see LICENSE).
-
-The Mela importer in this repository is newly written for openCook Web and follows
-the publicly documented Mela file format:
-
-  https://mela.recipes/fileformat/index.html
-
-openCook Web is free software: you can redistribute it and/or modify it under the
-terms of the GNU General Public License as published by the Free Software Foundation,
-either version 3 of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY
-WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
-PARTICULAR PURPOSE. See the GNU General Public License for more details.
+Die Dateien in public/legal/ sind die im Produktionsbuild ausgelieferten
+Kopien der Lizenz- und Drittanbieterhinweise. Bei Änderungen müssen sie
+synchron zu LICENSE, NOTICE und dieser Datei gehalten werden.

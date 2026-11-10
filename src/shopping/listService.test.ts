@@ -465,6 +465,42 @@ describe('demand distribution', () => {
     expect(distribution.positions.filter((entry) => entry.itemKey === key)).toHaveLength(0)
   })
 
+  it('counts a quantity-less item as open and done in the list summary', async () => {
+    await seed(
+      recipe({
+        ingredients: [
+          ingredient({
+            name: 'Mozzarella',
+            raw: 'Mozzarella',
+            quantity: null,
+            quantityText: null,
+            unit: null,
+          }),
+        ],
+      }),
+    )
+    const key = shoppingItemKey('Mozzarella')
+
+    let open = await getOpenDemandByList(PERIOD)
+    let summary = open.lists.find((entry) => entry.listId === open.standardListId)
+    expect(summary).toMatchObject({ openPositions: 1, donePositions: 0 })
+
+    await addShoppingPurchase({
+      shoppingDate: PERIOD,
+      itemKey: key,
+      listId: open.standardListId,
+      periodStart: PERIOD,
+      amounts: [],
+      snapshot: [],
+      qualitative: true,
+    })
+    open = await getOpenDemandByList(PERIOD)
+    summary = open.lists.find((entry) => entry.listId === open.standardListId)
+    expect(summary).toMatchObject({ openPositions: 0, donePositions: 1 })
+    expect(open.serviceConflicts).toHaveLength(0)
+    expect(open.requiresReview).toBe(false)
+  })
+
   it('resets a distribution back to the standard list', async () => {
     await seed()
     const market = await createFreeShoppingList({ name: 'Markt' })

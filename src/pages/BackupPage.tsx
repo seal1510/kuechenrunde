@@ -41,7 +41,7 @@ export function BackupPage() {
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `opencook-backup-${new Date().toISOString().slice(0, 10)}.zip`
+      link.download = `kuechenrunde-backup-${new Date().toISOString().slice(0, 10)}.zip`
       document.body.appendChild(link)
       link.click()
       link.remove()

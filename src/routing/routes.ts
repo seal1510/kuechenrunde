@@ -1,5 +1,5 @@
 /*
- * openCook Web
+ * Küchenrunde (vormals openCook Web)
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -22,6 +22,7 @@ export type Route =
   | { name: 'import' }
   | { name: 'import-url' }
   | { name: 'backup' }
+  | { name: 'about' }
 
 /** Single source of truth for the URL-import link target. */
 export const URL_IMPORT_HASH = '#/import/url'
@@ -78,6 +79,7 @@ export function parseRoute(hash: string): Route {
   if (path === 'import') return { name: 'import' }
   if (path === 'import/url') return { name: 'import-url' }
   if (path === 'backup') return { name: 'backup' }
+  if (path === 'about') return { name: 'about' }
   if (path === 'recipe/new') return { name: 'recipe-new' }
 
   if (path.startsWith('recipe/') && path.endsWith('/cook')) {

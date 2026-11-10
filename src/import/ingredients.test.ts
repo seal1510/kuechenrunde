@@ -4,6 +4,7 @@ import {
   orderIngredientsForDisplay,
   parseIngredientLine,
   parseIngredients,
+  reparseStoredIngredient,
 } from './ingredients'
 import { formatIngredientAmount } from './mela'
 
@@ -152,19 +153,164 @@ describe('ingredient quantity parsing', () => {
     })
   })
 
-  it('keeps unclear or missing quantities as plain original lines', () => {
-    for (const raw of [
-      'Salz und Pfeffer',
-      'etwas Muskat',
-      'ca. Salz',
-      '1/2',
-      'evtl. etwas Wasser zum Nachgießen',
-    ]) {
+  it('parses an upper-bound "bis" prefix without keeping it in the name', () => {
+    expect(line('bis 2 Zweige frischer Thymian')).toMatchObject({
+      quantity: 2,
+      quantityText: 'bis 2',
+      unit: 'Zweige',
+      name: 'frischer Thymian',
+      parseStatus: 'parsed',
+    })
+    expect(line('bis zu 50 ml Meerrettich')).toMatchObject({
+      quantity: 50,
+      quantityText: 'bis zu 50',
+      unit: 'ml',
+      name: 'Meerrettich',
+      parseStatus: 'parsed',
+    })
+    expect(line('bis 50 ml Meerrettich')).toMatchObject({
+      quantity: 50,
+      quantityText: 'bis 50',
+      unit: 'ml',
+      name: 'Meerrettich',
+      parseStatus: 'parsed',
+    })
+    expect(line('bis 950 ml Rinderbrühe')).toMatchObject({
+      quantity: 950,
+      quantityText: 'bis 950',
+      unit: 'ml',
+      name: 'Rinderbrühe',
+      parseStatus: 'parsed',
+    })
+  })
+
+  it('parses the real Mela range, trailing and shorthand formats', () => {
+    expect(line('40 bis 50 ml Meerrettich (aus dem Glas)')).toMatchObject({
+      quantity: 40,
+      quantityText: '40 bis 50',
+      unit: 'ml',
+      name: 'Meerrettich (aus dem Glas)',
+      parseStatus: 'parsed',
+    })
+    expect(line('1 bis 2 Zweige frischer Thymian')).toMatchObject({
+      quantity: 1,
+      quantityText: '1 bis 2',
+      unit: 'Zweige',
+      name: 'frischer Thymian',
+      parseStatus: 'parsed',
+    })
+    expect(line('750 bis 950 ml Rinderbrühe')).toMatchObject({
+      quantity: 750,
+      quantityText: '750 bis 950',
+      unit: 'ml',
+      name: 'Rinderbrühe',
+      parseStatus: 'parsed',
+    })
+    expect(line('Knoblauchzehe(n), 2 - 3')).toMatchObject({
+      quantity: 2,
+      quantityText: '2 - 3',
+      unit: null,
+      name: 'Knoblauchzehen',
+      parseStatus: 'parsed',
+    })
+    expect(line('1 TL, gestr. Garam Masala')).toMatchObject({
+      quantity: 1,
+      quantityText: '1',
+      unit: 'TL',
+      name: 'Garam Masala',
+      parseStatus: 'parsed',
+    })
+    expect(line('1 Stück(e) Ingwer, daumengroß')).toMatchObject({
+      quantity: 1,
+      quantityText: '1',
+      unit: 'Stück',
+      name: 'Ingwer, daumengroß',
+      parseStatus: 'parsed',
+    })
+    expect(line('2 ½ EL Tomatenmark')).toMatchObject({
+      quantity: 2.5,
+      quantityText: '2½',
+      unit: 'EL',
+      name: 'Tomatenmark',
+      parseStatus: 'parsed',
+    })
+    expect(line('600 ml Rindsuppe/-brühe/ -fond')).toMatchObject({
+      quantity: 600,
+      quantityText: '600',
+      unit: 'ml',
+      name: 'Rindsuppe',
+      parseStatus: 'parsed',
+    })
+  })
+
+  it('normalises plural shorthand and leading size words', () => {
+    expect(line('Mango(s), frische')).toMatchObject({
+      parseStatus: 'plain',
+      name: 'Mangos, frische',
+    })
+    expect(line('Hähnchenfilet(s)')).toMatchObject({
+      parseStatus: 'plain',
+      name: 'Hähnchenfilets',
+    })
+    expect(line('Zwiebel(n)')).toMatchObject({
+      parseStatus: 'plain',
+      name: 'Zwiebeln',
+    })
+    expect(line('Knoblauchzehe(n)')).toMatchObject({
+      parseStatus: 'plain',
+      name: 'Knoblauchzehen',
+    })
+    expect(line('1 große Zwiebel(n)')).toMatchObject({
+      quantity: 1,
+      name: 'Zwiebeln',
+    })
+    expect(line('3 kleine Möhre')).toMatchObject({
+      quantity: 3,
+      name: 'Möhre',
+    })
+  })
+
+  it('keeps the amounts from the Erdnisseintopf source line stable', () => {
+    // The source page writes "2  Knoblauchzehen" with two spaces.
+    expect(line('2  Knoblauchzehen')).toMatchObject({
+      quantity: 2,
+      quantityText: '2',
+      unit: null,
+      name: 'Knoblauchzehen',
+      parseStatus: 'parsed',
+    })
+    // Decimal comma, a unit and a long parenthetical must not shift the amount.
+    expect(
+      line('1,5 TL Kreuzkümmel, wahlweise! (alternativ 1 TL Zimt gemahlen)'),
+    ).toMatchObject({
+      quantity: 1.5,
+      quantityText: '1,5',
+      unit: 'TL',
+      name: 'Kreuzkümmel, wahlweise! (alternativ 1 TL Zimt gemahlen)',
+      parseStatus: 'parsed',
+    })
+    expect(line('1  Peperoni')).toMatchObject({
+      quantity: 1,
+      quantityText: '1',
+      unit: null,
+      name: 'Peperoni',
+    })
+  })
+
+  it('keeps unclear quantities plain and preserves the original line', () => {
+    const cases: Array<[string, string]> = [
+      ['Salz und Pfeffer', 'Salz und Pfeffer'],
+      ['etwas Muskat', 'Muskat'],
+      ['ca. Salz', 'Salz'],
+      ['1/2', '1/2'],
+      ['evtl. etwas Wasser zum Nachgießen', 'evtl. etwas Wasser zum Nachgießen'],
+    ]
+    for (const [raw, name] of cases) {
       const ingredient = line(raw)
       expect(ingredient.parseStatus).toBe('plain')
       expect(ingredient.quantity).toBeNull()
       expect(ingredient.raw).toBe(raw)
-      expect(ingredient.name).toBe(raw)
+      expect(ingredient.name).toBe(name)
     }
   })
 
@@ -183,6 +329,60 @@ describe('ingredient quantity parsing', () => {
       purchaseNote: '',
       preparationNote: '',
     })
+  })
+})
+
+describe('read-time repair of stored ingredients', () => {
+  it('fixes old parsed names that still contain the amount or unit', () => {
+    const old = {
+      ...line('750 bis 950 ml Rinderbrühe'),
+      name: 'bis 950 ml Rinderbrühe',
+      quantity: 750,
+      quantityText: '750',
+      unit: null,
+      parseStatus: 'parsed' as const,
+    }
+    const repaired = reparseStoredIngredient(old)
+    expect(repaired).toMatchObject({
+      name: 'Rinderbrühe',
+      quantity: 750,
+      quantityText: '750 bis 950',
+      unit: 'ml',
+      parseStatus: 'parsed',
+    })
+    // The stored object itself is never mutated.
+    expect(old.name).toBe('bis 950 ml Rinderbrühe')
+    expect(old.unit).toBeNull()
+  })
+
+  it('repairs plain rows with trailing quantities', () => {
+    const old = {
+      ...line('Knoblauchzehe(n), 2 - 3'),
+      name: 'Knoblauchzehe(n), 2 - 3',
+      quantity: null,
+      quantityText: null,
+      unit: null,
+      parseStatus: 'plain' as const,
+    }
+    expect(reparseStoredIngredient(old)).toMatchObject({
+      name: 'Knoblauchzehen',
+      quantity: 2,
+      quantityText: '2 - 3',
+      unit: null,
+      parseStatus: 'parsed',
+    })
+  })
+
+  it('leaves a clean structured row alone and keeps its unit', () => {
+    const clean = {
+      ...line('2 Zwiebeln'),
+      name: 'Zwiebeln',
+      quantity: 2,
+      quantityText: '2',
+      unit: 'Stück',
+      parseStatus: 'parsed' as const,
+    }
+    expect(reparseStoredIngredient(clean)).toEqual(clean)
   })
 })
 
@@ -259,5 +459,12 @@ describe('ingredient amount display', () => {
     expect(formatIngredientAmount(line('0,5 l Milch'))).toBe('0,5 l')
     expect(formatIngredientAmount(line('1.5 kg Kartoffeln'))).toBe('1,5 kg')
     expect(formatIngredientAmount(line('etwa 250 g Mehl'))).toBe('etwa 250 g')
+    // Exact source lines that previously looked suspicious in a stored recipe.
+    expect(formatIngredientAmount(line('2  Knoblauchzehen'))).toBe('2')
+    expect(
+      formatIngredientAmount(
+        line('1,5 TL Kreuzkümmel, wahlweise! (alternativ 1 TL Zimt gemahlen)'),
+      ),
+    ).toBe('1,5 TL')
   })
 })

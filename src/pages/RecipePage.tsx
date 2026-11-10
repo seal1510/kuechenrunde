@@ -4,8 +4,12 @@ import { db } from '../db'
 import type { RecipeImage } from '../types'
 import { RecipeBody } from '../components/RecipeCard'
 import { Markdown, useImageUrl } from '../components/Markdown'
+import { DEFAULT_WEEK_START_DAY } from '../domain/calendar'
+import { todayKey } from '../domain/dates'
 import { effectiveDuration, formatDuration } from '../lib/format'
 import { cookHash } from '../routing/routes'
+import { getCalendarSettings } from '../settings/calendar'
+import { DishDialog } from './plan/DishDialog'
 
 function ImageThumb({
   image,
@@ -58,9 +62,14 @@ export function RecipePage({ id }: { id: string }) {
     [id],
   )
   const [activeImage, setActiveImage] = useState(0)
+  const [planning, setPlanning] = useState(false)
+  const [planSaved, setPlanSaved] = useState(false)
+  const calendarSettings = useLiveQuery(() => getCalendarSettings(), [])
 
   useEffect(() => {
     setActiveImage(0)
+    setPlanning(false)
+    setPlanSaved(false)
   }, [id])
 
   const recipe = data?.recipe
@@ -169,6 +178,31 @@ export function RecipePage({ id }: { id: string }) {
             </dl>
           ) : null}
           <div className="recipe-actions">
+            <button
+              type="button"
+              className="button primary detail-plan"
+              onClick={() => {
+                setPlanSaved(false)
+                setPlanning(true)
+              }}
+            >
+              <svg
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                aria-hidden="true"
+                focusable="false"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="2.2" y="3.2" width="11.6" height="10.4" rx="1.6" />
+                <path d="M5 1.8v3M11 1.8v3M2.2 6.3h11.6M5.4 9.2h.1M8 9.2h.1M10.6 9.2h.1M5.4 11.5h.1M8 11.5h.1" />
+              </svg>
+              Einplanen
+            </button>
             <a className="button warm detail-cook" href={cookHash(recipe.id)}>
               <svg
                 viewBox="0 0 16 16"
@@ -241,7 +275,23 @@ export function RecipePage({ id }: { id: string }) {
 
       <RecipeBody recipe={recipe} />
 
+      {planSaved ? (
+        <p className="notice success plan-saved-notice" role="status">
+          Eingeplant. Der Wochenplan wurde aktualisiert.
+        </p>
+      ) : null}
+
       <nav className="detail-mobile-actions" aria-label="Rezeptaktionen">
+        <button
+          type="button"
+          className="button primary"
+          onClick={() => {
+            setPlanSaved(false)
+            setPlanning(true)
+          }}
+        >
+          Einplanen
+        </button>
         <a className="button warm" href={cookHash(recipe.id)}>
           <svg
             viewBox="0 0 16 16"
@@ -256,6 +306,22 @@ export function RecipePage({ id }: { id: string }) {
           Kochen
         </a>
       </nav>
+
+      {planning ? (
+        <DishDialog
+          mode="create"
+          initialDate={todayKey()}
+          initialRecipeId={recipe.id}
+          initialEntries={[]}
+          recipes={[recipe]}
+          weekStartDay={calendarSettings?.weekStartDay ?? DEFAULT_WEEK_START_DAY}
+          onDone={() => {
+            setPlanning(false)
+            setPlanSaved(true)
+          }}
+          onClose={() => setPlanning(false)}
+        />
+      ) : null}
     </div>
   )
 }

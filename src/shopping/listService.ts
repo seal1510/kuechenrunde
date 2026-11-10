@@ -11,6 +11,7 @@
 
 import { db } from '../db'
 import { addDays, todayKey } from '../domain/dates'
+import { catalogKeyVariants, catalogShoppingKey } from '../domain/ingredientCatalog'
 import {
   parseShoppingQuantityPosition,
   resolveCanonicalKey,
@@ -475,7 +476,7 @@ export async function moveShoppingItem(
       const rules = await db.shoppingItemRules.toArray()
       await db.shoppingDemandAllocations
         .where('[periodStart+itemKey]')
-        .equals([demand.period.start, item.key])
+        .anyOf(catalogKeyVariants(item.key).map((key) => [demand.period.start, key]))
         .delete()
       if (!targetIsStandard) {
         await db.shoppingDemandAllocations.put({
@@ -586,7 +587,7 @@ export async function moveShoppingPosition(
 
       const allocations = await db.shoppingDemandAllocations
         .where('[periodStart+itemKey]')
-        .equals([demand.period.start, item.key])
+        .anyOf(catalogKeyVariants(item.key).map((key) => [demand.period.start, key]))
         .toArray()
       if (
         allocations.some(
@@ -726,7 +727,7 @@ export async function assignShoppingSubquantity(
   return db.transaction('rw', db.shoppingDemandAllocations, async () => {
     const allocations = await db.shoppingDemandAllocations
       .where('[periodStart+itemKey]')
-      .equals([demand.period.start, item.key])
+      .anyOf(catalogKeyVariants(item.key).map((key) => [demand.period.start, key]))
       .toArray()
     if (
       allocations.some(
@@ -784,12 +785,97 @@ export async function assignShoppingSubquantity(
   })
 }
 
+/**
+ * When a distribution is reset or a share is removed, the demand returns to
+ * the standard list. Purchases that were recorded on the now unassigned list
+ * must follow the demand, otherwise a bought article suddenly looks open and
+ * produces an avoidable review conflict. Stale rows for items that are no
+ * longer needed are left untouched so they remain reachable for review.
+ */
+async function movePurchasesToStandard(
+  itemKey: string,
+  period: ShoppingPeriod,
+  fromListIds: ReadonlySet<string>,
+  now: number,
+): Promise<number> {
+  const standardId = standardShoppingListId(period.start)
+  if (fromListIds.size === 0) return 0
+  const rules = await db.shoppingItemRules.toArray()
+  const purchases = await db.shoppingPurchases.toArray()
+  let moved = 0
+  for (const purchase of purchases) {
+    if (purchase.manualItemId) continue
+    if (!DATE_RE.test(purchase.shoppingDate)) continue
+    if (!periodContainsDate(period, purchase.shoppingDate)) continue
+    if (resolveCanonicalKey(purchase.itemKey, rules) !== itemKey) continue
+    const currentListId = purchase.listId ?? standardId
+    if (currentListId === standardId || !fromListIds.has(currentListId)) continue
+    await db.shoppingPurchases.put({
+      ...purchase,
+      listId: standardId,
+      legacyWeekAmbiguous: undefined,
+      updatedAt: now,
+    })
+    moved += 1
+  }
+  return moved
+}
+
+/**
+ * Item keys currently needed in the period. A broken period/demand state must
+ * never prevent removing a stale allocation, so failures simply skip the
+ * purchase reassignment.
+ */
+async function demandedItemKeys(periodStart: string): Promise<Set<string>> {
+  try {
+    const demand = await getShoppingPeriodDemand(periodStart)
+    return new Set(demand.items.map((item) => item.key))
+  } catch {
+    return new Set()
+  }
+}
+
 export async function removeShoppingAllocation(id: string): Promise<void> {
   const existing = await db.shoppingDemandAllocations.get(id)
   if (!existing) {
     throw new ShoppingListError('allocation-not-found', 'Die Zuweisung wurde nicht gefunden.')
   }
-  await db.shoppingDemandAllocations.delete(id)
+  const demandedKeys = await demandedItemKeys(existing.periodStart)
+  const itemKey = catalogShoppingKey(existing.itemKey)
+  if (!demandedKeys.has(itemKey)) {
+    await db.shoppingDemandAllocations.delete(id)
+    return
+  }
+  await db.transaction(
+    'rw',
+    [
+      db.shoppingDemandAllocations,
+      db.shoppingPurchases,
+      db.shoppingItemRules,
+      db.shoppingLists,
+    ],
+    async () => {
+      const lists = await db.shoppingLists.toArray()
+      const period = periodForPersistedStart(existing.periodStart, lists)
+      const remaining = await db.shoppingDemandAllocations
+        .where('[periodStart+itemKey]')
+        .anyOf(
+          catalogKeyVariants(itemKey).map((key) => [existing.periodStart, key]),
+        )
+        .toArray()
+      await db.shoppingDemandAllocations.delete(id)
+      const stillAssigned = remaining.some(
+        (allocation) => allocation.id !== id && allocation.listId === existing.listId,
+      )
+      if (stillAssigned) return
+      await movePurchasesToStandard(
+        itemKey,
+        period,
+        new Set([existing.listId]),
+        Date.now(),
+      )
+    },
+  )
 }
 
 export interface ResetShoppingAllocationsInput {
@@ -804,31 +890,59 @@ export async function resetShoppingAllocations(
   const period = await requirePeriod(input.periodStart)
   const itemKey = optionalText(input.itemKey)
   const dimension = optionalText(input.dimension)
-  return db.transaction('rw', db.shoppingDemandAllocations, async () => {
-    const rows = itemKey
-      ? await db.shoppingDemandAllocations
-          .where('[periodStart+itemKey]')
-          .equals([period.start, itemKey])
-          .toArray()
-      : await db.shoppingDemandAllocations
-          .where('periodStart')
-          .equals(period.start)
-          .toArray()
-    if (dimension && rows.some((allocation) => allocation.dimension === '*')) {
-      throw new ShoppingListError(
-        'full-allocation-conflict',
-        'Die ganze Position ist vollständig verschoben. Ein dimensionsbezogener Reset ist nicht eindeutig.',
-        { itemKey, dimension },
+  const demandedKeys = await demandedItemKeys(period.start)
+  return db.transaction(
+    'rw',
+    [db.shoppingDemandAllocations, db.shoppingPurchases, db.shoppingItemRules],
+    async () => {
+      const rows = itemKey
+        ? await db.shoppingDemandAllocations
+            .where('[periodStart+itemKey]')
+            .anyOf(catalogKeyVariants(itemKey).map((key) => [period.start, key]))
+            .toArray()
+        : await db.shoppingDemandAllocations
+            .where('periodStart')
+            .equals(period.start)
+            .toArray()
+      if (dimension && rows.some((allocation) => allocation.dimension === '*')) {
+        throw new ShoppingListError(
+          'full-allocation-conflict',
+          'Die ganze Position ist vollständig verschoben. Ein dimensionsbezogener Reset ist nicht eindeutig.',
+          { itemKey, dimension },
+        )
+      }
+      const removed = rows.filter(
+        (allocation) => !dimension || allocation.dimension === dimension,
       )
-    }
-    let removed = 0
-    for (const allocation of rows) {
-      if (dimension && allocation.dimension !== dimension) continue
-      await db.shoppingDemandAllocations.delete(allocation.id)
-      removed += 1
-    }
-    return removed
-  })
+      const affected = new Map<string, Set<string>>()
+      for (const allocation of removed) {
+        const key = catalogShoppingKey(allocation.itemKey)
+        if (!demandedKeys.has(key)) continue
+        const listIds = affected.get(key) ?? new Set<string>()
+        listIds.add(allocation.listId)
+        affected.set(key, listIds)
+      }
+      for (const allocation of removed) {
+        await db.shoppingDemandAllocations.delete(allocation.id)
+      }
+
+      const now = Date.now()
+      for (const [key, listIds] of affected) {
+        const remaining = await db.shoppingDemandAllocations
+          .where('[periodStart+itemKey]')
+          .anyOf(catalogKeyVariants(key).map((variant) => [period.start, variant]))
+          .toArray()
+        const stillAssigned = new Set(remaining.map((allocation) => allocation.listId))
+        const unassigned = new Set(
+          Array.from(listIds).filter((listId) => !stillAssigned.has(listId)),
+        )
+        if (unassigned.size > 0) {
+          await movePurchasesToStandard(key, period, unassigned, now)
+        }
+      }
+      return removed.length
+    },
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -887,10 +1001,16 @@ export interface ShoppingOpenDemandResult {
   unquantified: ShoppingUnquantifiedPlacement[]
   /** Only recipe demand; manual unquantified rows stay in `manualItems`. */
   automaticUnquantified: ShoppingUnquantifiedPlacement[]
+  /** Effective list per automatic purchase after unambiguous attribution. */
+  purchaseListIds: ReadonlyMap<string, string>
   lists: ShoppingListSummary[]
   conflicts: ShoppingDistributionConflict[]
   serviceConflicts: ShoppingListServiceConflict[]
   requiresReview: boolean
+}
+
+function purchasePlacementKey(listId: string, itemKey: string): string {
+  return `${listId}\u0000${itemKey}`
 }
 
 function sumPurchased(
@@ -1182,9 +1302,9 @@ export function buildShoppingOpenDemand(
         legacyPurchaseFallback,
       })
     } else {
-      const done =
-        effectivePurchases.length > 0 &&
-        effectivePurchases.some((purchase) => purchase.qualitative)
+      // Any linked purchase means the article was bought. This also keeps an
+      // article done when its quantity is removed after it had been checked.
+      const done = effectivePurchases.length > 0
       manualItems.push({
         manualItem: item,
         listId,
@@ -1245,6 +1365,27 @@ export function buildShoppingOpenDemand(
     if (item.done) summary.donePositions += 1
     else summary.openPositions += 1
   }
+  // Purely qualitative automatic rows have no numeric position to count. An
+  // item that also has positions is already represented by those positions.
+  const purchasedItemLists = new Set(
+    automaticContributions.map((entry) => {
+      const listId = openResult.purchaseListIds.get(entry.id) ?? entry.listId
+      return purchasePlacementKey(listId, entry.itemKey)
+    }),
+  )
+  const itemsWithPositions = new Set(
+    distribution.positions.map((position) => position.itemKey),
+  )
+  for (const placement of distribution.unquantified) {
+    if (itemsWithPositions.has(placement.itemKey)) continue
+    const summary = summaries.get(placement.listId)
+    if (!summary) continue
+    if (purchasedItemLists.has(purchasePlacementKey(placement.listId, placement.itemKey))) {
+      summary.donePositions += 1
+    } else {
+      summary.openPositions += 1
+    }
+  }
 
   return {
     period,
@@ -1253,6 +1394,7 @@ export function buildShoppingOpenDemand(
     manualItems,
     unquantified: [...distribution.unquantified, ...manualUnquantified],
     automaticUnquantified: [...distribution.unquantified],
+    purchaseListIds: openResult.purchaseListIds,
     lists: Array.from(summaries.values()),
     conflicts: distribution.conflicts,
     serviceConflicts,
@@ -1544,8 +1686,31 @@ export async function setManualItemPurchased(
       }
       if (purchased) {
         const existing = await db.shoppingPurchases.where('manualItemId').equals(id).toArray()
+        const parsed = parseShoppingQuantityPosition(item.quantityText ?? '', item.unit)
         if (existing.length > 0) {
-          return { item, purchases: existing }
+          // A qualitative or outdated purchase may not cover a quantity that
+          // was added later. Top up the open amount instead of doing nothing.
+          if (!parsed) return { item, purchases: existing }
+          const open = openAmount(
+            { lower: parsed.lower, upper: parsed.upper },
+            sumPurchased(existing, parsed.dimension),
+          )
+          if (open.lower === 0 && open.upper === 0) {
+            return { item, purchases: existing }
+          }
+          const purchase = await addShoppingPurchaseRecord({
+            shoppingDate: purchaseDate,
+            itemKey: manualItemKey(item),
+            listId,
+            manualItemId: item.id,
+            periodStart: context.periodStart,
+            amounts: [
+              { dimension: parsed.dimension, lower: open.lower, upper: open.upper },
+            ],
+            snapshot: [parsed],
+            qualitative: false,
+          })
+          return { item, purchases: [...existing, purchase] }
         }
         if (adoptable) {
           const candidate = await db.shoppingPurchases.get(adoptable.id)
@@ -1568,7 +1733,6 @@ export async function setManualItemPurchased(
             return { item, purchases: [adopted] }
           }
         }
-        const parsed = parseShoppingQuantityPosition(item.quantityText ?? '', item.unit)
         const amounts: ShoppingPurchasedAmount[] =
           parsed && (parsed.lower > 0 || parsed.upper > 0)
             ? [

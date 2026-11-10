@@ -42,6 +42,12 @@ describe('quantity token parsing', () => {
   it('keeps ranges and qualifiers', () => {
     const range = parseQuantityToken('ca. 2-3')
     expect(range).toEqual({ qualifier: 'ca.', values: [2, 3], range: true })
+    expect(parseQuantityToken('bis 2')).toEqual({
+      qualifier: 'bis',
+      values: [2],
+      range: false,
+    })
+    expect(parseQuantityToken('bis zu 50')?.values).toEqual([50])
   })
 
   it('does not invent a number for plain text', () => {
@@ -57,6 +63,7 @@ describe('scaling', () => {
     expect(scaleQuantityForDisplay('ca. 200', 0.5)).toBe('ca. 100')
     expect(scaleQuantityForDisplay('1 1/2', 2)).toBe('3')
     expect(scaleQuantityForDisplay('1/2', 3)).toBe('1,5')
+    expect(scaleQuantityForDisplay('bis 2', 1.5)).toBe('bis 3')
   })
 
   it('uses readable rounding', () => {
@@ -81,6 +88,30 @@ describe('scaling', () => {
     expect(scaledIngredientLine(result.items[0]!)).toBe('ca. 3–4,5 EL Olivenöl')
     expect(original.quantityText).toBe('ca. 2-3')
     expect(original.quantity).toBe(2)
+  })
+
+  it('repairs legacy stored rows before scaling', () => {
+    const old = ingredient({
+      raw: '750 bis 950 ml Rinderbrühe',
+      name: 'bis 950 ml Rinderbrühe',
+      quantity: 750,
+      quantityText: '750',
+      unit: null,
+    })
+    const result = scaleRecipeIngredients([old], 2, 4)
+    expect(result.items[0]?.ingredient.name).toBe('Rinderbrühe')
+    expect(result.items[0]?.quantityText).toBe('1500–1900')
+    expect(scaledIngredientAmount(result.items[0]!)).toBe('1500–1900 ml')
+    expect(old.name).toBe('bis 950 ml Rinderbrühe')
+    expect(old.unit).toBeNull()
+
+    const garlic = ingredient({
+      raw: 'Knoblauchzehe(n), 2 - 3',
+      parseStatus: 'plain',
+    })
+    const scaledGarlic = scaleRecipeIngredients([garlic], 2, 4)
+    expect(scaledGarlic.items[0]?.ingredient.name).toBe('Knoblauchzehen')
+    expect(scaledGarlic.items[0]?.quantityText).toBe('4–6')
   })
 
   it('leaves non-numeric ingredients unchanged', () => {

@@ -1,0 +1,42 @@
+Open Food Facts – Datenhinweis für Küchenrunde
+==============================================
+
+Küchenrunde verwendet deutsche Namen, Synonyme und Verarbeitungsbegriffe aus
+den Open-Food-Facts-Taxonomien:
+
+- taxonomies/food/ingredients.txt
+- taxonomies/ingredients_processing.txt
+
+Quelle: https://github.com/openfoodfacts/openfoodfacts-server
+
+Open Food Facts wird von einer unabhängigen Non-Profit-Organisation
+betrieben. Küchenrunde ist kein offizielles Open-Food-Facts-Projekt und wird
+von Open Food Facts nicht unterstützt.
+
+Lizenzlage
+----------
+
+Die Open-Food-Facts-Nutzungsbedingungen nennen für die Datenbank die Open
+Database License (ODbL) 1.0 und für die Einzelinhalte die Database Contents
+License (DbCL) 1.0:
+
+  https://world.openfoodfacts.org/terms-of-use
+
+Der Quellcode des Open-Food-Facts-Servers steht unter AGPL-3.0:
+
+  https://github.com/openfoodfacts/openfoodfacts-server/blob/main/LICENSE
+
+Die Taxonomiedateien liegen im AGPL-3.0-Repository, haben aber keine eigene,
+dateispezifische Lizenzangabe. Ihre konkrete Zuordnung zu ODbL/DbCL oder
+AGPL-3.0 ist daher offen. Vor einer öffentlichen Veröffentlichung ist diese
+Frage mit Open Food Facts zu klären.
+
+Bis zur Klärung behauptet Küchenrunde keine bestimmte Lizenz für diese
+Taxonomiedateien. Sie werden als Datenquelle mit Attribution genannt.
+
+Der Zutatenkatalog in src/domain/ingredientCatalogData.ts ist eine kuratierte,
+stark reduzierte Auswahl und keine vollständige Kopie der Taxonomien. Für die
+Daten gelten die Bedingungen der genannten Quellen; für den Quellcode dieses
+Projekts gilt die GPL-3.0-or-later.
+
+Weitere Hinweise: NOTICE und docs/ingredient-catalog.md.

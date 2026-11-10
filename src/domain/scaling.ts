@@ -9,6 +9,7 @@
  */
 
 import type { Ingredient } from '../types'
+import { reparseStoredIngredient } from '../import/ingredients'
 
 export interface ParsedQuantityToken {
   /** "ca.", "etwa", … including the original punctuation. */
@@ -42,7 +43,7 @@ export interface RecipeScaleResult {
   warnings: string[]
 }
 
-const QUALIFIER_RE = /^(ca\.?|etwa|circa|zirka|rund|ungefähr|gut)\s+/i
+const QUALIFIER_RE = /^(ca\.?|etwa|circa|zirka|rund|ungefähr|gut|bis(?:\s+zu)?|max\.?)\s+/i
 
 const UNICODE_FRACTIONS: Record<string, number> = {
   '½': 0.5,
@@ -114,7 +115,7 @@ export function parseQuantityToken(text: string | null | undefined): ParsedQuant
   }
 
   if (!rest) return null
-  const parts = rest.split(/\s*[-–—]\s*/)
+  const parts = rest.split(/\s*[-–—]\s*|\s+bis\s+/i)
   if (parts.length > 2 || parts.some((part) => !part)) return null
 
   const values: number[] = []
@@ -207,7 +208,10 @@ export function scaleRecipeIngredients(
     warnings.push('Die gewünschte Kochportionenzahl ist ungültig. Die Mengen bleiben unverändert.')
   }
 
-  const items = ingredients.map<ScaledIngredient>((ingredient) => {
+  const items = ingredients.map<ScaledIngredient>((storedIngredient) => {
+    // Existing recipes may still contain parser output from an older version.
+    // Re-read the preserved original line in memory; nothing is persisted.
+    const ingredient = reparseStoredIngredient(storedIngredient)
     const token =
       ingredient.quantityText?.trim() ||
       (typeof ingredient.quantity === 'number' ? String(ingredient.quantity) : '')

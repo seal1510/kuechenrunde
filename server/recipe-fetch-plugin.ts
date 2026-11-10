@@ -195,7 +195,7 @@ export function createRecipeFetchHandler() {
 export function recipeFetchPlugin(): Plugin {
   const handler = createRecipeFetchHandler()
   return {
-    name: 'opencook-recipe-fetch',
+    name: 'kuechenrunde-recipe-fetch',
     configureServer(server) {
       server.middlewares.use(RECIPE_FETCH_PATH, handler)
     },

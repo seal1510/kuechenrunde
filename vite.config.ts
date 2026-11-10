@@ -10,9 +10,9 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'openCook Web',
-        short_name: 'openCook',
-        description: 'Lokale Rezeptbibliothek mit Mela-Import',
+        name: 'Küchenrunde',
+        short_name: 'Küchenrunde',
+        description: 'Rezepte, Wochenplan und Einkaufsliste für die Familie.',
         lang: 'de',
         theme_color: '#0f1511',
         background_color: '#f2ecdf',
@@ -26,7 +26,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest,txt}'],
         navigateFallback: '/index.html',
         cleanupOutdatedCaches: true,
       },

@@ -119,6 +119,42 @@ describe('JSON-LD recipe extraction', () => {
     expect(recipe.raw).toEqual(fullRecipe)
   })
 
+  it('keeps decimal commas and double spaces in a recipe-page ingredient list', () => {
+    const result = extractRecipeCandidates(
+      page([
+        {
+          '@type': 'Recipe',
+          name: 'Afrikanischer Erdnusseintopf mit Hähnchen',
+          recipeIngredient: [
+            '2  Knoblauchzehen',
+            '1,5 TL Kreuzkümmel, wahlweise! (alternativ 1 TL Zimt gemahlen)',
+            '1  Peperoni',
+            '1,5 EL Honig',
+          ],
+          recipeInstructions: ['Alles kochen.'],
+        },
+      ]),
+      'https://example.com/erdnuss',
+    )
+    const amounts = result.candidates[0]!.ingredients.map((ingredient) => ({
+      quantity: ingredient.quantity,
+      quantityText: ingredient.quantityText,
+      unit: ingredient.unit,
+      name: ingredient.name,
+    }))
+    expect(amounts).toEqual([
+      { quantity: 2, quantityText: '2', unit: null, name: 'Knoblauchzehen' },
+      {
+        quantity: 1.5,
+        quantityText: '1,5',
+        unit: 'TL',
+        name: 'Kreuzkümmel, wahlweise! (alternativ 1 TL Zimt gemahlen)',
+      },
+      { quantity: 1, quantityText: '1', unit: null, name: 'Peperoni' },
+      { quantity: 1.5, quantityText: '1,5', unit: 'EL', name: 'Honig' },
+    ])
+  })
+
   it('supports multiple blocks, @graph, nested mainEntity and @type variants', () => {
     const first = {
       '@context': 'https://schema.org',

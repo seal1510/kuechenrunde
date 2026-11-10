@@ -10,6 +10,7 @@
  */
 
 import { db } from '../db'
+import { catalogShoppingKey } from '../domain/ingredientCatalog'
 import {
   buildShoppingList,
   resolveCanonicalKey,
@@ -77,8 +78,10 @@ export interface ShoppingDistributionView extends ShoppingDistributionResult {
   demand: ShoppingPeriodDemand
 }
 
-export function manualItemKey(item: Pick<ShoppingManualItem, 'name'>): string {
-  return shoppingItemKey(splitIngredientName(item.name).identityName)
+export function manualItemKey(
+  item: Pick<ShoppingManualItem, 'name' | 'unit'>,
+): string {
+  return shoppingItemKey(splitIngredientName(item.name, { unit: item.unit }).identityName)
 }
 
 export async function loadShoppingPeriodDemand(
@@ -140,11 +143,17 @@ export async function loadShoppingDistribution(
   anchor: string,
 ): Promise<ShoppingDistributionView> {
   const demand = await loadShoppingPeriodDemand(anchor)
-  const [allocations, lists, settings] = await Promise.all([
+  const [storedAllocations, lists, settings] = await Promise.all([
     db.shoppingDemandAllocations.where('periodStart').equals(demand.period.start).toArray(),
     db.shoppingLists.toArray(),
     getShoppingSettings(),
   ])
+  // Legacy rows keep their ids and list decisions, but contribute under the
+  // current canonical identity.
+  const allocations = storedAllocations.map((allocation) => ({
+    ...allocation,
+    itemKey: catalogShoppingKey(allocation.itemKey),
+  }))
   const standardList =
     lists.find((list) => list.id === demand.standardListId) ??
     standardShoppingListRecord(demand.period, settings.standardListName, 0)

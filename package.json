@@ -1,9 +1,9 @@
 {
-  "name": "opencook-web",
+  "name": "kuechenrunde",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Lokale Rezeptbibliothek mit Mela-Import (openCook-Web)",
+  "description": "Lokale Rezeptbibliothek mit Mela-Import (Küchenrunde)",
   "license": "GPL-3.0-or-later",
   "scripts": {
     "dev": "vite",

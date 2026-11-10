@@ -21,6 +21,20 @@ import type {
   ShoppingQuantityCorrection,
 } from '../types'
 import { addDays, formatWeekRange, startOfWeekOn } from './dates'
+import {
+  expandPluralSuffix,
+  foldIngredientText,
+  isSizeAdjectiveToken,
+  normalizeIngredientName,
+  normalizeUnitCandidate,
+  shoppingItemKey,
+} from './ingredientNames'
+import {
+  catalogShoppingKey,
+  resolveCatalogMatch,
+  type CatalogMatch,
+  type ResolveCatalogOptions,
+} from './ingredientCatalog'
 import { dishIdentityFor, dishShoppingNeeds, type DishSource } from './dishSource'
 import { formatScaledNumber, parseQuantityToken } from './scaling'
 
@@ -145,59 +159,87 @@ export function isCurrentShoppingWeek(
 /* Names and product identity                                          */
 /* ------------------------------------------------------------------ */
 
-/** Lowercase, fold German umlauts, unify sharp s and spacing. */
+/** Shared spelling fold for every domain rule; see ingredientNames. */
 function fold(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/ä/g, 'a')
-    .replace(/ö/g, 'o')
-    .replace(/ü/g, 'u')
-    .replace(/ß/g, 'ss')
-    .replace(/soße/g, 'sauce')
-    .replace(/sosse/g, 'sauce')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return foldIngredientText(value)
 }
 
-function stemWord(word: string): string {
-  if (word.length <= 4) return word
-  // One conservative plural/singular sweep. The same rule is applied to both
-  // directions, so "Tomaten" and "Tomate" land on the same key.
-  for (const suffix of ['en', 'er', 'n', 'e', 's']) {
-    if (!word.endsWith(suffix)) continue
-    if (suffix === 's' && word.endsWith('ss')) continue
-    const stem = word.slice(0, -suffix.length)
-    if (stem.length >= 3) return stem
-  }
-  return word
-}
+/** Re-exported stable product identity (implemented in ingredientNames). */
+export { shoppingItemKey }
 
-/**
- * Stable product identity, independent from the rendered label. Only the
- * spelling is normalised; unknown parentheses stay part of the identity so
- * different product variants are never merged by accident.
- */
-export function shoppingItemKey(name: string): string {
-  const folded = fold(name)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (!folded) return ''
-  return folded
-    .split(' ')
-    .map(stemWord)
-    .filter(Boolean)
-    .join(' ')
-}
+const FRESH_FORM_WORDS = new Set([
+  'frisch', 'frische', 'frischer', 'frisches', 'frischen', 'frischem',
+  'reif', 'reife', 'reifer', 'reifes', 'reifen',
+])
+
+const DRIED_FORM_WORDS = new Set([
+  'getrocknet', 'getrocknete', 'getrockneter', 'getrocknetes',
+  'getrockneten', 'getrocknetem', 'gerebelt', 'gerebelte', 'gerebelter',
+  'gerebeltes', 'gerebelten', 'gemahlen', 'gemahlene', 'gemahlener',
+  'gemahlenes', 'gemahlenen', 'gemahlenem', 'pulver', 'pulverisiert',
+  'zerrieben', 'zerstossen', 'zerstossene', 'zerstossener',
+])
+
+const PRODUCT_FORM_WORDS = new Set([
+  ...DRIED_FORM_WORDS,
+  'stuckig', 'stuckige', 'stuckiger', 'stuckiges', 'stuckigen',
+  'passiert', 'passierte', 'passierter', 'passiertes', 'passierten',
+  'ungesuesst', 'ungesuesste', 'ungesuesster', 'ungesuesstes',
+  'ungesüsst', 'ungesüsste', 'ungesüsster', 'ungesüsstes',
+  'ganz', 'ganze', 'ganzer', 'ganzes', 'ganzen',
+  'samen', 'korner', 'körner', 'korn',
+  'dose', 'dosen', 'glas', 'konserve', 'konserven',
+])
+
+const PRODUCT_FORM_PHRASES = new Set([
+  'in flussigkeit', 'in fluessigkeit', 'in flüssigkeit',
+  'in sirup', 'in saft', 'in wasser', 'in lake', 'in salzlake',
+  'in ol', 'in öl', 'in essig',
+  'aus der dose', 'aus dem glas', 'aus der konserve',
+  'ganze samen', 'ganzer samen',
+])
+
+const COLOR_WORDS = new Set([
+  'rot', 'rote', 'roter', 'rotes', 'roten', 'rotem',
+  'grun', 'grune', 'gruner', 'grunes', 'grunen', 'grunem',
+  'gelb', 'gelbe', 'gelber', 'gelbes', 'gelben', 'gelbem',
+  'weiss', 'weisse', 'weisser', 'weisses', 'weissen', 'weissem',
+  'schwarz', 'schwarze', 'schwarzer', 'schwarzes', 'schwarzen', 'schwarzem',
+  'braun', 'braune', 'brauner', 'braunes', 'braunen', 'braunem',
+])
+
+const STATE_WORDS = new Set([
+  'kochend', 'heiss', 'heiß', 'warm', 'lauwarm', 'kalt', 'gekuhlt', 'gekühlt',
+])
+
+const OPTIONAL_MARKERS = /\b(?:optional|evtl|eventuell|ggf|wer\s+mag|nach\s+bedarf)\b/
+const AMOUNT_DESCRIPTOR_WORDS = new Set([
+  'gestr', 'gestrichen', 'gehauft', 'gehäuft', 'leicht', 'knapp', 'voll',
+  'ca', 'etwa', 'circa', 'rund', 'zirka', 'mehr', 'auch', 'etwas',
+])
+
+const LEADING_FORM_VARIANTS: Array<[RegExp, string]> = [
+  [/^getrocknet/i, 'getrocknet'],
+  [/^gemahlen/i, 'gemahlen'],
+  [/^gerebelt/i, 'gerebelt'],
+  [/^pulverisiert/i, 'pulverisiert'],
+  [/^zerrieben/i, 'zerrieben'],
+  [/^passiert/i, 'passiert'],
+  [/^stuckig/i, 'stuckig'],
+  [/^stückig/i, 'stuckig'],
+  [/^ganz(?:e|er|es|en|em)?$/i, 'ganz'],
+]
+
+const LEADING_PREPARATION_ADJECTIVES = new Set([
+  'gerieben', 'geriebene', 'geriebener', 'geriebenes', 'geriebenen', 'geriebenem',
+  'geraspelt', 'geraspelte', 'geraspelter', 'geraspeltes', 'geraspelten',
+])
 
 const STRONG_PREPARATION_WORDS = new Set([
   'gehackt',
   'gewurfelt',
   'gewürfelt',
   'geschnitten',
-  'gemahlen',
   'gerieben',
   'gezupft',
   'gewaschen',
@@ -231,7 +273,6 @@ const STRONG_PREPARATION_PREFIXES = [
   'gehackt',
   'gewurfelt',
   'geschnitten',
-  'gemahlen',
   'gerieben',
   'gezupft',
   'gewaschen',
@@ -256,37 +297,17 @@ const STRONG_PREPARATION_PREFIXES = [
 ]
 
 const WEAK_PREPARATION_WORDS = new Set([
-  'fein',
-  'feine',
-  'feinen',
-  'feiner',
-  'feines',
-  'grob',
-  'grobe',
-  'groben',
-  'grober',
-  'grobes',
-  'klein',
-  'kleine',
-  'kleinen',
-  'kleiner',
-  'kleines',
-  'mittelgross',
-  'mittelgroß',
-  'gross',
-  'groß',
-  'frisch',
+  'fein', 'feine', 'feinen', 'feiner', 'feines', 'feinem',
+  'grob', 'grobe', 'groben', 'grober', 'grobes', 'grobem',
+  'klein', 'kleine', 'kleinen', 'kleiner', 'kleines', 'kleinem',
+  'mittelgross', 'mittelgrosse', 'mittelgrosser', 'mittelgrosses',
+  'mittelgroß', 'mittelgroße', 'mittelgroßer', 'mittelgroßes',
+  'gross', 'grosse', 'grosser', 'grosses', 'grossen', 'grossem',
+  'groß', 'große', 'großer', 'großes', 'großen', 'großem',
+  'frisch', 'frische', 'frischer', 'frisches',
   'in',
-  'streifen',
-  'wurfel',
-  'würfel',
-  'scheiben',
-  'stucke',
-  'stücke',
-  'ringe',
-  'stifte',
-  'mundgerechte',
-  'mundgerecht',
+  'streifen', 'wurfel', 'würfel', 'scheiben', 'stucke', 'stücke',
+  'spalten', 'ringe', 'stifte', 'mundgerechte', 'mundgerecht',
 ])
 
 /**
@@ -296,14 +317,8 @@ const WEAK_PREPARATION_WORDS = new Set([
  * part of the shopping name.
  */
 const CUT_FORM_WORDS = new Set([
-  'scheiben',
-  'stifte',
-  'streifen',
-  'ringe',
-  'wurfel',
-  'würfel',
-  'stucke',
-  'stücke',
+  'scheiben', 'stifte', 'streifen', 'ringe', 'wurfel', 'würfel',
+  'stucke', 'stücke', 'spalten',
 ])
 
 export function isPreparationPhrase(value: string): boolean {
@@ -360,6 +375,7 @@ const COOKING_PURPOSE_VERBS = [
   'ablöschen',
   'betraufeln',
   'braten',
+  'anbraten',
   'backen',
   'frittieren',
   'kochen',
@@ -385,10 +401,11 @@ const COOKING_PURPOSE = new RegExp(
   `\\b(?:zum|zur)\\s+(?:${COOKING_PURPOSE_VERBS.join('|')})\\b`,
 )
 const TRAILING_PURPOSE = new RegExp(
-  `[\\s,;]*(?:zum|zur)\\s+(?:${COOKING_PURPOSE_VERBS.join('|')})\\s*$`,
+  `[\\s,;–—-]*(?:zum|zur|für|fuer)\\s+(?:${COOKING_PURPOSE_VERBS.join('|')})\\s*$`,
   'i',
 )
-const TRAILING_AMOUNT_HINT = /[\s,;]*nach\s+(?:geschmack|bedarf|belieben)\s*$/i
+const TRAILING_AMOUNT_HINT = /[\s,;–—-]*nach\s+(?:geschmack|bedarf|belieben)\s*$/i
+const TRAILING_ROLE = /[\s,;–—-]*als\s+[a-zäöüß]+\s*$/i
 const LEADING_OPTIONAL = /^(?:evtl\.?|eventuell|optional|ggf\.?|gegebenenfalls)\s+/i
 
 /**
@@ -398,8 +415,9 @@ const LEADING_OPTIONAL = /^(?:evtl\.?|eventuell|optional|ggf\.?|gegebenenfalls)\
  */
 function isMeasurementPhrase(value: string): boolean {
   const amount = String.raw`(?:\d+\s*\/\s*\d+|\d+(?:[.,]\d+)?|[½¼¾⅓⅔⅛⅜⅝⅞])`
+  const units = String.raw`(?:g|kg|mg|ml|l|cl|dl|cm|mm|stück|stk\.?|x|el|tl|msp|prise|bund|packung|pck\.?|dose|glas|beutel|tube|flasche|scheibe|zehe|kopf|knolle|stange|zweig|handvoll)`
   const pattern = new RegExp(
-    String.raw`^(?:ca\.?|etwa|circa|rund|zirka)?\s*${amount}(?:\s*[-–]\s*${amount})?\s*(?:g|kg|mg|ml|l|cl|dl|stück|stk\.?|x|el|tl|msp|prise|bund|packung|pck\.?|dose|glas|beutel|tube|flasche|scheibe|zehe|kopf|knolle|stange|zweig|handvoll)\s*$`,
+    String.raw`^(?:à\s*|je\s*)?(?:ca\.?|etwa|circa|rund|zirka)?\s*${amount}(?:\s*(?:[-–—]|bis)\s*${amount})?\s*${units}(?:\s+[a-zäöüß]+){0,2}\s*$`,
     'i',
   )
   return pattern.test(value.trim())
@@ -414,6 +432,144 @@ export function isCookingPurposePhrase(value: string): boolean {
   const folded = fold(value).replace(/[.,;:!?]+$/g, '').trim()
   if (!folded) return false
   return COOKING_PURPOSE.test(folded)
+}
+
+function phraseTokens(value: string): string[] {
+  return fold(value)
+    .replace(/[.,;:!?()]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
+function isProductFormPhrase(value: string): boolean {
+  const tokens = phraseTokens(value)
+  if (tokens.length === 0) return false
+  const joined = tokens.join(' ')
+  if (PRODUCT_FORM_PHRASES.has(joined)) return true
+  if (tokens.length === 1 && PRODUCT_FORM_WORDS.has(tokens[0] ?? '')) return true
+  return (
+    tokens.some((token) => DRIED_FORM_WORDS.has(token)) &&
+    tokens.every(
+      (token) => DRIED_FORM_WORDS.has(token) || FRESH_FORM_WORDS.has(token),
+    )
+  )
+}
+
+function isFreshnessPhrase(value: string): boolean {
+  const tokens = phraseTokens(value)
+  return tokens.length > 0 && tokens.every((token) => FRESH_FORM_WORDS.has(token))
+}
+
+function isStatePhrase(value: string): boolean {
+  const tokens = phraseTokens(value)
+  return tokens.length > 0 && tokens.every((token) => STATE_WORDS.has(token))
+}
+
+function isSizePhrase(value: string): boolean {
+  const tokens = phraseTokens(value)
+  return tokens.length > 0 && tokens.every((token) => isSizeAdjectiveToken(token))
+}
+
+function isColorPhrase(value: string): boolean {
+  const tokens = phraseTokens(value)
+  return tokens.length === 1 && COLOR_WORDS.has(tokens[0] ?? '')
+}
+
+function isOptionalPhrase(value: string): boolean {
+  return OPTIONAL_MARKERS.test(fold(value))
+}
+
+function isAmountDescriptorPhrase(value: string): boolean {
+  const tokens = phraseTokens(value)
+  return (
+    tokens.length > 0 &&
+    tokens.every((token) => AMOUNT_DESCRIPTOR_WORDS.has(token))
+  )
+}
+
+function isSingleLetterPhrase(value: string): boolean {
+  return /^[a-z]$/i.test(value.trim())
+}
+
+function isUsagePhrase(value: string): boolean {
+  const folded = fold(value).replace(/[.,;:!?]+$/g, '').trim()
+  if (!folded) return false
+  return (
+    COOKING_PURPOSE.test(folded) ||
+    TRAILING_AMOUNT_HINT.test(folded) ||
+    /^(?:nach\s+bedarf|nach\s+geschmack|bei\s+bedarf|optional|wer\s+mag)$/.test(
+      folded,
+    ) ||
+    /\b(?:menge|geschmacksache|geschmackssache)\b/.test(folded)
+  )
+}
+
+/** Freshness stays visible only where it distinguishes a real product form. */
+const FRESH_NAME_PRODUCTS = new Set(['hefe'])
+const LEADING_FRESH_NAME = /^frisch(?:e|er|es|en|em)?\s+(.+)$/i
+
+function removeLeadingFresh(value: string): { name: string; cleaned: boolean } {
+  const match = LEADING_FRESH_NAME.exec(value)
+  if (!match) return { name: value, cleaned: false }
+  const rest = (match[1] ?? '').trim()
+  const first = fold(rest).split(/\s+/)[0] ?? ''
+  if (FRESH_NAME_PRODUCTS.has(first)) return { name: value, cleaned: false }
+  return { name: rest, cleaned: true }
+}
+
+const COLOR_VARIANT_PRODUCTS = new Set([
+  'paprika', 'paprikaschote', 'paprikaschoten', 'spitzpaprika',
+  'zwiebel', 'zwiebeln', 'chili', 'chilischote', 'chilischoten',
+  'chillischote', 'chillischoten',
+])
+
+const COLOR_ROOTS: Array<[string, string]> = [
+  ['rot', 'rot'],
+  ['grun', 'grün'],
+  ['gelb', 'gelb'],
+  ['weiss', 'weiß'],
+  ['schwarz', 'schwarz'],
+  ['braun', 'braun'],
+]
+
+function canonicalColor(value: string): string | null {
+  const folded = fold(value).replace(/[.,;:!?]+$/g, '')
+  for (const [root, display] of COLOR_ROOTS) {
+    if (folded === root || (folded.startsWith(root) && folded.length - root.length <= 2)) {
+      return display
+    }
+  }
+  return null
+}
+
+/** Colour is a variant only where it is not already part of a fixed name. */
+function extractLeadingColor(value: string): { name: string; variant: string } {
+  const parts = value.split(/\s+/).filter(Boolean)
+  if (parts.length < 2) return { name: value, variant: '' }
+  const color = canonicalColor(parts[0] ?? '')
+  if (!color) return { name: value, variant: '' }
+  const rest = parts.slice(1)
+  const base = fold(rest[0] ?? '')
+  if (!COLOR_VARIANT_PRODUCTS.has(base) && !COLOR_VARIANT_PRODUCTS.has(fold(rest.join(' ')))) {
+    return { name: value, variant: '' }
+  }
+  return { name: rest.join(' '), variant: color }
+}
+
+/** Move a leading form adjective ("gemahlener Koriander") into the variant. */
+function extractLeadingForm(value: string): { name: string; variant: string } {
+  const parts = value.split(/\s+/).filter(Boolean)
+  if (parts.length < 2) return { name: value, variant: '' }
+  const first = parts[0] ?? ''
+  for (const [pattern, canonical] of LEADING_FORM_VARIANTS) {
+    if (pattern.test(first)) {
+      return { name: parts.slice(1).join(' '), variant: canonical }
+    }
+  }
+  if (LEADING_PREPARATION_ADJECTIVES.has(fold(first))) {
+    return { name: parts.slice(1).join(' '), variant: '' }
+  }
+  return { name: value, variant: '' }
 }
 
 /** Strip a usage clause from the end; returns the remaining name. */
@@ -431,6 +587,12 @@ function stripTrailingUsage(value: string): { name: string; removed: string } {
     if (amount) {
       removed.push(amount[0].replace(/^[\s,;]+/, '').trim())
       name = name.slice(0, amount.index).trim().replace(/[,;]+$/, '').trim()
+      continue
+    }
+    const role = TRAILING_ROLE.exec(name)
+    if (role) {
+      removed.push(role[0].replace(/^[\s,;]+/, '').trim())
+      name = name.slice(0, role.index).trim().replace(/[,;]+$/, '').trim()
       continue
     }
     break
@@ -459,10 +621,14 @@ export interface SplitIngredientName {
   identityName: string
   /** Removed preparation hint (not shown on the shopping list). */
   preparationNote: string
+  /** True when the source explicitly called the product fresh. */
+  fresh: boolean
   /** Reliable purchase/description hint, e.g. "bevorzugt Mutti". */
   embeddedPurchaseNote: string
   /** True when at least one part of the original line was cleaned/removed. */
   cleaned: boolean
+  /** Catalogue identity when the name was recognised, otherwise null. */
+  catalog: CatalogMatch | null
 }
 
 export interface ShoppingIngredientClassification {
@@ -470,6 +636,28 @@ export interface ShoppingIngredientClassification {
   split: SplitIngredientName
   /** Human-readable reason for an excluded instruction line. */
   reason: string
+}
+
+/** Turn a recognised form tail into a stable display variant. */
+function canonicalFormVariant(value: string): string {
+  const tokens = fold(value)
+    .replace(/[.,;:!?()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+  for (const token of tokens) {
+    for (const [pattern, canonical] of LEADING_FORM_VARIANTS) {
+      if (pattern.test(token)) return canonical
+    }
+  }
+  return tokens.includes('dose')
+    ? 'Dose'
+    : tokens.includes('glas')
+      ? 'Glas'
+      : tokens.includes('konserve') || tokens.includes('konserven')
+        ? 'Konserve'
+        : value.replace(/\s+/g, ' ').trim()
 }
 
 /**
@@ -480,12 +668,33 @@ export interface ShoppingIngredientClassification {
  * 3. preparation hint (never shown as a purchase preference),
  * 4. reliable purchase hint.
  *
- * Unknown parentheticals are handled conservatively: they stay part of the
+ * Parentheses, commas and spaced dashes are peeled off from the end. Harmless
+ * size/freshness/usage words are separated; unknown parentheticals stay in the
  * product identity as a variant instead of being discarded as decoration.
  */
-export function splitIngredientName(rawName: string): SplitIngredientName {
-  let name = String(rawName ?? '').trim()
+export function splitIngredientName(
+  rawName: string,
+  options: ResolveCatalogOptions = {},
+): SplitIngredientName {
+  const rawText = String(rawName ?? '').trim()
+  // The untouched name is checked first, so a full product name such as
+  // "Gehackte Tomaten" or "Tomaten (stückig)" wins over its preparation words.
+  const rawMatch = resolveCatalogMatch(rawText, options)
+  if (rawMatch) {
+    return {
+      name: rawMatch.label,
+      variant: '',
+      identityName: rawMatch.label,
+      preparationNote: '',
+      embeddedPurchaseNote: '',
+      fresh: rawMatch.form === 'fresh',
+      cleaned: rawMatch.label !== rawText,
+      catalog: rawMatch,
+    }
+  }
+  let name = rawText
   let cleaned = false
+  let fresh = false
   const preparation: string[] = []
   const purchase: string[] = []
   const variants: string[] = []
@@ -497,42 +706,142 @@ export function splitIngredientName(rawName: string): SplitIngredientName {
     name = leading.name
   }
 
+  // "2 Dosen (à 425 ml) stückige Tomaten": a leading package hint.
   for (let round = 0; round < 4; round += 1) {
-    const match = /\(([^()]*)\)\s*[.,;]?\s*$/.exec(name)
-    if (!match) break
-    const content = (match[1] ?? '').trim()
-    if (!content) break
-    if (isPreparationPhrase(content) || isCookingPurposePhrase(content)) {
-      preparation.push(content)
+    const leadingParen = /^\(([^()]*)\)\s*(.+)$/.exec(name)
+    if (!leadingParen) break
+    const content = (leadingParen[1] ?? '').trim()
+    const rest = (leadingParen[2] ?? '').trim()
+    if (!content || !rest) break
+    if (isFreshnessPhrase(content)) fresh = true
+    if (
+      isMeasurementPhrase(content) ||
+      isOptionalPhrase(content) ||
+      isUsagePhrase(content) ||
+      isFreshnessPhrase(content) ||
+      isStatePhrase(content) ||
+      isSizePhrase(content) ||
+      isAmountDescriptorPhrase(content)
+    ) {
+      if (isMeasurementPhrase(content)) purchase.push(content)
+      else preparation.push(content)
+      name = rest
       cleaned = true
-    } else if (isMeasurementPhrase(content)) {
-      purchase.push(content)
-      cleaned = true
-    } else if (isPurchasePhrase(content)) {
-      purchase.push(content)
-      cleaned = true
-    } else {
-      // Unknown: could be a variety, type, fat level, brand or composition.
-      // Never throw it away; it defines the product identity.
-      variants.push(content)
-      cleaned = true
+      continue
     }
-    name = name.slice(0, match.index).trim().replace(/[,;]+$/, '').trim()
+    break
   }
 
-  // "Zwiebeln, fein gewürfelt" / "Rotwein, trocken" without parentheses.
-  const comma = /^(.*),\s*([^,]+)$/.exec(name)
-  if (comma) {
-    const tail = (comma[2] ?? '').trim()
-    if (isPreparationPhrase(tail) || isCookingPurposePhrase(tail)) {
-      preparation.push(tail)
+  for (let round = 0; round < 12; round += 1) {
+    // "Bulgur - ungekocht, je feiner …": a spaced dash starts a note.
+    const dash = /^(.*)\s+[-–—]\s+(.+)$/.exec(name)
+    if (dash) {
+      const tail = (dash[2] ?? '').trim()
+      if (isProductFormPhrase(tail)) variants.push(canonicalFormVariant(tail))
+      else if (isPurchasePhrase(tail)) purchase.push(tail)
+      else preparation.push(tail)
+      name = (dash[1] ?? '').trim()
       cleaned = true
-      name = (comma[1] ?? '').trim()
-    } else if (isPurchasePhrase(tail)) {
-      purchase.push(tail)
-      cleaned = true
-      name = (comma[1] ?? '').trim()
+      continue
     }
+
+    const paren = /\(([^()]*)\)\s*[.,;]?\s*$/.exec(name)
+    if (paren) {
+      const content = (paren[1] ?? '').trim()
+      if (!content) break
+      const base = name.slice(0, paren.index).trim().replace(/[,;]+$/, '').trim()
+      const tight = paren.index > 0 && !/\s/.test(name.charAt(paren.index - 1))
+      if (tight && /^(?:n|en|e|er|s)$/i.test(content)) {
+        name = expandPluralSuffix(name)
+        cleaned = true
+        continue
+      }
+      if (isFreshnessPhrase(content)) fresh = true
+      if (
+        isSingleLetterPhrase(content) ||
+        isOptionalPhrase(content) ||
+        isUsagePhrase(content) ||
+        isFreshnessPhrase(content) ||
+        isStatePhrase(content) ||
+        isSizePhrase(content) ||
+        isAmountDescriptorPhrase(content)
+      ) {
+        preparation.push(content)
+        cleaned = true
+      } else if (isMeasurementPhrase(content)) {
+        purchase.push(content)
+        cleaned = true
+      } else if (isPurchasePhrase(content)) {
+        purchase.push(content)
+        cleaned = true
+      } else if (isProductFormPhrase(content)) {
+        variants.push(canonicalFormVariant(content))
+        cleaned = true
+      } else if (isPreparationPhrase(content) || isCookingPurposePhrase(content)) {
+        preparation.push(content)
+        cleaned = true
+      } else {
+        // Unknown: could be a variety, type, fat level, brand or composition.
+        // Never throw it away; it defines the product identity.
+        variants.push(content)
+        cleaned = true
+      }
+      name = base
+      continue
+    }
+
+    // "Zwiebeln, fein gewürfelt" / "Mango(s), in Spalten, in Flüssigkeit".
+    const comma = /^(.*),\s*([^,]+)$/.exec(name)
+    if (comma) {
+      const base = (comma[1] ?? '').trim()
+      let tail = (comma[2] ?? '').trim()
+      const usageAtEnd = tail.match(
+        /[\s,;–—-]*(?:nach\s+(?:geschmack|bedarf|belieben)|zum\s+[a-zäöüß]+|zur\s+[a-zäöüß]+)\s*$/i,
+      )
+      if (usageAtEnd) {
+        preparation.push(usageAtEnd[0].replace(/^[\s,;–—-]+/, '').trim())
+        tail = tail.slice(0, usageAtEnd.index).trim()
+        cleaned = true
+        if (!tail) {
+          name = base
+          continue
+        }
+        name = `${base}, ${tail}`
+        continue
+      }
+      let consumed = true
+      if (isFreshnessPhrase(tail)) fresh = true
+      if (
+        isOptionalPhrase(tail) ||
+        isUsagePhrase(tail) ||
+        isFreshnessPhrase(tail) ||
+        isStatePhrase(tail) ||
+        isSizePhrase(tail) ||
+        isAmountDescriptorPhrase(tail)
+      ) {
+        preparation.push(tail)
+      } else if (isMeasurementPhrase(tail)) {
+        purchase.push(tail)
+      } else if (isPurchasePhrase(tail)) {
+        purchase.push(tail)
+      } else if (isProductFormPhrase(tail)) {
+        variants.push(canonicalFormVariant(tail))
+      } else if (isPreparationPhrase(tail) || isCookingPurposePhrase(tail)) {
+        preparation.push(tail)
+      } else if (isColorPhrase(tail)) {
+        variants.push(canonicalColor(tail) ?? tail.toLocaleLowerCase('de'))
+      } else {
+        consumed = false
+      }
+      if (consumed) {
+        name = base
+        cleaned = true
+        continue
+      }
+      break
+    }
+
+    break
   }
 
   const usage = stripTrailingUsage(name)
@@ -542,15 +851,90 @@ export function splitIngredientName(rawName: string): SplitIngredientName {
     name = usage.name
   }
 
-  name = name.replace(/\s+/g, ' ').trim()
-  const variant = variants.join(' · ').trim()
+  const leadingFresh = removeLeadingFresh(name)
+  if (leadingFresh.cleaned) {
+    name = leadingFresh.name
+    cleaned = true
+    fresh = true
+  }
+
+  const leadingColor = extractLeadingColor(name)
+  if (leadingColor.variant) {
+    variants.push(leadingColor.variant)
+    name = leadingColor.name
+    cleaned = true
+  }
+
+  const leadingForm = extractLeadingForm(name)
+  if (leadingForm.variant) {
+    variants.push(leadingForm.variant)
+    cleaned = true
+  }
+  name = normalizeIngredientName(leadingForm.name)
+
+  const dedupedVariants = Array.from(
+    new Set(variants.map((entry) => entry.trim()).filter(Boolean)),
+  )
+  const fallbackName = name || rawText
+  const matchText = [
+    fallbackName,
+    ...dedupedVariants,
+    fresh ? 'frisch' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  let match = resolveCatalogMatch(matchText, options)
+  if (!match && dedupedVariants.length > 0) {
+    // A parenthetical translation is often a second name for the same product
+    // ("Kreuzkümmelpulver (Cumin)"). It must not become part of the identity
+    // when the catalogue itself confirms that both names belong together.
+    const baseMatch = resolveCatalogMatch(fallbackName, options)
+    const variantMatches = dedupedVariants.map((variant) => resolveCatalogMatch(variant, options))
+    if (
+      baseMatch &&
+      variantMatches.every(
+        (variantMatch) =>
+          variantMatch !== null && variantMatch.familyId === baseMatch.familyId,
+      )
+    ) {
+      const distinctProducts = new Set(
+        variantMatches.map((variantMatch) => variantMatch?.productId),
+      )
+      if (distinctProducts.size <= 1) {
+        const variantMatch = variantMatches[0]
+        match =
+          baseMatch.isDefaultProduct &&
+          variantMatch &&
+          !variantMatch.isDefaultProduct &&
+          variantMatch.productId !== baseMatch.productId
+            ? variantMatch
+            : baseMatch
+      }
+    }
+  }
+  if (match) {
+    return {
+      name: match.label,
+      variant: '',
+      identityName: match.label,
+      preparationNote: preparation.join(', '),
+      embeddedPurchaseNote: purchase.join(', '),
+      fresh: match.form === 'fresh',
+      cleaned: cleaned || match.label !== fallbackName,
+      catalog: match,
+    }
+  }
+
+  const variant = dedupedVariants.join(' · ')
   return {
-    name: name || String(rawName ?? '').trim(),
+    name: fallbackName,
     variant,
-    identityName: [name, variants.join(' ')].filter(Boolean).join(' ').trim(),
+    identityName: [fallbackName, dedupedVariants.join(' ')].filter(Boolean).join(' ').trim(),
     preparationNote: preparation.join(', '),
     embeddedPurchaseNote: purchase.join(', '),
+    fresh,
     cleaned,
+    catalog: null,
   }
 }
 
@@ -561,19 +945,20 @@ export function splitIngredientName(rawName: string): SplitIngredientName {
  */
 export function classifyIngredientForShopping(
   rawName: string,
+  options: ResolveCatalogOptions = {},
 ): ShoppingIngredientClassification {
   const text = String(rawName ?? '').replace(/\s+/g, ' ').trim()
   if (!text) {
     return {
       decision: 'instruction',
-      split: splitIngredientName(text),
+      split: splitIngredientName(text, options),
       reason: 'Leere Zeile',
     }
   }
   if (text.endsWith(':')) {
     return {
       decision: 'instruction',
-      split: splitIngredientName(text),
+      split: splitIngredientName(text, options),
       reason: 'Abschnittsüberschrift',
     }
   }
@@ -588,13 +973,13 @@ export function classifyIngredientForShopping(
     ) {
       return {
         decision: 'instruction',
-        split: splitIngredientName(text),
+        split: splitIngredientName(text, options),
         reason: 'Abschnittsüberschrift',
       }
     }
   }
 
-  const split = splitIngredientName(text)
+  const split = splitIngredientName(text, options)
   const folded = fold(split.name).replace(/[.,;:!?]+$/g, '').trim()
   if (!folded) {
     return { decision: 'instruction', split, reason: 'Reine Zubereitungsanweisung' }
@@ -725,6 +1110,8 @@ const CONTAINER_UNITS: Record<string, string> = {
   becher: 'Becher',
   dose: 'Dose',
   dosen: 'Dose',
+  konserve: 'Konserve',
+  konserven: 'Konserve',
   glas: 'Glas',
   glaser: 'Glas',
   gläser: 'Glas',
@@ -782,9 +1169,7 @@ const CONTAINER_UNITS: Record<string, string> = {
 }
 
 function normalizedUnit(unit: string | null | undefined): string {
-  return fold(unit ?? '')
-    .replace(/\.+$/g, '')
-    .trim()
+  return fold(normalizeUnitCandidate(unit ?? ''))
 }
 
 function unitSpec(unit: string | null | undefined): UnitSpec {
@@ -949,17 +1334,37 @@ function roundAmount(value: number): number {
 /* Automatic category assignment                                       */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Product vocabulary for this app's own eleven shopping categories,
+ * compiled with reference to:
+ * - misterm2310/einkaufslisten-card, custom_components/einkaufsliste/data/
+ *   kategorien.json (MIT, Copyright (c) 2026 misterm2310)
+ * - Open Food Facts ingredients taxonomy
+ *   (https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/food/ingredients.txt;
+ *   Daten: ODbL 1.0 / DbCL 1.0, die genaue Lizenzzuordnung der
+ *   Taxonomiedateien ist offen, siehe NOTICE), German names and synonyms only
+ *
+ * The list stays deliberately explicit. Unknown products fall through to
+ * "Sonstiges" instead of being guessed from a risky fragment.
+ */
 const CATEGORY_KEYWORDS: Array<[ShoppingCategoryId, string[]]> = [
   [
     'household',
     [
-      'toilettenpapier', 'kuchenrolle', 'küchenrolle', 'spulmittel', 'spülmittel',
-      'waschmittel', 'weichspuler', 'weichspüler', 'reiniger', 'seife', 'shampoo',
-      'zahnpasta', 'zahnburste', 'zahnbürste', 'mullbeutel', 'müllbeutel',
-      'alufolie', 'frischhaltefolie', 'backpapier', 'serviette', 'servietten',
-      'putzlappen', 'schwamm', 'kerze', 'kerzen', 'batterie', 'batterien',
-      'kaffeefilter', 'filtertute', 'filtertüte', 'duschgel', 'deodorant',
-      'wc',
+      'toilettenpapier', 'klopapier', 'kuchenrolle', 'küchenrolle', 'spulmittel',
+      'spülmittel', 'putzmittel', 'waschmittel', 'weichspuler', 'weichspüler',
+      'reiniger', 'glasreiniger', 'seife', 'duschgel', 'shampoo', 'spülung',
+      'zahnpasta', 'zahnburste', 'zahnbürste', 'zahnseide', 'mundspulung',
+      'mundspülung', 'deo', 'deodorant', 'windel', 'feuchttucher', 'feuchttücher',
+      'rasier', 'tampon', 'binden', 'watepads', 'wattestäbchen', 'taschentucher',
+      'taschentücher', 'pflaster', 'sonnencreme', 'haargel', 'lotion',
+      'bodylotion', 'handcreme', 'nagellack', 'makeup', 'schminke', 'haarspray',
+      'kontaktlinsen', 'mullbeutel', 'müllbeutel', 'mullsack', 'müllsack',
+      'alufolie', 'frischhaltefolie', 'gefrierbeutel', 'backpapier', 'serviette',
+      'servietten', 'putzlappen', 'spültucher', 'spültücher', 'lappen', 'schwamm',
+      'kerze', 'kerzen', 'batterie', 'batterien', 'gluhbirne', 'glühbirne',
+      'kaffeefilter', 'filtertute', 'filtertüte', 'entkalker', 'spulmaschinentabs',
+      'spülmaschinentabs', 'tabs', 'wc',
     ],
   ],
   [
@@ -969,100 +1374,160 @@ const CATEGORY_KEYWORDS: Array<[ShoppingCategoryId, string[]]> = [
   [
     'drinks',
     [
-      'wasser', 'mineralwasser', 'saft', 'orangensaft', 'apfelsaft', 'wein', 'rotwein',
-      'weisswein', 'weißwein', 'bier', 'limonade', 'cola', 'schorle', 'kaffee',
-      'espresso', 'tee', 'teebeutel', 'kaffeebohnen', 'kakao', 'getrank', 'getränk',
-      'prosecco', 'sekt', 'likor', 'likör',
+      'wasser', 'mineralwasser', 'sprudel', 'sprudelwasser', 'saft', 'orangensaft',
+      'apfelsaft', 'traubensaft', 'wein', 'rotwein', 'weisswein', 'weißwein',
+      'bier', 'radler', 'limonade', 'limo', 'cola', 'fanta', 'sprite', 'schorle',
+      'eistee', 'energy', 'kaffee', 'espresso', 'tee', 'teebeutel', 'kaffeebohnen',
+      'kakao', 'getrank', 'getränk', 'prosecco', 'sekt', 'likor', 'likör',
+      'whisky', 'wodka', 'smoothie', 'kasten', 'kiste',
     ],
   ],
   [
     'meat',
     [
-      'fleisch', 'hack', 'hackfleisch', 'rind', 'rinder', 'schwein', 'schweine',
-      'huhn', 'huhner', 'hühner', 'hahnchen', 'hähnchen', 'haehnchen', 'pute',
-      'puten', 'lamm', 'steak', 'schnitzel', 'wurst', 'wurste', 'würste',
-      'schinken', 'speck', 'bacon', 'salami', 'chorizo', 'fisch', 'lachs',
-      'thunfisch', 'forelle', 'kabeljau', 'garnele', 'garnelen', 'scampi',
-      'shrimp', 'muschel', 'muscheln', 'tintenfisch', 'matjes', 'hering',
-      'bratwurst', 'aufschnitt', 'geflugel', 'geflügel', 'gulasch',
-      'gehacktes', 'hackepeter', 'faschiertes',
+      'fleisch', 'hack', 'hackfleisch', 'rind', 'rinder', 'rinderhack',
+      'schwein', 'schweine', 'schweinehack', 'huhn', 'huhner', 'hühner',
+      'huhnchen', 'hühnchen', 'hahnchen', 'hähnchen', 'haehnchen',
+      'hahnchenbrust', 'hähnchenbrust', 'hahnchenschenkel', 'hähnchenschenkel',
+      'huhnerbrust', 'hühnerbrust', 'huhnerfilet', 'hühnerfilet', 'pute', 'puten',
+      'putenbrust', 'putenfilet', 'lamm', 'lammfleisch', 'kalbfleisch', 'steak',
+      'schnitzel', 'kotelett', 'braten', 'filet', 'wurst', 'wurste', 'würste',
+      'wurstchen', 'würstchen', 'schinken', 'speck', 'bacon', 'salami', 'chorizo',
+      'aufschnitt', 'frikadelle', 'gulasch', 'gehacktes', 'hackepeter',
+      'faschiertes', 'leberkase', 'leberkäse', 'mett', 'chicken', 'nuggets',
+      'fisch', 'lachs', 'lachsfilet', 'thunfisch', 'forelle', 'kabeljau', 'dorsch',
+      'schellfisch', 'makrele', 'sardine', 'sardinen', 'hering', 'matjes',
+      'garnele', 'garnelen', 'scampi', 'shrimp', 'krabben', 'crevetten', 'muschel',
+      'muscheln', 'tintenfisch', 'geflugel', 'geflügel',
     ],
   ],
   [
     'canned',
     [
-      'dose', 'dosen', 'konserve', 'konserven', 'passierte tomate', 'passierte tomaten',
-      'tomatenmark', 'pesto', 'marmelade', 'konfiture', 'konfitüre', 'kokosmilch',
-      'kokosnussmilch', 'mais', 'kichererbse', 'kichererbsen', 'linsen', 'bohnen',
-      'sauce', 'sosse', 'soße', 'brühe', 'bruhe', 'fond', 'suppe', 'fertiggericht',
-      'oliven', 'kapern', 'artischocke', 'artischocken', 'sonnengetrocknete',
-      'thunfischdose', 'sardine', 'sardinen', 'sardellen', 'würzsauce', 'ketchup',
-      'senfgurke', 'senfgurken', 'essiggurke', 'essiggurken', 'mandeln', 'nusse',
-      'nüsse', 'rosinen',
+      'dose', 'dosen', 'dosentomaten', 'konserve', 'konserven', 'tomatenkonserve',
+      'passierte tomate', 'passierte tomaten', 'passata', 'tomatenpassata',
+      'pizzatomaten', 'chutney', 'mangochutney', 'erdnussmus', 'nussmus',
+      'gochujang', 'kimchi',
+      'passiert', 'passierte', 'stuckig', 'stückig',
+      'mandelmus', 'tomaten passiert', 'in flussigkeit', 'in fluessigkeit',
+      'in flüssigkeit', 'in sirup', 'in saft',
+      'tomatenmark', 'tomatenpuree', 'tomatenpüree', 'tomatenfruchtfleisch',
+      'tomatenhack', 'tomatenwurfel', 'tomatenwürfel', 'stuckige tomaten',
+      'stückige tomaten', 'tomaten stuckig', 'tomaten stückig',
+      'gehackte tomaten', 'tomaten gehackt', 'zerkleinerte tomaten',
+      'geschalte tomaten', 'geschälte tomaten', 'schaltomaten', 'schältomaten',
+      'tomaten aus der dose', 'tomaten in der dose', 'tomaten in dosen',
+      'getrocknete tomaten', 'sonnengetrocknete tomaten',
+      'artischockenherzen', 'artischockenherz', 'pesto', 'marmelade',
+      'konfiture', 'konfitüre', 'kokosmilch', 'kokosnussmilch', 'kokoscreme',
+      'kokosnusscreme', 'mais', 'kichererbse', 'kichererbsen',
+      'linsen', 'bohnen', 'kidneybohnen', 'sauce', 'sosse', 'soße', 'brühe',
+      'bruhe', 'fond', 'suppe', 'fertiggericht', 'oliven', 'kapern',
+      'sonnengetrocknete', 'thunfischdose', 'sardine', 'sardinen', 'sardellen',
+      'wurzsauce', 'würzsauce', 'ketchup', 'senfgurke', 'senfgurken',
+      'essiggurke', 'essiggurken', 'mandeln', 'nusse', 'nüsse', 'rosinen',
     ],
   ],
   [
     'dairy',
     [
-      'milch', 'butter', 'kase', 'käse', 'quark', 'joghurt', 'jogurt', 'sahne',
-      'creme', 'creme fraiche', 'crème fraîche', 'schmand', 'mascarpone',
-      'mozzarella', 'parmesan', 'feta', 'ricotta', 'huettenkase', 'hüttenkäse',
-      'frischkase', 'frischkäse', 'ei', 'eier', 'eigelb', 'eiweiss', 'buttermilch',
-      'kondensmilch', 'sauerrahm', 'skyr', 'gouda', 'emmentaler', 'bergkase',
-      'bergkäse', 'pudding',
+      'milch', 'butter', 'margarine', 'kase', 'käse', 'quark', 'joghurt',
+      'jogurt', 'sahne', 'schlagsahne', 'kochsahne', 'saure sahne', 'creme',
+      'creme fraiche', 'crème fraîche', 'schmand', 'mascarpone', 'mozzarella',
+      'parmesan', 'feta', 'ricotta', 'camembert', 'huettenkase', 'hüttenkäse',
+      'frischkase', 'frischkäse', 'grillkase', 'grillkäse', 'halloumi', 'ei',
+      'eier', 'eigelb', 'eiweiss', 'buttermilch', 'kefir', 'kondensmilch',
+      'sauerrahm', 'skyr', 'gouda', 'emmentaler', 'bergkase', 'bergkäse',
+      'pudding',
     ],
   ],
   [
     'bakery',
     [
       'brot', 'brote', 'brotchen', 'brötchen', 'baguette', 'toast', 'croissant',
-      'brezel', 'bagel', 'kuchen', 'torte', 'gebäck', 'geback', 'semmel',
-      'semmeln', 'laugengeback', 'zwieback', 'knackebrot', 'knäckebrot',
+      'brezel', 'laugen', 'laugengeback', 'bagel', 'kuchen', 'torte', 'geback',
+      'semmel', 'semmeln', 'zwieback', 'knackebrot', 'knäckebrot',
+      'wrap', 'tortilla', 'fladenbrot', 'ciabatta', 'berliner', 'muffin',
+      'donut', 'hefezopf', 'stuten', 'waffel',
     ],
   ],
   [
     'spices',
     [
-      'salz', 'pfeffer', 'gewurz', 'gewürz', 'gewurze', 'gewürze', 'olivenol',
-      'olivenöl', 'rapsol', 'rapsöl', 'sonnenblumenol', 'sonnenblumenöl',
-      'pflanzenol', 'pflanzenöl', 'kokosol', 'kokosöl', 'sesamol', 'sesamöl',
-      'erdnussol', 'erdnussöl', 'leinol', 'leinöl', 'kurbiskernol', 'kürbiskernöl',
+      'salz', 'speisesalz', 'tafelsalz', 'kochsalz', 'meersalz', 'jodsalz',
+      'steinsalz', 'pfeffer', 'schwarzer pfeffer', 'weisser pfeffer',
+      'edelsusspaprika', 'edelsuesspaprika', 'paprika edelsuss',
+      'paprika edelsuess', 'kardamom', 'kardamomkapseln', 'senfsamen',
+      'senfsaat', 'kummelsamen', 'kuemmelsamen', 'muskatnuss', 'honig',
+      'majonaise', 'majo', 'nelken', 'gewurznelken', 'knoblauchpulver',
+      'zwiebelpulver', 'ingwerpulver',
+      'weißer pfeffer', 'pfeffer schwarz', 'frisch gemahlener pfeffer',
+      'gemahlener pfeffer', 'cayennepfeffer', 'gewurz', 'gewürz', 'gewurze',
+      'gewürze', 'gewurzmischung', 'gewürzmischung', 'gewürzmischungen',
+      'gewurzmischungen', 'krauter der provinz', 'kräuter der provinz',
+      'italienische krauter', 'italienische kräuter', 'provenzalische krauter',
+      'provenzalische kräuter', 'grillgewurz', 'grillgewürz', 'curry',
+      'currypulver', 'currypaste', 'garam masala', 'ras el hanout', 'baharat',
+      'olivenol', 'olivenöl', 'natives olivenol', 'natives olivenöl', 'ol',
+      'pflanzenol', 'pflanzenöl', 'pflanzliches ol', 'pflanzliches öl',
+      'pflanzenole', 'pflanzenöle', 'rapsol', 'rapsöl', 'sonnenblumenol',
+      'sonnenblumenöl', 'kokosol', 'kokosöl', 'sesamol', 'sesamöl', 'erdnussol',
+      'erdnussöl', 'leinol', 'leinöl', 'kurbiskernol', 'kürbiskernöl',
       'walnussol', 'walnussöl', 'traubenkernol', 'traubenkernöl', 'avocadoöl',
-      'balsamico', 'balsamicoessig', 'mayonnaise', 'mayo', 'essig', 'senf', 'curry',
-      'paprikapulver', 'zimt', 'muskat', 'vanille', 'curcuma', 'kurkuma',
-      'kreuzkummel', 'kreuzkümmel', 'kummel', 'kümmel', 'chilipulver',
-      'zucker', 'backpulver', 'natron', 'hefe', 'trockenhefe', 'vanillezucker',
-      'speisestarke', 'speisestärke', 'starke', 'stärke', 'agar', 'gelatine',
-      'safran', 'majoran', 'estragon', 'lorbeer',
+      'chiliol', 'chiliöl', 'knoblauchol', 'knoblauchöl', 'maisol', 'maisöl',
+      'distelol', 'distelöl', 'sojaol', 'sojaöl', 'balsamico', 'balsamicoessig',
+      'mayonnaise', 'mayo', 'essig', 'senf', 'paprikapulver', 'chilipulver',
+      'chiliflocken', 'zimt', 'muskat', 'vanille', 'curcuma', 'kurkuma',
+      'kreuzkummel', 'kreuzkümmel', 'kummel', 'kümmel', 'safran', 'majoran',
+      'estragon', 'lorbeer', 'lorbeerblatt', 'lorbeerblatter', 'lorbeerblätter',
+      'korianderpulver', 'koriandersamen', 'gemahlener koriander',
+      'koriander gemahlen', 'zucker', 'backpulver', 'natron', 'hefe',
+      'trockenhefe', 'vanillezucker', 'speisestarke', 'speisestärke', 'starke',
+      'stärke', 'agar', 'gelatine',
     ],
   ],
   [
     'grains',
     [
-      'nudel', 'nudeln', 'pasta', 'spaghetti', 'penne', 'fusilli', 'makkaroni',
-      'lasagne', 'reis', 'reisnudel', 'reisnudeln', 'getreide', 'mehl', 'hafer',
-      'haferflocke', 'haferflocken', 'quinoa', 'couscous', 'bulgur', 'polenta',
-      'grieß', 'griess', 'hirse', 'gerste', 'dinkel', 'roggen', 'weizen',
-      'cornflakes', 'müsli', 'musli', 'flocke', 'flocken', 'granola',
+      'nudel', 'nudeln', 'teigwaren', 'pasta', 'spaghetti', 'penne', 'fusilli',
+      'makkaroni', 'lasagne', 'tagliatelle', 'linguine', 'ravioli', 'gnocchi',
+      'reis', 'basmatireis', 'jasminreis', 'risottoreis', 'reisnudel',
+      'reisnudeln', 'getreide', 'mehl', 'hafer', 'haferflocke', 'haferflocken',
+      'quinoa', 'couscous', 'bulgur', 'polenta', 'griess', 'grieß', 'hirse',
+      'gerste', 'dinkel', 'roggen', 'weizen', 'cornflakes', 'musli', 'müsli',
+      'flocke', 'flocken', 'granola',
     ],
   ],
   [
     'produce',
     [
-      'obst', 'gemuse', 'gemüse', 'zwiebel', 'zwiebeln', 'tomate', 'tomaten',
+      'obst', 'gemuse', 'gemuese', 'gemüse', 'zwiebel', 'zwiebeln', 'tomate',
+      'tomaten',
       'kartoffel', 'kartoffeln', 'karotte', 'karotten', 'mohre', 'möhre', 'mohren',
-      'möhren', 'paprika', 'gurke', 'gurken', 'salat', 'apfel', 'äpfel', 'banane',
-      'bananen', 'zitrone', 'zitronen', 'limette', 'limetten', 'orange', 'orangen',
-      'beere', 'beeren', 'erdbeere', 'erdbeeren', 'himbeere', 'himbeeren',
-      'blaubeere', 'blaubeeren', 'traube', 'trauben', 'birne', 'birnen',
-      'pfirsich', 'pfirsiche', 'pflaume', 'pflaumen', 'avocado', 'avocados',
-      'spinat', 'brokkoli', 'broccoli', 'blumenkohl', 'kohl', 'lauch', 'porree',
+      'möhren', 'paprika', 'peperoni', 'gurke', 'gurken', 'salat', 'apfel',
+      'äpfel', 'banane', 'bananen', 'zitrone', 'zitronen', 'limette', 'limetten',
+      'orange', 'orangen', 'mandarine', 'mandarinen', 'clementine',
+      'clementinen', 'beere', 'beeren', 'erdbeere', 'erdbeeren', 'himbeere',
+      'himbeeren', 'heidelbeere', 'heidelbeeren', 'blaubeere', 'blaubeeren',
+      'traube', 'trauben', 'birne', 'birnen', 'pfirsich', 'pfirsiche',
+      'nektarine', 'nektarinen', 'pflaume', 'pflaumen', 'kirsche', 'kirschen',
+      'kiwi', 'kiwis', 'mango', 'mangos', 'ananas', 'melone', 'melonen',
+      'avocado', 'avocados', 'spinat', 'brokkoli', 'broccoli', 'blumenkohl',
+      'kohl', 'kohlrabi', 'rotkohl', 'weisskohl', 'weißkohl', 'spitzkohl',
+      'rosenkohl', 'grunkohl', 'grünkohl', 'wirsing', 'lauch', 'porree',
       'sellerie', 'pilz', 'pilze', 'champignon', 'champignons', 'zucchini',
       'aubergine', 'auberginen', 'kurbis', 'kürbis', 'knoblauch', 'krauter',
-      'kräuter', 'petersilie', 'basilikum', 'koriander', 'dill', 'minze',
-      'rosmarin', 'thymian', 'oregano', 'frühlingszwiebel', 'frühlingszwiebeln',
-      'fenchel', 'rote beete', 'mangold', 'rucola', 'rukkola', 'ingwer', 'chili',
-      'erbsen', 'spargel', 'radieschen', 'rettich', 'okra', 'pak choi',
+      'kraeuter', 'kräuter', 'petersilie', 'basilikum', 'koriander', 'dill', 'minze',
+      'rosmarin', 'thymian', 'oregano', 'schnittlauch', 'kerbel', 'liebstock',
+      'liebstöckel', 'salbei', 'barlauch', 'bärlauch', 'kresse',
+      'brunnenkresse', 'frühlingszwiebel', 'frühlingszwiebeln', 'fenchel',
+      'rote beete', 'mangold', 'rucola', 'rukkola', 'ingwer', 'chili',
+      'chilischote', 'chilischoten', 'erbsen', 'grune bohnen', 'grüne bohnen',
+      'brechbohnen', 'schnittbohnen', 'spargel', 'radieschen', 'rettich',
+      'meerrettich', 'maiskolben', 'okra', 'pak choi', 'artischocke',
+      'artischocken',
+      'susskartoffel', 'süßkartoffel', 'pastinake', 'pastinaken', 'steckrube',
+      'steckrübe', 'topinambur', 'zitronensaft', 'limonensaft',
     ],
   ],
 ]
@@ -1102,9 +1567,9 @@ function keywordScore(name: string, tokens: readonly string[], keyword: Category
   if (keyword.words.length === 0) return 0
   if (keyword.words.length > 1) {
     if (name === keyword.keyword) return 1200 + keyword.keyword.length
-    if (name.includes(` ${keyword.keyword} `)) return 900 + keyword.keyword.length
+    if (name.includes(` ${keyword.keyword} `)) return 1100 + keyword.keyword.length
     if (name.startsWith(`${keyword.keyword} `) || name.endsWith(` ${keyword.keyword}`)) {
-      return 800 + keyword.keyword.length
+      return 1050 + keyword.keyword.length
     }
     return 0
   }
@@ -1136,6 +1601,11 @@ function keywordScore(name: string, tokens: readonly string[], keyword: Category
 export function guessShoppingCategory(name: string): ShoppingCategoryId {
   const normalized = categoryText(name)
   if (!normalized) return 'other'
+  // The catalogue is the single authority for known products: category and
+  // shopping identity then always describe the same product.
+  const catalogMatch = resolveCatalogMatch(name)
+  if (catalogMatch) return catalogMatch.category
+  const tokens = normalized.split(' ').filter(Boolean)
   // Explicit freezing markers describe the storage form, not the base product.
   if (
     /(^|\s)tiefkuhl/.test(normalized) ||
@@ -1144,7 +1614,13 @@ export function guessShoppingCategory(name: string): ShoppingCategoryId {
   ) {
     return 'frozen'
   }
-  const tokens = normalized.split(' ').filter(Boolean)
+  const hasStorageForm =
+    tokens.some((token) =>
+      ['dose', 'dosen', 'glas', 'glaser', 'konserve', 'konserven'].includes(token),
+    ) ||
+    /(^|\s)(?:in\s+(?:flussigkeit|fluessigkeit|sirup|saft)|aus\s+(?:der\s+dose|dem\s+glas|der\s+konserve))(\s|$)/.test(
+      normalized,
+    )
   let bestCategory: ShoppingCategoryId = 'other'
   let bestScore = 0
   for (const keyword of CATEGORY_KEYWORD_INDEX) {
@@ -1153,6 +1629,14 @@ export function guessShoppingCategory(name: string): ShoppingCategoryId {
       bestScore = score
       bestCategory = keyword.category
     }
+  }
+  // A jar/can marker overrides the raw product only where the fresh variant
+  // would otherwise win. Olive oil in a glass bottle stays an oil, not a can.
+  if (
+    hasStorageForm &&
+    (bestCategory === 'produce' || bestCategory === 'meat' || bestCategory === 'other')
+  ) {
+    return 'canned'
   }
   return bestCategory
 }
@@ -1177,6 +1661,8 @@ interface MutablePosition {
 
 interface MutableGroup {
   key: string
+  /** Identity without an inferred form suffix, used for legacy compatibility. */
+  baseKey: string
   rawKeys: Set<string>
   names: string[]
   variants: Set<string>
@@ -1327,11 +1813,14 @@ function dishLabel(source: DishSource): string {
 
 /** Follow persisted product aliases. Cycles stop at the last safe identity. */
 function resolveKey(key: string, byKey: ReadonlyMap<string, ShoppingItemRule>): string {
-  let current = key
+  // Keys written by older versions may name a synonym or an older form
+  // variant of the same catalogue product. The catalogue maps them before the
+  // user-owned alias rules are followed, so no database migration is needed.
+  let current = catalogShoppingKey(key)
   const seen = new Set<string>()
   for (let index = 0; index < 16; index += 1) {
     seen.add(current)
-    const next = byKey.get(current)?.canonicalKey?.trim()
+    const next = catalogShoppingKey(byKey.get(current)?.canonicalKey?.trim() ?? '')
     if (!next || next === current || seen.has(next)) break
     current = next
   }
@@ -1429,6 +1918,42 @@ function positionsEqual(
   return true
 }
 
+/** Unit-backed storage form; an explicit Dose/Glas is stronger than a name. */
+function preservedFormForUnit(unit: string | null | undefined): string | null {
+  const dimension = unitSpec(unit).dimension
+  if (dimension === 'unit:dose') return 'Dose'
+  if (dimension === 'unit:glas') return 'Glas'
+  if (dimension === 'unit:konserve') return 'Konserve'
+  return null
+}
+
+/**
+ * When only one form of a product exists, keep its old base key so existing
+ * purchases and list allocations continue to match. Split keys are only needed
+ * once fresh and preserved/ground forms actually coexist.
+ */
+function collapseSingleFormGroups(
+  groups: Map<string, MutableGroup>,
+): Map<string, MutableGroup> {
+  const byBase = new Map<string, MutableGroup[]>()
+  for (const group of groups.values()) {
+    const list = byBase.get(group.baseKey) ?? []
+    list.push(group)
+    byBase.set(group.baseKey, list)
+  }
+  const resolved = new Map<string, MutableGroup>()
+  for (const [baseKey, list] of byBase) {
+    if (list.length === 1 && !groups.has(baseKey)) {
+      const only = list[0]!
+      only.key = baseKey
+      resolved.set(baseKey, only)
+      continue
+    }
+    for (const group of list) resolved.set(group.key, group)
+  }
+  return resolved
+}
+
 /**
  * Build the complete visible list for one shopping week.
  *
@@ -1478,17 +2003,32 @@ export function buildShoppingList(input: ShoppingListInput): ShoppingListResult 
     for (const need of needs) {
       // Only pure instructions are dropped. A real product with "zum Braten"
       // or "nach Geschmack" stays a product; the usage clause is cleaned off.
-      const classification = classifyIngredientForShopping(need.name)
+      const classification = classifyIngredientForShopping(need.name, {
+        unit: need.unit,
+      })
       if (classification.decision === 'instruction') continue
       const split = classification.split
-      const rawKey = shoppingItemKey(split.identityName)
+      const baseKey = canonical(shoppingItemKey(split.identityName))
+      if (!baseKey) continue
+      const baseCategory = guessShoppingCategory(
+        [split.name, split.variant].filter(Boolean).join(' '),
+      )
+      const extras: string[] = []
+      // A unit-resolved catalogue product already names its storage/form. For
+      // every other product a Dose/Glas unit still describes the purchase form.
+      const storage = split.catalog?.viaUnitHint ? null : preservedFormForUnit(need.unit)
+      if (storage && baseCategory !== 'canned') extras.push(storage)
+      const rawKey = shoppingItemKey(
+        [split.identityName, ...extras].filter(Boolean).join(' '),
+      )
       if (!rawKey) continue
       const key = canonical(rawKey)
       if (!viewed) continue
-      const group = ensureGroup(groups, key, split.name)
+      const group = ensureGroup(groups, key, baseKey, split.name)
       group.rawKeys.add(rawKey)
       group.names.push(split.name)
       if (split.variant) group.variants.add(split.variant)
+      for (const extra of extras) group.variants.add(extra)
       group.sources.push({ kind: 'cook', label: dishLabel(source), refId: session.id })
       const note = [need.purchaseNote.trim(), split.embeddedPurchaseNote.trim()]
         .filter(Boolean)
@@ -1506,12 +2046,12 @@ export function buildShoppingList(input: ShoppingListInput): ShoppingListResult 
   for (const manual of input.manualItems) {
     const date = manual.shoppingDate || manual.weekStart || ''
     if (!date) continue
-    const split = splitIngredientName(manual.name)
+    const split = splitIngredientName(manual.name, { unit: manual.unit })
     const rawKey = shoppingItemKey(split.identityName)
     if (!rawKey) continue
     const key = canonical(rawKey)
     if (!inWeek(date)) continue
-    const group = ensureGroup(groups, key, split.name)
+    const group = ensureGroup(groups, key, key, split.name)
     group.rawKeys.add(rawKey)
     group.names.push(split.name)
     if (split.variant) group.variants.add(split.variant)
@@ -1522,6 +2062,8 @@ export function buildShoppingList(input: ShoppingListInput): ShoppingListResult 
     group.sources.push({ kind: 'manual', label: split.name, refId: manual.id })
     addContribution(group, manual.quantityText, manual.unit)
   }
+
+  const resolvedGroups = collapseSingleFormGroups(groups)
 
   const suppliedPurchases = input.purchases ?? []
   const purchases: ShoppingPurchase[] =
@@ -1551,7 +2093,7 @@ export function buildShoppingList(input: ShoppingListInput): ShoppingListResult 
   }
 
   const items: ShoppingListItem[] = []
-  for (const group of groups.values()) {
+  for (const group of resolvedGroups.values()) {
     const groupRules = input.rules.filter((rule) => canonical(rule.key) === group.key)
     const primary =
       rulesByKey.get(group.key) ??
@@ -1560,11 +2102,14 @@ export function buildShoppingList(input: ShoppingListInput): ShoppingListResult 
       ) ??
       groupRules[0]
     const name = primary?.displayName.trim() || bestName(group.names)
+    const variant = dedupeNotes(Array.from(group.variants)).join(' · ')
+    // The variant carries relevant product distinctions such as "stückig" for
+    // canned tomatoes or "getrocknet" for herbs, so the fallback guess sees it.
     const categoryId = normalizeCategoryId(
       primary?.categoryId ??
         groupRules.find((rule) => rule.categoryId)?.categoryId ??
         group.manualCategoryId ??
-        guessShoppingCategory(name),
+        guessShoppingCategory([name, variant].filter(Boolean).join(' ')),
     )
 
     const derivedPositions = sortPositions(
@@ -1629,7 +2174,7 @@ export function buildShoppingList(input: ShoppingListInput): ShoppingListResult 
     items.push({
       key: group.key,
       name,
-      variant: dedupeNotes(Array.from(group.variants)).join(' · '),
+      variant,
       categoryId,
       derivedPositions,
       requiredPositions,
@@ -1674,12 +2219,14 @@ function dimensionRank(dimension: string): number {
 function ensureGroup(
   groups: Map<string, MutableGroup>,
   key: string,
+  baseKey: string,
   name: string,
 ): MutableGroup {
   const existing = groups.get(key)
   if (existing) return existing
   const created: MutableGroup = {
     key,
+    baseKey,
     rawKeys: new Set(),
     names: [],
     variants: new Set(),

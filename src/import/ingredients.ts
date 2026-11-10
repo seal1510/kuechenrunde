@@ -1,14 +1,25 @@
 /*
- * openCook Web
+ * Küchenrunde (vormals openCook Web)
  * Copyright (C) 2026 openCook Web contributors
+ * Copyright (C) 2026 olie.xdev <olie.xdeveloper@googlemail.com>
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Ingredient-line parsing is derived from the behaviour of openCook's
  * `IngredientLineParser` (GPLv3). The original line is always kept on the
  * ingredient, so a conservative parse never destroys the source text.
+ *
+ * Original: https://github.com/oliexdev/openCook (v0.4, commit 6e0c234).
+ * Die Ableitung ist im Baseline-Commit vom 2026-11-08 enthalten; für
+ * Küchenrunde am 2026-11-10 angepasst.
  */
 
 import type { Ingredient, IngredientGroup, IngredientLink } from '../types'
+import {
+  displayUnitCandidate,
+  isSizeAdjectiveToken,
+  normalizeIngredientName,
+  normalizeUnitCandidate,
+} from '../domain/ingredientNames'
 
 const UNIT_WORDS = new Set([
   // metric / volume
@@ -162,13 +173,7 @@ const COUNT_UNITS = new Set([
 /** Canonical spelling of a known unit, or null for unknown/ambiguous text. */
 export function canonicalUnitWord(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
-  const normalized = value
-    .trim()
-    .toLocaleLowerCase('de')
-    .replace(/\.+$/, '')
-    .replace(/\/n$/, '')
-    .replace(/\(n\)$/, '')
-    .replace(/\(en\)$/, '')
+  const normalized = normalizeUnitCandidate(value)
   if (!normalized) return null
   const alias = UNIT_ALIASES[normalized]
   if (alias) return alias
@@ -226,11 +231,12 @@ const UNICODE_FRACTIONS: Record<string, number> = {
 }
 
 const SINGLE_QUANTITY = String.raw`(?:\d+\s+\d+\s*\/\s*\d+|\d+\s*\/\s*\d+|\d+(?:[.,]\d+)?)`
+const RANGE_SEPARATOR = String.raw`(?:\s*[-–—]\s*|\s+bis\s+)`
 const LEADING_QUANTITY = new RegExp(
-  String.raw`^(${SINGLE_QUANTITY}(?:\s*[-–]\s*${SINGLE_QUANTITY})?)\s*`,
+  String.raw`^(${SINGLE_QUANTITY}(?:${RANGE_SEPARATOR}${SINGLE_QUANTITY})?)\s*`,
 )
 
-const QUALIFIER = /^(ca|etwa|circa|zirka|rund|ungefähr)(?:\.|\b)\s*/i
+const QUALIFIER = /^(ca|etwa|circa|zirka|rund|ungefähr|bis(?:\s+zu)?|max)(?:\.|\b)\s*/i
 const SPELLED_QUANTITY =
   /^(?:ein(?:e|en|em|er|es)?\s+)?(halb(?:e[rnms]?)?|viertel|dreiviertel|eineinhalb|anderthalb)\b\s*/i
 
@@ -390,21 +396,117 @@ export function parseIngredientLine(
 
   try {
     const leading = readLeadingQuantity(plain)
-    if (!leading) return base
-    const { unit, name } = splitUnit(leading.rest)
-    if (!name) return base
-
-    return {
-      ...base,
-      name,
-      quantity: leading.quantity,
-      quantityText: leading.quantityText,
-      unit,
-      parseStatus: 'parsed',
+    if (leading) {
+      const { unit, name } = splitUnit(stripLeadingSizeWords(leading.rest))
+      if (name) {
+        return {
+          ...base,
+          name: normalizeIngredientName(name),
+          quantity: leading.quantity,
+          quantityText: leading.quantityText,
+          unit,
+          parseStatus: 'parsed',
+        }
+      }
     }
+
+    const trailing = readTrailingQuantity(plain)
+    if (trailing) {
+      return {
+        ...base,
+        name: normalizeIngredientName(trailing.name),
+        quantity: trailing.quantity,
+        quantityText: trailing.quantityText,
+        unit: trailing.unit,
+        parseStatus: 'parsed',
+      }
+    }
+
+    return { ...base, name: normalizeIngredientName(plain) }
   } catch {
     // A conservative parser must never lose the original line.
     return base
+  }
+}
+
+/** "1 große Zwiebel" and "1 daumengroßes Stück Ingwer" parse without noise. */
+function stripLeadingSizeWords(value: string): string {
+  const parts = value.split(/\s+/).filter(Boolean)
+  let index = 0
+  while (index < parts.length - 1 && isSizeAdjectiveToken(parts[index] ?? '')) {
+    index += 1
+  }
+  return parts.slice(index).join(' ')
+}
+
+/**
+ * Read a quantity after the product name, e.g. "Knoblauchzehe(n), 2 - 3" or
+ * "Mehl, 500 g". Only a comma/semicolon-separated pure amount is accepted, so
+ * a product name containing a number is never rewritten by guesswork.
+ */
+function readTrailingQuantity(
+  text: string,
+): { name: string; quantity: number; quantityText: string; unit: string | null } | null {
+  const separator = Math.max(text.lastIndexOf(','), text.lastIndexOf(';'))
+  if (separator <= 0 || separator >= text.length - 1) return null
+  const name = text.slice(0, separator).trim()
+  const tail = text.slice(separator + 1).trim()
+  if (!name || !tail) return null
+  const leading = readLeadingQuantity(tail)
+  if (!leading) return null
+  const { unit, name: rest } = splitUnit(stripLeadingSizeWords(leading.rest), true)
+  if (rest) return null
+  return {
+    name,
+    quantity: leading.quantity,
+    quantityText: leading.quantityText,
+    unit,
+  }
+}
+
+/**
+ * Old parser output sometimes still carries the amount or unit in the visible
+ * name ("bis 950 ml …", "TL, gestr. …", "½ EL …", "Stück(e) …").
+ */
+function storedNameNeedsRepair(name: string): boolean {
+  const text = name.trim()
+  return (
+    /^(?:bis\s+)?(?:\d+(?:[.,]\d+)?|[½¼¾⅓⅔⅛⅜⅝⅞])(?:\s|$|[a-zäöüß])/i.test(text) ||
+    /^(?:tl|el|ml|cl|dl|g|kg|mg|stk|stück|stueck|zehe|zehen|zweig|zweige)\b/i.test(
+      text,
+    ) ||
+    /\bbis\b/i.test(text)
+  )
+}
+
+/**
+ * Read-time interpretation of a stored ingredient. The recipe row is never
+ * mutated; this only repairs old parser output in memory so existing recipes
+ * benefit from parser fixes without a migration or re-import. Already clean
+ * structured rows are left exactly as they are.
+ */
+export function reparseStoredIngredient(ingredient: Ingredient): Ingredient {
+  const raw = ingredient.raw?.trim()
+  if (!raw) return ingredient
+  const plain = ingredient.parseStatus === 'plain'
+  if (!plain && !storedNameNeedsRepair(ingredient.name)) return ingredient
+
+  const parsed = parseIngredientLine(raw, ingredient.position, ingredient.groupId)
+  if (parsed.parseStatus === 'parsed') {
+    return {
+      ...ingredient,
+      name: parsed.name || ingredient.name,
+      quantity: parsed.quantity,
+      quantityText: parsed.quantityText,
+      unit: parsed.unit,
+      parseStatus: 'parsed',
+    }
+  }
+
+  // A plain row may still gain a normalised name ("Frische Petersilie").
+  return {
+    ...ingredient,
+    name: parsed.name || ingredient.name,
   }
 }
 
@@ -505,8 +607,8 @@ function parseQuantity(token: string): number | null {
   let value = token.trim()
   if (!value) return null
   // Ranges use their lower bound, exactly like the previous parser.
-  if (value.includes('-') || value.includes('–')) {
-    value = (value.split(/[-–]/, 1)[0] ?? '').trim()
+  if (/\s+bis\s+|[-–—]/.test(value)) {
+    value = (value.split(/\s+bis\s+|[-–—]/, 1)[0] ?? '').trim()
     if (!value) return null
   }
   if (value.includes(' ') && value.includes('/')) {
@@ -530,22 +632,25 @@ function parseFraction(value: string): number | null {
   return numerator / denominator
 }
 
-/** Split "<unit> <name>"; only take a unit when a non-empty ingredient name remains. */
-function splitUnit(rest: string): { unit: string | null; name: string } {
+/**
+ * Split "<unit> <name>". A unit is only accepted when a non-empty name
+ * remains, except for trailing quantities where the unit is the whole tail.
+ */
+function splitUnit(
+  rest: string,
+  allowEmptyName = false,
+): { unit: string | null; name: string } {
   const text = rest.trim()
   if (!text) return { unit: null, name: '' }
   const parts = text.split(/\s+/)
-  for (let count = Math.min(3, parts.length - 1); count >= 1; count -= 1) {
+  const maxWords = allowEmptyName
+    ? Math.min(3, parts.length)
+    : Math.min(3, parts.length - 1)
+  for (let count = maxWords; count >= 1; count -= 1) {
     const candidate = parts.slice(0, count).join(' ')
-    const normalized = candidate
-      .toLowerCase()
-      .replace(/\.$/, '')
-      .replace(/\/n$/, '')
-      .replace(/\(n\)$/, '')
-      .replace(/\(en\)$/, '')
-    if (UNIT_WORDS.has(normalized)) {
+    if (UNIT_WORDS.has(normalizeUnitCandidate(candidate))) {
       return {
-        unit: candidate,
+        unit: displayUnitCandidate(candidate),
         name: parts.slice(count).join(' ').trim(),
       }
     }

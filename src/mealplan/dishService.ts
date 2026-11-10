@@ -18,6 +18,7 @@ import {
   planDayTotal,
 } from '../domain/dishplan'
 import { resolveOriginalServings } from '../domain/scaling'
+import { planCleanupForDeletedSessions } from '../shopping/orphanCleanup'
 import { randomId } from '../lib/id'
 import type {
   CookSession,
@@ -595,13 +596,34 @@ export async function deleteDishPlan(
 ): Promise<{ deletedMeals: number }> {
   return db.transaction(
     'rw',
-    [db.mealPlans, db.cookSessions, db.mealDays, db.freeDishes, db.cookProgress],
+    [
+      db.mealPlans,
+      db.cookSessions,
+      db.mealDays,
+      db.freeDishes,
+      db.cookProgress,
+      db.recipes,
+      db.settings,
+      db.shoppingLists,
+      db.shoppingItemRules,
+      db.shoppingPurchases,
+      db.shoppingDemandAllocations,
+      db.shoppingQuantityCorrections,
+    ],
     async () => {
       const session = await db.cookSessions.get(cookSessionId)
       const entries = await db.mealPlans
         .where('cookSessionId')
         .equals(cookSessionId)
         .toArray()
+
+      // Shopping demand is derived from cooking events. Remove purchases and
+      // list allocations that only belonged to this dish in the same
+      // transaction, so deleting a planned dish cannot leave orphaned rows.
+      const cleanup = await planCleanupForDeletedSessions(
+        session ? [session] : [],
+      )
+
       if (entries.length > 0) {
         await db.mealPlans.bulkDelete(entries.map((entry) => entry.id))
       }
@@ -612,6 +634,12 @@ export async function deleteDishPlan(
         entries.find((entry) => entry.freeDishId)?.freeDishId ??
         null
       if (freeDishId) await db.freeDishes.delete(freeDishId)
+      if (cleanup.removedPurchaseIds.length > 0) {
+        await db.shoppingPurchases.bulkDelete(cleanup.removedPurchaseIds)
+      }
+      if (cleanup.removedAllocationIds.length > 0) {
+        await db.shoppingDemandAllocations.bulkDelete(cleanup.removedAllocationIds)
+      }
       const dates = new Set(entries.map((entry) => entry.date))
       for (const date of dates) await clearDaySkippedIfEmpty(date)
       return { deletedMeals: entries.length }

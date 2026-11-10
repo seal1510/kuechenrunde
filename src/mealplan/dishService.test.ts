@@ -1,12 +1,23 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { db } from '../db'
 import { addDays } from '../domain/dates'
+import { shoppingItemKey } from '../domain/shopping'
+import { standardShoppingListId } from '../domain/shoppingLists'
 import {
   createDaySelection,
   toPlanDays,
 } from '../domain/daySelection'
 import { DEFAULT_PLAN_SLOT, groupDates, planDayTotal, scalePlan } from '../domain/dishplan'
-import type { MealPlanEntry, Recipe } from '../types'
+import { deleteRecipe } from '../import/importer'
+import type { Ingredient, MealPlanEntry, Recipe } from '../types'
+import {
+  assignShoppingSubquantity,
+  createFreeShoppingList,
+  createManualListItem,
+  getOpenDemandByList,
+  setManualItemPurchased,
+} from '../shopping/listService'
+import { addShoppingPurchase } from '../shopping/service'
 import {
   CookedPlanConflictError,
   deleteDishPlan,
@@ -63,6 +74,43 @@ function makeRecipe(id: string, overrides: Partial<Recipe> = {}): Recipe {
   }
 }
 
+function ingredient(
+  id: string,
+  name: string,
+  quantity: number,
+  unit = 'Stück',
+  position = 0,
+): Ingredient {
+  return {
+    id,
+    groupId: null,
+    position,
+    raw: `${quantity} ${unit} ${name}`,
+    name,
+    quantity,
+    quantityText: String(quantity),
+    unit,
+    purchaseNote: '',
+    preparationNote: '',
+    parseStatus: 'parsed',
+    links: [],
+  }
+}
+
+function ingredientWithoutQuantity(
+  id: string,
+  name: string,
+  position = 0,
+): Ingredient {
+  return {
+    ...ingredient(id, name, 1, 'Stück', position),
+    raw: name,
+    quantity: null,
+    quantityText: null,
+    unit: null,
+  }
+}
+
 function legacyEntry(id: string, date: string): MealPlanEntry {
   return {
     id,
@@ -79,11 +127,40 @@ function legacyEntry(id: string, date: string): MealPlanEntry {
   }
 }
 
+async function buy(
+  itemKey: string,
+  quantity: number,
+  listId: string = standardShoppingListId(TODAY),
+): Promise<void> {
+  await addShoppingPurchase({
+    shoppingDate: TODAY,
+    itemKey,
+    listId,
+    periodStart: TODAY,
+    amounts: [{ dimension: 'count', lower: quantity, upper: quantity }],
+    snapshot: [
+      {
+        dimension: 'count',
+        unit: 'Stück',
+        lower: quantity,
+        upper: quantity,
+        qualifier: '',
+      },
+    ],
+  })
+}
+
 beforeEach(async () => {
   await db.mealPlans.clear()
   await db.mealDays.clear()
   await db.settings.clear()
   await db.shoppingLists.clear()
+  await db.shoppingPurchases.clear()
+  await db.shoppingDemandAllocations.clear()
+  await db.shoppingItemRules.clear()
+  await db.shoppingQuantityCorrections.clear()
+  await db.shoppingManualItems.clear()
+  await db.freeDishes.clear()
   // These historical tests assume a Monday-based planning week. The product
   // default is now the configured shopping day; the explicit test setting keeps
   // the existing expectations deterministic.
@@ -465,6 +542,392 @@ describe('multi-day dish service', () => {
     expect(await db.mealPlans.count()).toBe(1)
     expect(await db.cookSessions.count()).toBe(1)
     expect(await db.mealPlans.get(other.entries[0]!.id)).toBeTruthy()
+  })
+
+  it('removes partially checked purchases and allocations when the last demand disappears', async () => {
+    const tomatoKey = shoppingItemKey('Tomaten')
+    await db.recipes.put(
+      makeRecipe('r1', {
+        title: 'Tomaten-Zwiebeln',
+        servingsText: '2',
+        servingsNumber: 2,
+        ingredients: [
+          ingredient('i1', 'Tomaten', 4, 'Stück', 0),
+          ingredient('i2', 'Zwiebeln', 2, 'Stück', 1),
+        ],
+      }),
+    )
+    const dish = await saveDishPlan({
+      recipeId: 'r1',
+      days: [{ date: TODAY, servings: 2 }],
+    })
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    const organic = await createFreeShoppingList({ name: 'Bioladen' })
+    await assignShoppingSubquantity({
+      periodStart: TODAY,
+      itemKey: tomatoKey,
+      dimension: 'count',
+      targetListId: market.id,
+      quantity: 2,
+    })
+    await assignShoppingSubquantity({
+      periodStart: TODAY,
+      itemKey: tomatoKey,
+      dimension: 'count',
+      targetListId: organic.id,
+      quantity: 2,
+    })
+    await buy(tomatoKey, 2, market.id)
+
+    const before = await getOpenDemandByList(TODAY)
+    expect(before.requiresReview).toBe(false)
+
+    await deleteDishPlan(dish.session.id)
+
+    expect(await db.shoppingPurchases.count()).toBe(0)
+    expect(await db.shoppingDemandAllocations.count()).toBe(0)
+    const after = await getOpenDemandByList(TODAY)
+    expect(after.positions).toHaveLength(0)
+    expect(after.requiresReview).toBe(false)
+    expect(after.serviceConflicts).toHaveLength(0)
+    expect(after.conflicts).toHaveLength(0)
+  })
+
+  it('removes a quantity-less purchase when the last demand disappears', async () => {
+    const mozzarellaKey = shoppingItemKey('Mozzarella')
+    await db.recipes.put(
+      makeRecipe('r1', {
+        title: 'Mozzarella',
+        ingredients: [ingredientWithoutQuantity('i1', 'Mozzarella')],
+      }),
+    )
+    const dish = await saveDishPlan({
+      recipeId: 'r1',
+      days: [{ date: TODAY, servings: 2 }],
+    })
+    await addShoppingPurchase({
+      shoppingDate: TODAY,
+      itemKey: mozzarellaKey,
+      listId: standardShoppingListId(TODAY),
+      periodStart: TODAY,
+      amounts: [],
+      snapshot: [],
+      qualitative: true,
+    })
+
+    const before = await getOpenDemandByList(TODAY)
+    expect(before.unquantified.some((entry) => entry.itemKey === mozzarellaKey)).toBe(true)
+    expect(before.serviceConflicts).toHaveLength(0)
+
+    await deleteDishPlan(dish.session.id)
+
+    expect(await db.shoppingPurchases.count()).toBe(0)
+    const after = await getOpenDemandByList(TODAY)
+    expect(after.unquantified).toHaveLength(0)
+    expect(after.requiresReview).toBe(false)
+    expect(after.serviceConflicts).toHaveLength(0)
+    expect(after.conflicts).toHaveLength(0)
+  })
+
+  it('keeps a quantity-less purchase while another dish still needs the ingredient', async () => {
+    const mozzarellaKey = shoppingItemKey('Mozzarella')
+    await db.recipes.bulkPut([
+      makeRecipe('r1', {
+        title: 'Mozzarella A',
+        ingredients: [ingredientWithoutQuantity('i1', 'Mozzarella')],
+      }),
+      makeRecipe('r2', {
+        title: 'Mozzarella B',
+        ingredients: [ingredientWithoutQuantity('i2', 'Mozzarella')],
+      }),
+    ])
+    const first = await saveDishPlan({
+      recipeId: 'r1',
+      days: [{ date: TODAY, servings: 2 }],
+    })
+    await saveDishPlan({
+      recipeId: 'r2',
+      days: [{ date: '2026-05-26', servings: 2 }],
+    })
+    await addShoppingPurchase({
+      shoppingDate: TODAY,
+      itemKey: mozzarellaKey,
+      listId: standardShoppingListId(TODAY),
+      periodStart: TODAY,
+      amounts: [],
+      snapshot: [],
+      qualitative: true,
+    })
+
+    await deleteDishPlan(first.session.id)
+
+    expect(await db.shoppingPurchases.count()).toBe(1)
+    const after = await getOpenDemandByList(TODAY)
+    expect(after.unquantified.some((entry) => entry.itemKey === mozzarellaKey)).toBe(true)
+    expect(after.requiresReview).toBe(false)
+    expect(after.serviceConflicts).toHaveLength(0)
+  })
+
+  it('keeps a numeric purchase when only quantity-less demand remains', async () => {
+    const tomatoKey = shoppingItemKey('Tomaten')
+    await db.recipes.bulkPut([
+      makeRecipe('r1', {
+        title: 'Tomaten mit Menge',
+        ingredients: [ingredient('i1', 'Tomaten', 4, 'Stück', 0)],
+      }),
+      makeRecipe('r2', {
+        title: 'Tomaten ohne Menge',
+        ingredients: [ingredientWithoutQuantity('i2', 'Tomaten')],
+      }),
+    ])
+    const first = await saveDishPlan({
+      recipeId: 'r1',
+      days: [{ date: TODAY, servings: 2 }],
+    })
+    await saveDishPlan({
+      recipeId: 'r2',
+      days: [{ date: '2026-05-26', servings: 2 }],
+    })
+    await buy(tomatoKey, 4)
+
+    await deleteDishPlan(first.session.id)
+
+    expect(await db.shoppingPurchases.count()).toBe(1)
+    const after = await getOpenDemandByList(TODAY)
+    const summary = after.lists.find((entry) => entry.listId === after.standardListId)
+    expect(summary).toMatchObject({ openPositions: 0, donePositions: 1 })
+    expect(after.requiresReview).toBe(false)
+    expect(after.serviceConflicts).toHaveLength(0)
+  })
+
+  it('keeps a purchase from a removed numeric share for quantity-less demand', async () => {
+    const tomatoKey = shoppingItemKey('Tomaten')
+    await db.recipes.bulkPut([
+      makeRecipe('r1', {
+        title: 'Tomaten mit Menge',
+        ingredients: [ingredient('i1', 'Tomaten', 4, 'Stück', 0)],
+      }),
+      makeRecipe('r2', {
+        title: 'Tomaten ohne Menge',
+        ingredients: [ingredientWithoutQuantity('i2', 'Tomaten')],
+      }),
+    ])
+    const first = await saveDishPlan({
+      recipeId: 'r1',
+      days: [{ date: TODAY, servings: 2 }],
+    })
+    await saveDishPlan({
+      recipeId: 'r2',
+      days: [{ date: '2026-05-26', servings: 2 }],
+    })
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    await assignShoppingSubquantity({
+      periodStart: TODAY,
+      itemKey: tomatoKey,
+      dimension: 'count',
+      targetListId: market.id,
+      quantity: 2,
+    })
+    await buy(tomatoKey, 2, market.id)
+
+    const before = await getOpenDemandByList(TODAY)
+    expect(before.serviceConflicts).toHaveLength(0)
+
+    await deleteDishPlan(first.session.id)
+
+    expect(await db.shoppingPurchases.count()).toBe(1)
+    expect(await db.shoppingDemandAllocations.count()).toBe(0)
+    const after = await getOpenDemandByList(TODAY)
+    const summary = after.lists.find((entry) => entry.listId === after.standardListId)
+    expect(summary).toMatchObject({ openPositions: 0, donePositions: 1 })
+    expect(after.requiresReview).toBe(false)
+    expect(after.serviceConflicts).toHaveLength(0)
+  })
+
+  it('removes fully checked purchases when the last demand disappears', async () => {
+    const tomatoKey = shoppingItemKey('Tomaten')
+    const onionKey = shoppingItemKey('Zwiebeln')
+    await db.recipes.put(
+      makeRecipe('r1', {
+        title: 'Tomaten-Zwiebeln',
+        servingsText: '2',
+        servingsNumber: 2,
+        ingredients: [
+          ingredient('i1', 'Tomaten', 4, 'Stück', 0),
+          ingredient('i2', 'Zwiebeln', 2, 'Stück', 1),
+        ],
+      }),
+    )
+    const dish = await saveDishPlan({
+      recipeId: 'r1',
+      days: [{ date: TODAY, servings: 2 }],
+    })
+    await buy(tomatoKey, 4)
+    await buy(onionKey, 2)
+
+    await deleteDishPlan(dish.session.id)
+
+    expect(await db.shoppingPurchases.count()).toBe(0)
+    const after = await getOpenDemandByList(TODAY)
+    expect(after.positions).toHaveLength(0)
+    expect(after.requiresReview).toBe(false)
+    expect(after.serviceConflicts).toHaveLength(0)
+    expect(after.conflicts).toHaveLength(0)
+  })
+
+  it('keeps purchases and list allocations for an ingredient shared with another dish', async () => {
+    const tomatoKey = shoppingItemKey('Tomaten')
+    const breadKey = shoppingItemKey('Brötchen')
+    await db.recipes.bulkPut([
+      makeRecipe('r1', {
+        title: 'Tomaten A',
+        servingsText: '2',
+        servingsNumber: 2,
+        ingredients: [ingredient('i1', 'Tomaten', 4, 'Stück', 0)],
+      }),
+      makeRecipe('r2', {
+        title: 'Tomaten B',
+        servingsText: '2',
+        servingsNumber: 2,
+        ingredients: [
+          ingredient('i2', 'Tomaten', 4, 'Stück', 0),
+          ingredient('i3', 'Brötchen', 2, 'Stück', 1),
+        ],
+      }),
+    ])
+    const first = await saveDishPlan({
+      recipeId: 'r1',
+      days: [{ date: TODAY, servings: 2 }],
+    })
+    await saveDishPlan({
+      recipeId: 'r2',
+      days: [{ date: TODAY, servings: 2 }],
+    })
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    await assignShoppingSubquantity({
+      periodStart: TODAY,
+      itemKey: tomatoKey,
+      dimension: 'count',
+      targetListId: market.id,
+      quantity: 4,
+    })
+    await buy(tomatoKey, 2, market.id)
+    await buy(breadKey, 2)
+
+    await deleteDishPlan(first.session.id)
+
+    expect(await db.shoppingPurchases.count()).toBe(2)
+    expect(await db.shoppingDemandAllocations.count()).toBe(1)
+    expect(await db.mealPlans.count()).toBe(1)
+    expect(await db.cookSessions.count()).toBe(1)
+
+    const view = await getOpenDemandByList(TODAY)
+    const position = view.positions.find(
+      (entry) => entry.itemKey === tomatoKey && entry.listId === market.id,
+    )
+    expect(position).toMatchObject({
+      assignedLower: 4,
+      purchasedLower: 2,
+      openLower: 2,
+    })
+    const breadPosition = view.positions.find(
+      (entry) => entry.itemKey === breadKey,
+    )
+    expect(breadPosition).toMatchObject({
+      assignedLower: 2,
+      purchasedLower: 2,
+      openLower: 0,
+    })
+    expect(view.requiresReview).toBe(false)
+    expect(view.serviceConflicts).toHaveLength(0)
+  })
+
+  it('leaves manual articles and their purchases on other lists untouched', async () => {
+    await db.recipes.put(
+      makeRecipe('r1', {
+        title: 'Tomaten',
+        servingsText: '2',
+        servingsNumber: 2,
+        ingredients: [ingredient('i1', 'Tomaten', 4, 'Stück', 0)],
+      }),
+    )
+    const dish = await saveDishPlan({
+      recipeId: 'r1',
+      days: [{ date: TODAY, servings: 2 }],
+    })
+    const drogerie = await createFreeShoppingList({ name: 'Drogerie' })
+    const manual = await createManualListItem({
+      listId: drogerie.id,
+      name: 'Zahnpasta',
+      quantityText: '1',
+      unit: 'Stück',
+      shoppingDate: TODAY,
+    })
+    await setManualItemPurchased(manual.id, true)
+
+    await deleteDishPlan(dish.session.id)
+
+    expect(await db.shoppingManualItems.count()).toBe(1)
+    expect(await db.shoppingPurchases.count()).toBe(1)
+    expect(await db.shoppingLists.get(drogerie.id)).toBeTruthy()
+    const view = await getOpenDemandByList(TODAY)
+    expect(view.requiresReview).toBe(false)
+    expect(
+      view.manualItems.some(
+        (entry) => entry.manualItem.id === manual.id && entry.done,
+      ),
+    ).toBe(true)
+  })
+
+  it('cleans shopping rows when deleting a recipe with planned cooking events', async () => {
+    const tomatoKey = shoppingItemKey('Tomaten')
+    const breadKey = shoppingItemKey('Brötchen')
+    await db.recipes.bulkPut([
+      makeRecipe('r1', {
+        title: 'Tomaten',
+        servingsText: '2',
+        servingsNumber: 2,
+        ingredients: [ingredient('i1', 'Tomaten', 4, 'Stück', 0)],
+      }),
+      makeRecipe('r2', {
+        title: 'Brötchen',
+        servingsText: '2',
+        servingsNumber: 2,
+        ingredients: [ingredient('i2', 'Brötchen', 2, 'Stück', 0)],
+      }),
+    ])
+    await saveDishPlan({
+      recipeId: 'r1',
+      days: [{ date: TODAY, servings: 2 }],
+    })
+    await saveDishPlan({
+      recipeId: 'r2',
+      days: [{ date: TODAY, servings: 2 }],
+    })
+    const market = await createFreeShoppingList({ name: 'Markt' })
+    await assignShoppingSubquantity({
+      periodStart: TODAY,
+      itemKey: tomatoKey,
+      dimension: 'count',
+      targetListId: market.id,
+      quantity: 2,
+    })
+    await buy(tomatoKey, 2, market.id)
+    await buy(breadKey, 2)
+
+    await deleteRecipe('r1')
+
+    expect(await db.recipes.get('r1')).toBeUndefined()
+    expect(await db.cookSessions.count()).toBe(1)
+    expect(await db.mealPlans.count()).toBe(1)
+    expect(await db.shoppingPurchases.count()).toBe(1)
+    expect(await db.shoppingDemandAllocations.count()).toBe(0)
+    const view = await getOpenDemandByList(TODAY)
+    expect(view.positions.some((entry) => entry.itemKey === tomatoKey)).toBe(false)
+    expect(
+      view.positions.find((entry) => entry.itemKey === breadKey),
+    ).toMatchObject({ assignedLower: 2, purchasedLower: 2, openLower: 0 })
+    expect(view.requiresReview).toBe(false)
   })
 
   it('requires explicit confirmation before redefining a cooked amount', async () => {

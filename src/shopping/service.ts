@@ -10,6 +10,7 @@
  */
 
 import { db } from '../db'
+import { catalogKeyVariants } from '../domain/ingredientCatalog'
 import { addDays } from '../domain/dates'
 import {
   CATEGORY_ORDER_SETTING_KEY,
@@ -355,8 +356,14 @@ async function assertMergeAllocationsCompatible(
   targetKey: string,
 ): Promise<void> {
   const [sourceAllocations, targetAllocations] = await Promise.all([
-    db.shoppingDemandAllocations.where('itemKey').equals(sourceKey).toArray(),
-    db.shoppingDemandAllocations.where('itemKey').equals(targetKey).toArray(),
+    db.shoppingDemandAllocations
+      .where('itemKey')
+      .anyOf(catalogKeyVariants(sourceKey))
+      .toArray(),
+    db.shoppingDemandAllocations
+      .where('itemKey')
+      .anyOf(catalogKeyVariants(targetKey))
+      .toArray(),
   ])
   if (sourceAllocations.length === 0 || targetAllocations.length === 0) return
 
@@ -454,7 +461,7 @@ export async function mergeShoppingProducts(
       // are never silently added or a full assignment silently preferred.
       const sourceAllocations = await db.shoppingDemandAllocations
         .where('itemKey')
-        .equals(source)
+        .anyOf(catalogKeyVariants(source))
         .toArray()
       const remappedAllocations = sourceAllocations.map((allocation) => ({
         source: allocation,
@@ -495,14 +502,14 @@ export async function mergeShoppingProducts(
 
       await db.shoppingPurchases
         .where('itemKey')
-        .equals(source)
+        .anyOf(catalogKeyVariants(source))
         .modify((purchase: ShoppingPurchase) => {
           purchase.itemKey = finalTarget
           purchase.updatedAt = now
         })
       const sourceCorrections = await db.shoppingQuantityCorrections
         .where('itemKey')
-        .equals(source)
+        .anyOf(catalogKeyVariants(source))
         .toArray()
       for (const correction of sourceCorrections) {
         const nextId = quantityCorrectionId(
@@ -529,7 +536,7 @@ export async function mergeShoppingProducts(
       // them; migrating them here prevents a later double conversion.
       await db.shoppingChecks
         .where('itemKey')
-        .equals(source)
+        .anyOf(catalogKeyVariants(source))
         .modify((check) => {
           check.itemKey = finalTarget
           check.updatedAt = now

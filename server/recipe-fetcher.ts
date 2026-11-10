@@ -164,7 +164,7 @@ export function resolveRedirect(currentUrl: URL, location: string): URL {
 function requestHeaders(target: ValidatedTarget, kind: 'html' | 'image'): http.OutgoingHttpHeaders {
   return {
     Host: target.url.host,
-    'User-Agent': 'openCookWeb/0.2 (local recipe import)',
+    'User-Agent': 'Kuechenrunde/0.2 (local recipe import)',
     Accept:
       kind === 'html'
         ? 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1'

@@ -1,12 +1,17 @@
 /*
- * openCook Web
+ * Küchenrunde (vormals openCook Web)
  * Copyright (C) 2026 openCook Web contributors
+ * Copyright (C) 2026 olie.xdev <olie.xdeveloper@googlemail.com>
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Pure TypeScript port of openCook's MealPlanner (GPLv3). The scoring weights,
  * reason codes, hard cool-down and leftover rule mirror the Kotlin implementation;
  * the PRNG is a seeded Mulberry32 instead of kotlin.random.Random, so exact
  * random sequences differ while the behaviour is the same.
+ *
+ * Original: https://github.com/oliexdev/openCook (v0.4, commit 6e0c234).
+ * Die Portierung ist im Baseline-Commit vom 2026-11-08 enthalten; für
+ * Küchenrunde am 2026-11-10 angepasst.
  *
  * Mela does not deliver meal-type suitability or a protein field; categories
  * and ingredients are used as imported. The discontinued pantry feature has

@@ -1,3 +1,13 @@
+/*
+ * Küchenrunde (vormals openCook Web)
+ * Copyright (C) 2026 openCook Web contributors
+ * Copyright (C) 2026 olie.xdev <olie.xdeveloper@googlemail.com>
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Portierte Tests zum MealPlanReconciler; Original: openCook v0.4, commit 6e0c234.
+ * Für Küchenrunde am 2026-11-10 angepasst.
+ */
+
 import { describe, expect, it } from 'vitest'
 import { addDays } from './dates'
 import { reconcile } from './reconciler'

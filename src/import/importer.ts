@@ -1,4 +1,5 @@
 import { db } from '../db'
+import { planCleanupForDeletedSessions } from '../shopping/orphanCleanup'
 import { randomId } from '../lib/id'
 import type {
   ImportProgress,
@@ -163,17 +164,44 @@ export async function deleteAllData(): Promise<void> {
 export async function deleteRecipe(recipeId: string): Promise<void> {
   await db.transaction(
     'rw',
-    [db.recipes, db.images, db.mealPlans, db.cookSessions, db.cookProgress],
+    [
+      db.recipes,
+      db.images,
+      db.mealPlans,
+      db.cookSessions,
+      db.cookProgress,
+      db.freeDishes,
+      db.settings,
+      db.shoppingLists,
+      db.shoppingItemRules,
+      db.shoppingQuantityCorrections,
+      db.shoppingPurchases,
+      db.shoppingDemandAllocations,
+    ],
     async () => {
-      await db.images.where('recipeId').equals(recipeId).delete()
-      await db.mealPlans.where('recipeId').equals(recipeId).delete()
-      const sessionIds = await db.cookSessions
+      // Removing a recipe also removes all of its planned cooking events. The
+      // shopping cleanup must therefore run for every affected event before
+      // the sessions disappear.
+      const sessions = await db.cookSessions
         .where('recipeId')
         .equals(recipeId)
-        .primaryKeys()
+        .toArray()
+      const cleanup = await planCleanupForDeletedSessions(sessions)
+
+      await db.images.where('recipeId').equals(recipeId).delete()
+      await db.mealPlans.where('recipeId').equals(recipeId).delete()
       await db.cookSessions.where('recipeId').equals(recipeId).delete()
-      if (sessionIds.length > 0) {
-        await db.cookProgress.where('cookSessionId').anyOf(sessionIds).delete()
+      if (sessions.length > 0) {
+        await db.cookProgress
+          .where('cookSessionId')
+          .anyOf(sessions.map((session) => session.id))
+          .delete()
+      }
+      if (cleanup.removedPurchaseIds.length > 0) {
+        await db.shoppingPurchases.bulkDelete(cleanup.removedPurchaseIds)
+      }
+      if (cleanup.removedAllocationIds.length > 0) {
+        await db.shoppingDemandAllocations.bulkDelete(cleanup.removedAllocationIds)
       }
       await db.recipes.delete(recipeId)
     },

@@ -1,12 +1,17 @@
 /*
- * openCook Web
+ * Küchenrunde (vormals openCook Web)
  * Copyright (C) 2026 openCook Web contributors
+ * Copyright (C) 2026 olie.xdev <olie.xdeveloper@googlemail.com>
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Pure port of openCook's MealPlanReconciler. A past, un-cooked, procured dish
  * rolls forward to the next free day within a small window. It is deliberately
  * not run automatically on app start in this package; the pure function is
  * available and tested for the later self-healing flow.
+ *
+ * Original: https://github.com/oliexdev/openCook (v0.4, commit 6e0c234).
+ * Die Portierung ist im Baseline-Commit vom 2026-11-08 enthalten; für
+ * Küchenrunde am 2026-11-10 angepasst.
  */
 
 import { addDays } from './dates'

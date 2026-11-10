@@ -475,6 +475,63 @@ describe('shopping and preparation notes', () => {
     expect(splitIngredientName('Mandeln (gehackte)').name).toBe('Mandeln')
   })
 
+  it('treats short parenthetical plural suffixes as part of the base name', () => {
+    expect(splitIngredientName('Zwiebel(n)')).toMatchObject({
+      name: 'Zwiebeln',
+      variant: '',
+    })
+    expect(splitIngredientName('Tomate(n)')).toMatchObject({
+      name: 'Tomaten',
+      variant: '',
+    })
+    expect(splitIngredientName('Ei(er)')).toMatchObject({
+      name: 'Eier',
+      variant: '',
+    })
+    // Do not double an already written plural suffix.
+    expect(splitIngredientName('Tomaten(n)').name).toBe('Tomaten')
+  })
+
+  it('normalises real product spellings without isolated letter variants', () => {
+    expect(splitIngredientName('Mango(s), frische')).toMatchObject({
+      name: 'Mangos',
+      variant: '',
+    })
+    expect(splitIngredientName('Mango(s), in Spalten, in Flüssigkeit')).toMatchObject({
+      name: 'Mangos',
+      variant: 'in Flüssigkeit',
+      preparationNote: 'in Spalten',
+    })
+    expect(splitIngredientName('Hähnchenfilet(s)')).toMatchObject({
+      name: 'Hähnchenfilet',
+      variant: '',
+    })
+    expect(splitIngredientName('Knoblauchzehe(n)').name).toBe('Knoblauch')
+    expect(splitIngredientName('Koriander, gemahlen')).toMatchObject({
+      name: 'Koriander gemahlen',
+      variant: '',
+      preparationNote: '',
+    })
+    expect(splitIngredientName('Olivenöl (nach Bedarf)')).toMatchObject({
+      name: 'Olivenöl',
+      variant: '',
+      preparationNote: 'nach Bedarf',
+    })
+    expect(splitIngredientName('(à 425 ml) stückige Tomaten')).toMatchObject({
+      name: 'Stückige Tomaten',
+      variant: '',
+      embeddedPurchaseNote: 'à 425 ml',
+    })
+    expect(splitIngredientName('Reis als Beilage')).toMatchObject({
+      name: 'Reis',
+      preparationNote: 'als Beilage',
+    })
+    expect(splitIngredientName('Muskatnuss (optional)')).toMatchObject({
+      name: 'Muskatnuss',
+      preparationNote: 'optional',
+    })
+  })
+
   it('treats pure measurement parentheses as a hint, not a variant', () => {
     const grams = splitIngredientName('Tomaten (400 g)')
     expect(grams.name).toBe('Tomaten')
@@ -489,9 +546,10 @@ describe('shopping and preparation notes', () => {
 
   it('keeps unknown parentheses as product variants but recognises reliable hints', () => {
     const branded = splitIngredientName('passierte Tomaten (Mutti)')
-    expect(branded.name).toBe('passierte Tomaten')
-    expect(branded.variant).toBe('Mutti')
-    expect(shoppingItemKey(branded.identityName)).not.toBe(shoppingItemKey('passierte Tomaten'))
+    expect(branded.name).toBe('Tomaten')
+    expect(branded.variant).toBe('Mutti · passiert')
+    expect(guessShoppingCategory(branded.identityName)).toBe('canned')
+    expect(shoppingItemKey(branded.identityName)).not.toBe(shoppingItemKey('Tomaten'))
 
     const wine = splitIngredientName('Rotwein (trocken, z. B. Dornfelder)')
     expect(wine.name).toBe('Rotwein')
@@ -1076,6 +1134,242 @@ describe('week start changes and dated data', () => {
   })
 })
 
+describe('real-world ingredient repair and merging', () => {
+  it('repairs legacy stored rows all the way into the shopping model', () => {
+    const result = list({
+      recipes: [
+        recipe({
+          ingredients: [
+            ingredient({
+              name: 'bis 950 ml Rinderbrühe',
+              raw: '750 bis 950 ml Rinderbrühe',
+              quantity: 750,
+              quantityText: '750',
+              unit: null,
+            }),
+            ingredient({
+              name: 'bis 2 Zweige frischer Thymian',
+              raw: '1 bis 2 Zweige frischer Thymian',
+              quantity: 1,
+              quantityText: '1',
+              unit: null,
+              position: 1,
+            }),
+            ingredient({
+              name: 'Knoblauchzehe(n), 2 - 3',
+              raw: 'Knoblauchzehe(n), 2 - 3',
+              quantity: null,
+              quantityText: null,
+              unit: null,
+              parseStatus: 'plain',
+              position: 2,
+            }),
+          ],
+        }),
+      ],
+      cookSessions: [session()],
+    })
+
+    expect(amount(item(result, 'Rinderbrühe'))).toEqual(['750–950 ml'])
+    expect(amount(item(result, 'Thymian'))).toEqual(['1–2 Zweig'])
+    expect(amount(item(result, 'Knoblauch'))).toEqual(['2–3'])
+    expect(item(result, 'Rinderbrühe').key).toBe(shoppingItemKey('Rinderbrühe'))
+  })
+
+  it('does not turn an explicitly fresh herb into the dried spice', () => {
+    const result = list({
+      recipes: [
+        recipe({
+          ingredients: [
+            ingredient({
+              name: 'frischer Koriander',
+              raw: '1 TL frischer Koriander',
+              quantity: 1,
+              quantityText: '1',
+              unit: 'TL',
+            }),
+            ingredient({
+              name: 'Kurkuma, frische',
+              raw: '1 Prise Kurkuma, frische',
+              quantity: 1,
+              quantityText: '1',
+              unit: 'Prise',
+              position: 1,
+            }),
+          ],
+        }),
+      ],
+      cookSessions: [session()],
+    })
+
+    const coriander = item(result, 'Koriander')
+    expect(coriander.variant).toBe('')
+    expect(coriander.categoryId).toBe('produce')
+    const turmeric = item(result, 'Kurkuma frisch')
+    expect(turmeric.variant).toBe('')
+    expect(turmeric.categoryId).toBe('produce')
+  })
+
+  it('keeps fresh and dried/ground products apart but merges spellings', () => {
+    const result = list({
+      recipes: [
+        recipe({
+          ingredients: [
+            ingredient({
+              name: 'Koriander',
+              raw: '½ Bund Koriander',
+              quantity: 0.5,
+              quantityText: '½',
+              unit: 'Bund',
+            }),
+            ingredient({
+              name: 'Koriander',
+              raw: '1 TL Koriander',
+              quantity: 1,
+              quantityText: '1',
+              unit: 'TL',
+              position: 1,
+            }),
+            ingredient({
+              name: 'Korianderpulver',
+              raw: '1 TL Korianderpulver',
+              quantity: 1,
+              quantityText: '1',
+              unit: 'TL',
+              position: 2,
+            }),
+            ingredient({
+              name: 'Tomaten',
+              raw: '300 g Tomaten',
+              quantity: 300,
+              quantityText: '300',
+              unit: 'g',
+              position: 3,
+            }),
+            ingredient({
+              name: 'Tomaten',
+              raw: '1 Dose Tomaten',
+              quantity: 1,
+              quantityText: '1',
+              unit: 'Dose',
+              position: 4,
+            }),
+            ingredient({
+              name: 'Mangos',
+              raw: '1 Mango(s), frische',
+              quantity: 1,
+              quantityText: '1',
+              unit: null,
+              position: 5,
+            }),
+            ingredient({
+              name: 'Mangos, in Spalten, in Flüssigkeit',
+              raw: '1 Dose Mango(s), in Spalten, in Flüssigkeit',
+              quantity: 1,
+              quantityText: '1',
+              unit: 'Dose',
+              position: 6,
+            }),
+            ingredient({
+              name: 'Hähnchenfilet(s)',
+              raw: '500 g Hähnchenfilet(s)',
+              quantity: 500,
+              quantityText: '500',
+              unit: 'g',
+              position: 7,
+            }),
+            ingredient({
+              name: 'Hähnchenfilet',
+              raw: '500 g Hähnchenfilet',
+              quantity: 500,
+              quantityText: '500',
+              unit: 'g',
+              position: 8,
+            }),
+            ingredient({
+              name: 'Zwiebel',
+              raw: '1 Zwiebel',
+              quantity: 1,
+              quantityText: '1',
+              unit: null,
+              position: 9,
+            }),
+            ingredient({
+              name: 'große Zwiebel(n)',
+              raw: '1 große Zwiebel(n)',
+              quantity: 1,
+              quantityText: '1',
+              unit: null,
+              position: 10,
+            }),
+            ingredient({
+              name: 'Kurkuma',
+              raw: '1 Stück Kurkuma (daumengroß)',
+              quantity: 1,
+              quantityText: '1',
+              unit: 'Stück',
+              position: 11,
+            }),
+            ingredient({
+              name: 'Kurkuma',
+              raw: '1 TL Kurkuma',
+              quantity: 1,
+              quantityText: '1',
+              unit: 'TL',
+              position: 12,
+            }),
+          ],
+        }),
+      ],
+      cookSessions: [session()],
+    })
+
+    const coriander = result.items.filter((entry) =>
+      entry.name === 'Koriander' || entry.name === 'Koriander gemahlen',
+    )
+    expect(coriander).toHaveLength(2)
+    expect(coriander.map((entry) => entry.categoryId).sort()).toEqual(['produce', 'spices'])
+    expect(coriander.map((entry) => entry.name).sort()).toEqual([
+      'Koriander',
+      'Koriander gemahlen',
+    ])
+    // "1 TL Koriander" and "Korianderpulver" are the same ground spice.
+    expect(item(result, 'Koriander gemahlen').positions.map(formatShoppingAmount)).toEqual([
+      '2 TL',
+    ])
+
+    const tomatoes = result.items.filter(
+      (entry) => entry.name === 'Tomaten' || entry.name === 'Tomaten Dose',
+    )
+    expect(tomatoes).toHaveLength(2)
+    expect(tomatoes.map((entry) => entry.categoryId).sort()).toEqual(['canned', 'produce'])
+    expect(tomatoes.map((entry) => entry.name).sort()).toEqual(['Tomaten', 'Tomaten Dose'])
+
+    const mangoes = result.items.filter((entry) => entry.name === 'Mangos')
+    expect(mangoes).toHaveLength(2)
+    expect(mangoes.map((entry) => entry.categoryId).sort()).toEqual(['canned', 'produce'])
+    expect(mangoes.some((entry) => entry.variant.includes('in Flüssigkeit'))).toBe(true)
+
+    expect(result.items.filter((entry) => entry.key === shoppingItemKey('Hähnchenfilet'))).toHaveLength(1)
+    const chicken = result.items.find((entry) => entry.key === shoppingItemKey('Hähnchenfilet'))!
+    expect(amount(chicken)).toEqual(['1 kg'])
+
+    expect(result.items.filter((entry) => entry.key === shoppingItemKey('Zwiebel'))).toHaveLength(1)
+    const onions = result.items.find((entry) => entry.key === shoppingItemKey('Zwiebel'))!
+    expect(amount(onions)).toEqual(['2'])
+
+    const turmeric = result.items.filter(
+      (entry) => entry.name === 'Kurkuma' || entry.name === 'Kurkuma frisch',
+    )
+    expect(turmeric).toHaveLength(2)
+    expect(turmeric.map((entry) => entry.categoryId).sort()).toEqual(['produce', 'spices'])
+    expect(turmeric.map((entry) => entry.name).sort()).toEqual([
+      'Kurkuma',
+      'Kurkuma frisch',
+    ])
+  })
+})
+
 describe('categories and order', () => {
   it('assigns generally known product types', () => {
     expect(guessShoppingCategory('Zwiebeln')).toBe('produce')
@@ -1385,6 +1679,65 @@ describe('week-scoped quantity corrections', () => {
         qualifier: '',
       }),
     ).toEqual({ quantityText: '2–3', unit: 'Stück' })
+  })
+})
+
+describe('category vocabulary', () => {
+  it('separates fresh produce, preserved vegetables, herbs and spices', () => {
+    expect(guessShoppingCategory('Frische Tomaten')).toBe('produce')
+    expect(guessShoppingCategory('Stückige Tomaten')).toBe('canned')
+    expect(guessShoppingCategory('Stückige Tomaten aus der Dose')).toBe('canned')
+    expect(guessShoppingCategory('Tomaten (stückig)')).toBe('canned')
+    expect(guessShoppingCategory('Gehackte Tomaten')).toBe('canned')
+    expect(guessShoppingCategory('Tomaten aus der Dose')).toBe('canned')
+
+    expect(guessShoppingCategory('Frischer Koriander')).toBe('produce')
+    expect(guessShoppingCategory('Korianderpulver')).toBe('spices')
+    expect(guessShoppingCategory('Gemahlener Koriander')).toBe('spices')
+    expect(guessShoppingCategory('Frische Petersilie')).toBe('produce')
+    expect(guessShoppingCategory('Getrocknete Petersilie')).toBe('spices')
+    expect(guessShoppingCategory('Getrockneter Thymian')).toBe('spices')
+    expect(guessShoppingCategory('Thymian getrocknet')).toBe('spices')
+    expect(guessShoppingCategory('Frischer Thymian')).toBe('produce')
+    expect(guessShoppingCategory('Getrocknete Kräuter')).toBe('spices')
+    expect(guessShoppingCategory('Kräuter der Provinz')).toBe('spices')
+  })
+
+  it('keeps spicy and aromatic products out of the produce aisle', () => {
+    expect(guessShoppingCategory('Cayennepfeffer')).toBe('spices')
+    expect(guessShoppingCategory('Chiliöl')).toBe('spices')
+    expect(guessShoppingCategory('Sesamöl')).toBe('spices')
+    expect(guessShoppingCategory('Kreuzkümmel')).toBe('spices')
+    expect(guessShoppingCategory('Kurkuma')).toBe('spices')
+  })
+
+  it('uses the real Mela vocabulary for spices, preserves and roots', () => {
+    expect(guessShoppingCategory('Edelsüßpaprika')).toBe('spices')
+    expect(guessShoppingCategory('Kardamomkapseln')).toBe('spices')
+    expect(guessShoppingCategory('Nelken')).toBe('spices')
+    expect(guessShoppingCategory('Senfsamen')).toBe('spices')
+    expect(guessShoppingCategory('Pizzatomaten')).toBe('canned')
+    expect(guessShoppingCategory('Mangochutney')).toBe('canned')
+    expect(guessShoppingCategory('Erdnussmus')).toBe('canned')
+    expect(guessShoppingCategory('Kurkuma frisch')).toBe('produce')
+    expect(guessShoppingCategory('Kurkuma gemahlen')).toBe('spices')
+    expect(guessShoppingCategory('Ingwer gemahlen')).toBe('spices')
+    expect(guessShoppingCategory('Tomaten Dose')).toBe('canned')
+    expect(guessShoppingCategory('Frische Mangos')).toBe('produce')
+    expect(guessShoppingCategory('Mangos in Flüssigkeit')).toBe('canned')
+    expect(guessShoppingCategory('Frischer Koriander')).toBe('produce')
+    expect(guessShoppingCategory('Koriander getrocknet')).toBe('spices')
+  })
+
+  it('uses the expanded food vocabulary without guessing unknown terms', () => {
+    expect(guessShoppingCategory('Süßkartoffel')).toBe('produce')
+    expect(guessShoppingCategory('Meerrettich')).toBe('produce')
+    expect(guessShoppingCategory('Schnittlauch')).toBe('produce')
+    expect(guessShoppingCategory('Hähnchenbrust')).toBe('meat')
+    expect(guessShoppingCategory('Halloumi')).toBe('dairy')
+    expect(guessShoppingCategory('Kichererbsen')).toBe('canned')
+    expect(guessShoppingCategory('Rapsöl')).toBe('spices')
+    expect(guessShoppingCategory('Wunderding')).toBe('other')
   })
 })
 

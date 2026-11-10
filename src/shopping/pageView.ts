@@ -26,7 +26,6 @@ import {
 } from '../domain/shopping'
 import {
   fromAmountMilli,
-  periodContainsDate,
   resolveShoppingDistribution,
   resolveShoppingPeriodResolution,
   standardShoppingListId,
@@ -53,6 +52,7 @@ import type {
   ShoppingPurchase,
   ShoppingQuantityCorrection,
 } from '../types'
+import { isDefaultExcludedIngredient } from './defaultExclusions'
 import { categoryOrderFromRows } from './service'
 import {
   buildShoppingOpenDemand,
@@ -166,34 +166,23 @@ function manualCategory(item: ShoppingManualItem): ShoppingCategoryId {
   if (item.categoryId && CATEGORY_IDS.has(item.categoryId)) {
     return item.categoryId as ShoppingCategoryId
   }
-  return guessShoppingCategory(item.name)
+  const split = splitIngredientName(item.name, { unit: item.unit })
+  return guessShoppingCategory([split.name, split.variant].filter(Boolean).join(' '))
 }
 
-function purchaseOnList(
-  purchase: ShoppingPurchase,
-  listId: string,
-  standardListIdValue: string,
-  period: ShoppingPeriod,
-): boolean {
-  if (purchase.listId) return purchase.listId === listId
-  return (
-    listId === standardListIdValue && periodContainsDate(period, purchase.shoppingDate)
-  )
-}
-
-function qualitativePurchaseIds(
+/**
+ * Only purchases that actually contributed to the open calculation belong to
+ * a row. Legacy/ambiguous purchases stay visible in the review section instead
+ * of silently marking a normal row as done.
+ */
+function purchaseIdsOnList(
   richItem: ShoppingListItem | null,
   listId: string,
-  standardListIdValue: string,
-  period: ShoppingPeriod,
+  purchaseListIds: ReadonlyMap<string, string>,
 ): string[] {
   if (!richItem) return []
   return richItem.purchases
-    .filter(
-      (purchase) =>
-        purchaseOnList(purchase, listId, standardListIdValue, period) &&
-        (purchase.qualitative || purchase.amounts.length === 0),
-    )
+    .filter((purchase) => purchaseListIds.get(purchase.id) === listId)
     .map((purchase) => purchase.id)
 }
 
@@ -305,30 +294,19 @@ function buildRows(
     const openPositions = openAmounts(group.positions, 'open', richItem)
     const requiredPositions = openAmounts(group.positions, 'required', richItem)
     const purchasedPositions = openAmounts(group.positions, 'purchased', richItem)
-    const qualitativeIds = qualitativePurchaseIds(
-      richItem,
-      group.listId,
-      open.standardListId,
-      open.period,
-    )
     const purchaseIds = Array.from(
       new Set([
         ...group.positions.flatMap((position) => position.purchaseIds),
-        ...qualitativeIds,
+        ...purchaseIdsOnList(richItem, group.listId, open.purchaseListIds),
       ]),
     )
     const unparsedAmounts = placement ? [...placement.unparsedAmounts] : []
     const missingQuantity = placement?.missingQuantity === true
     const hasUnquantified = unparsedAmounts.length > 0 || missingQuantity
-    const hasPurchase =
-      purchaseIds.length > 0 ||
-      group.positions.some(
-        (position) => position.purchasedLower > 0 || position.purchasedUpper > 0,
-      )
     const status: ShoppingPageRow['status'] =
       openPositions.length > 0
         ? 'open'
-        : hasUnquantified && !hasPurchase
+        : hasUnquantified && purchaseIds.length === 0
           ? 'open'
           : 'done'
     const name = richItem?.name || group.positions[0]?.name || ''
@@ -362,12 +340,7 @@ function buildRows(
     const key = `${placement.listId}\u0000${placement.itemKey}`
     if (positionsByItem.has(key)) continue
     const richItem = richByKey.get(placement.itemKey) ?? null
-    const qualitativeIds = qualitativePurchaseIds(
-      richItem,
-      placement.listId,
-      open.standardListId,
-      open.period,
-    )
+    const purchaseIds = purchaseIdsOnList(richItem, placement.listId, open.purchaseListIds)
     const name = richItem?.name || placement.name
     push({
       id: `auto:${placement.listId}:${placement.itemKey}:unquantified`,
@@ -383,8 +356,8 @@ function buildRows(
       unparsedAmounts: [...placement.unparsedAmounts],
       missingQuantity: placement.missingQuantity,
       notes: richItem?.purchaseNotes ?? [],
-      status: qualitativeIds.length > 0 ? 'done' : 'open',
-      purchaseIds: qualitativeIds,
+      status: purchaseIds.length > 0 ? 'done' : 'open',
+      purchaseIds,
       distributionListNames: distributedListNames(
         placement.itemKey,
         distribution,
@@ -437,7 +410,9 @@ function buildRows(
       id: `manual:${item.id}`,
       listId: manual.listId,
       kind: 'manual',
-      itemKey: shoppingItemKey(splitIngredientName(item.name).identityName) || item.name,
+      itemKey:
+        shoppingItemKey(splitIngredientName(item.name, { unit: item.unit }).identityName) ||
+        item.name,
       name: item.name,
       variant: '',
       categoryId: manualCategory(item),
@@ -483,8 +458,8 @@ function buildItemNameMap(input: ShoppingPageViewInput): Map<string, string> {
     const key = resolveCanonicalKey(rule.key, rules)
     if (!names.has(key)) names.set(key, display)
   }
-  const addName = (rawName: string) => {
-    const split = splitIngredientName(rawName)
+  const addName = (rawName: string, unit?: string | null) => {
+    const split = splitIngredientName(rawName, { unit })
     const rawKey = shoppingItemKey(split.identityName)
     if (!rawKey) return
     const key = resolveCanonicalKey(rawKey, rules)
@@ -492,12 +467,12 @@ function buildItemNameMap(input: ShoppingPageViewInput): Map<string, string> {
     if (label && !names.has(key)) names.set(key, label)
   }
   for (const recipe of input.recipes) {
-    for (const ingredient of recipe.ingredients) addName(ingredient.name)
+    for (const ingredient of recipe.ingredients) addName(ingredient.name, ingredient.unit)
   }
   for (const freeDish of input.freeDishes) {
-    for (const ingredient of freeDish.ingredients) addName(ingredient.name)
+    for (const ingredient of freeDish.ingredients) addName(ingredient.name, ingredient.unit)
   }
-  for (const manual of input.manualItems) addName(manual.name)
+  for (const manual of input.manualItems) addName(manual.name, manual.unit)
   return names
 }
 
@@ -749,9 +724,21 @@ export function buildShoppingPageView(input: ShoppingPageViewInput): ShoppingPag
     distribution,
     listNameById,
   )
+  // Hide only automatically derived staple rows, and do it after the demand
+  // and distribution have been calculated. This keeps existing allocations
+  // and purchases valid, avoids new review conflicts, and lets all displayed
+  // counters below count exactly the visible rows. Manual articles are always
+  // kept, even when their name is on the deny-list.
   const rowsByList: Record<string, ShoppingPageRow[]> = {}
   for (const [listId, rows] of Object.entries(rawRows)) {
-    rowsByList[listId] = sortRows(rows, categoryOrder)
+    rowsByList[listId] = sortRows(
+      rows.filter(
+        (row) =>
+          row.kind === 'manual' ||
+          !isDefaultExcludedIngredient(row.name, row.variant),
+      ),
+      categoryOrder,
+    )
   }
 
   const itemNames = buildItemNameMap(input)

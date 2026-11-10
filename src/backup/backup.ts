@@ -435,7 +435,7 @@ export async function inspectBackup(buffer: ArrayBuffer): Promise<BackupInspecti
   }
 
   const manifest = readJson<BackupManifest>('manifest.json')
-  if (manifest.format !== BACKUP_FORMAT) throw new BackupError('Das ist kein openCook-Web-Backup.')
+  if (manifest.format !== BACKUP_FORMAT) throw new BackupError('Das ist kein Küchenrunde-Backup.')
   if (!Number.isInteger(manifest.version) || manifest.version < 1) {
     throw new BackupError('Unbekannte Backup-Version.')
   }
