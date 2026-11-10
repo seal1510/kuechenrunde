@@ -1,7 +1,8 @@
 -- Küchenrunde – Cloud-Grundlage (Etappe A1)
--- Im Supabase-SQL-Editor als postgres ausführen. Nicht für eine nackte
+-- Über `supabase db push --remote` (CLI v3) anwenden. Nicht für eine nackte
 -- PostgreSQL-Instanz gedacht: auth.*, storage.* und die Realtime-Publication
--- werden von Supabase bereitgestellt.
+-- werden von Supabase bereitgestellt. Die CLI führt die Migration in einer
+-- eigenen Transaktion aus; deshalb hier kein explizites begin/commit.
 --
 -- Grundsätze:
 --  * Genau ein gemeinsamer Haushalt; keine Mandanten, Rollen oder Einladungen.
@@ -12,7 +13,6 @@
 --  * Alle Funktionen sind SECURITY INVOKER; RLS bleibt die letzte Instanz.
 --  * Keine Service-Role-Verwendung im Client.
 
-begin;
 
 /* ------------------------------------------------------------------ */
 /* 1. Haushalt und Mitgliedschaft                                      */
@@ -274,6 +274,8 @@ stable
 security invoker
 set search_path = public
 as $$
+declare
+  v_result jsonb;
 begin
   -- Explizit statt eines leeren Ergebnisses: Ein Nicht-Mitglied soll klar
   -- scheitern und nicht den Eindruck eines leeren Haushalts bekommen.
@@ -281,21 +283,22 @@ begin
     raise exception 'not a household member' using errcode = '42501';
   end if;
 
-  return (
-    select coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'collection', collection,
-          'id', id,
-          'rev', rev,
-          'data', data
-        )
-        order by collection, id
-      ),
-      '[]'::jsonb
-    )
-    from public.records
-  );
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'collection', collection,
+        'id', id,
+        'rev', rev,
+        'data', data
+      )
+      order by collection, id
+    ),
+    '[]'::jsonb
+  )
+  into v_result
+  from public.records;
+
+  return v_result;
 end;
 $$;
 
@@ -375,5 +378,3 @@ begin
   end if;
 end;
 $$;
-
-commit;

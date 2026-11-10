@@ -14,12 +14,12 @@ export interface CloudConfig {
   /** Projekt-Origin ohne abschließenden Schrägstrich. */
   url: string
   /** Öffentlicher Publishable-/Anon-Key. */
-  anonKey: string
+  publishableKey: string
 }
 
 export interface CloudEnv {
   VITE_SUPABASE_URL?: string
-  VITE_SUPABASE_ANON_KEY?: string
+  VITE_SUPABASE_PUBLISHABLE_KEY?: string
 }
 
 export class CloudConfigError extends Error {
@@ -39,11 +39,11 @@ const PLACEHOLDER_MARKERS = ['your-project-ref', 'replace-me', 'example.supabase
  */
 export function parseCloudConfig(env: CloudEnv): CloudConfig | null {
   const rawUrl = String(env.VITE_SUPABASE_URL ?? '').trim()
-  const rawKey = String(env.VITE_SUPABASE_ANON_KEY ?? '').trim()
+  const rawKey = String(env.VITE_SUPABASE_PUBLISHABLE_KEY ?? '').trim()
   if (!rawUrl && !rawKey) return null
   if (!rawUrl || !rawKey) {
     throw new CloudConfigError(
-      'Supabase ist unvollständig konfiguriert: VITE_SUPABASE_URL und VITE_SUPABASE_ANON_KEY müssen gemeinsam gesetzt sein.',
+      'Supabase ist unvollständig konfiguriert: VITE_SUPABASE_URL und VITE_SUPABASE_PUBLISHABLE_KEY müssen gemeinsam gesetzt sein.',
     )
   }
   if (PLACEHOLDER_MARKERS.some((marker) => rawUrl.includes(marker) || rawKey.includes(marker))) {
@@ -76,7 +76,7 @@ export function parseCloudConfig(env: CloudEnv): CloudConfig | null {
   }
 
   assertPublicKey(rawKey)
-  return { url: url.origin, anonKey: rawKey }
+  return { url: url.origin, publishableKey: rawKey }
 }
 
 /**
@@ -86,7 +86,7 @@ export function parseCloudConfig(env: CloudEnv): CloudConfig | null {
  */
 export function assertPublicKey(key: string): void {
   if (key.length < 20) {
-    throw new CloudConfigError('VITE_SUPABASE_ANON_KEY ist zu kurz.')
+    throw new CloudConfigError('VITE_SUPABASE_PUBLISHABLE_KEY ist zu kurz.')
   }
   if (/^sb_secret_/i.test(key) || key.toLowerCase().includes('service_role')) {
     throw new CloudConfigError(

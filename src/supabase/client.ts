@@ -25,12 +25,12 @@ const env = import.meta.env as unknown as Record<string, string | undefined>
 
 export const cloudConfig: CloudConfig | null = parseCloudConfig({
   VITE_SUPABASE_URL: env.VITE_SUPABASE_URL,
-  VITE_SUPABASE_ANON_KEY: env.VITE_SUPABASE_ANON_KEY,
+  VITE_SUPABASE_PUBLISHABLE_KEY: env.VITE_SUPABASE_PUBLISHABLE_KEY,
 })
 
 function createCloudClient(config: CloudConfig): SupabaseClient {
   try {
-    return createClient(config.url, config.anonKey, {
+    return createClient(config.url, config.publishableKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
@@ -60,7 +60,7 @@ export function isCloudConfigured(): boolean {
 export function requireSupabase(): SupabaseClient {
   if (!supabase) {
     throw new CloudNotConfiguredError(
-      'Supabase ist nicht konfiguriert. VITE_SUPABASE_URL und VITE_SUPABASE_ANON_KEY fehlen.',
+      'Supabase ist nicht konfiguriert. VITE_SUPABASE_URL und VITE_SUPABASE_PUBLISHABLE_KEY fehlen.',
     )
   }
   return supabase

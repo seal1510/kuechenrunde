@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const sql = readFileSync(
-  new URL('../../supabase/migrations/0001_cloud.sql', import.meta.url),
+  new URL('../../supabase/migrations/20261110134755_cloud.sql', import.meta.url),
   'utf8',
 )
 
@@ -157,5 +157,53 @@ describe('Supabase-Migration: Struktur und Rechte', () => {
     expect(normalized).toContain('create trigger records_bump_rev')
     expect(normalized).toContain('before update on public.records')
     expect(normalized).toContain('new.rev := old.rev + 1')
+  })
+})
+
+const hardening = readFileSync(
+  new URL(
+    '../../supabase/migrations/20261110150500_harden_grants.sql',
+    import.meta.url,
+  ),
+  'utf8',
+)
+const hardeningNormalized = hardening
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .replace(/--[^\n]*/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .toLowerCase()
+
+describe('Supabase-Migration: Rechte-Härtung', () => {
+  it('entzieht authenticated alle Tabellenrechte und vergibt nur die benötigten neu', () => {
+    expect(hardeningNormalized).toContain(
+      'revoke all on table public.household_members from authenticated',
+    )
+    expect(hardeningNormalized).toContain(
+      'grant select on table public.household_members to authenticated',
+    )
+    expect(hardeningNormalized).toContain(
+      'revoke all on table public.records from authenticated',
+    )
+    expect(hardeningNormalized).toContain(
+      'grant select, insert, update, delete on table public.records to authenticated',
+    )
+  })
+
+  it('vergibt kein TRUNCATE, REFERENCES oder TRIGGER an authenticated', () => {
+    expect(hardeningNormalized).not.toMatch(
+      /grant[^;]*\b(truncate|references|trigger)\b/,
+    )
+  })
+
+  it('hält PUBLIC und anon weiterhin vollständig ausgeschlossen', () => {
+    for (const table of ['household_members', 'records']) {
+      expect(hardeningNormalized).toContain(
+        `revoke all on table public.${table} from public`,
+      )
+      expect(hardeningNormalized).toContain(
+        `revoke all on table public.${table} from anon`,
+      )
+    }
   })
 })

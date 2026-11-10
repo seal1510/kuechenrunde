@@ -1,4 +1,4 @@
-# Supabase-Grundlage (Etappe A1)
+# Supabase-Grundlage (Etappe A1/A1.5)
 
 Diese Migration legt die gemeinsame Cloud-Basis für **einen** Familienhaushalt
 an. Sie ist noch **nicht** an die App angeschlossen: `src/db.ts`, alle Services
@@ -7,13 +7,28 @@ und alle Seiten arbeiten weiterhin ausschließlich lokal mit Dexie.
 ## Anwenden
 
 1. Supabase-Projekt anlegen (Region EU empfohlen).
-2. `supabase/migrations/0001_cloud.sql` im **SQL-Editor** als `postgres`
-   ausführen. Die Datei ist in eine Transaktion eingefasst und kann bei einem
-   Fehler vollständig zurückgerollt werden.
-3. In **Authentication → Users** pro Familienmitglied ein Konto mit
+2. Einmalig im lokalen Terminal anmelden und das Projekt verknüpfen
+   (interaktive Eingabe, keine Zugangsdaten im Repository):
+
+   ```bash
+   pnpm supabase login
+   pnpm supabase link --project-ref <projekt-ref>
+   ```
+
+3. Migration zuerst als Dry-Run prüfen, dann anwenden (CLI v3):
+
+   ```bash
+   pnpm supabase db push --dry-run --remote
+   pnpm supabase db push --remote
+   ```
+
+   Keine manuellen SQL-Skripte parallel im Dashboard einspielen; sonst
+   divergiert die Migrationshistorie.
+
+4. In **Authentication → Users** pro Familienmitglied ein Konto mit
    E-Mail + Initialpasswort anlegen und „Auto Confirm User“ setzen.
    Öffentliche Registrierung bleibt deaktiviert.
-4. Mitgliedschaft eintragen (nur über den Betreiber, nie aus der App):
+5. Mitgliedschaft eintragen (nur über den Betreiber, nie aus der App):
 
    ```sql
    insert into public.household_members (user_id, display_name)
@@ -22,9 +37,9 @@ und alle Seiten arbeiten weiterhin ausschließlich lokal mit Dexie.
    where email = 'mitglied@example.org';
    ```
 
-5. `.env.example` nach `.env` kopieren und `VITE_SUPABASE_URL` sowie
-   `VITE_SUPABASE_ANON_KEY` eintragen. Nur der öffentliche
-   Publishable-/Anon-Key; **niemals** `service_role`.
+6. `.env.example` nach `.env` kopieren und `VITE_SUPABASE_URL` sowie
+   `VITE_SUPABASE_PUBLISHABLE_KEY` eintragen. Nur der öffentliche
+   Publishable-Key; **niemals** `service_role`.
 
 ## Sicherheitsmodell
 
@@ -34,7 +49,8 @@ und alle Seiten arbeiten weiterhin ausschließlich lokal mit Dexie.
 - `is_household_member()`, `apply_ops()` und `snapshot()` sind
   `SECURITY INVOKER`; es gibt keinen Definer-Pfad um RLS herum.
 - `household_members` hat nur eine SELECT-Policy auf die eigene Zeile.
-  INSERT/UPDATE/DELETE sind für `authenticated` entzogen.
+  `authenticated` besitzt darauf ausschließlich `SELECT`; INSERT/UPDATE/DELETE
+  und TRUNCATE sind entzogen.
 - `apply_ops()` prüft die Mitgliedschaft zusätzlich explizit und verweigert
   sonst mit `42501`.
 - Schreibvorgänge nutzen `expected_rev` (Compare-and-Swap). Ein veralteter
@@ -42,26 +58,55 @@ und alle Seiten arbeiten weiterhin ausschließlich lokal mit Dexie.
 - Der Bucket `recipe-images` ist privat, auf 10 MB pro Datei und gängige
   Bild-MIME-Typen begrenzt.
 
-## Was mit echtem Supabase geprüft werden muss
+## Live-Status (A1.5)
 
-Ohne Projektzugang sind nur statische SQL-Prüfungen und Unit-Tests möglich.
-Folgende Punkte sind **Live-Tests** und noch offen:
+Projekt: `kuechenrunde` (`roalmqptpytcdfrcugyx`, eu-central-1, PostgreSQL 17.11).
 
-1. Migration läuft im SQL-Editor fehlerfrei durch (inkl. `storage`-Policies und
-   `alter publication`).
-2. `anon` erhält auf `records` keine Zeilen und keine Schreibrechte.
-3. Ein angemeldeter Nutzer **ohne** `household_members`-Zeile bekommt
-   `snapshot() = []`, bei `apply_ops()` den Fehler `42501` und bei Storage
-   keinen Zugriff.
-4. Ein Mitglied kann lesen/schreiben; der `rev`-Trigger erhöht die Revision bei
-   jedem Update.
-5. Zwei Clients mit derselben Ausgangsrevision: der zweite Schreibvorgang
-   erhält `PT409`; die erste Änderung bleibt erhalten.
-6. Realtime liefert INSERT/UPDATE/DELETE inklusive `old.collection`/`old.id`
-   (dafür ist `replica identity full` gesetzt).
-7. Der Bucket ist nicht öffentlich; signed URLs funktionieren nur mit
-   Mitglieds-Session.
-8. `household_members`-INSERT als `authenticated` wird verweigert.
+Angewendete Migrationen:
+
+- `20261110134755_cloud.sql`
+- `20261110150500_harden_grants.sql` – entzieht `authenticated` die von
+  Supabase standardmäßig gesetzten Rechte `TRUNCATE`, `REFERENCES` und
+  `TRIGGER`; TRUNCATE wird von RLS nicht geprüft.
+
+**Live geprüft:**
+
+- Tabellen, Spalten, Indizes, Trigger, Realtime-Publication und Storage-Bucket
+  existieren.
+- RLS ist auf `records` und `household_members` aktiv; die Policies entsprechen
+  dem Entwurf.
+- `is_household_member()`, `apply_ops()` und `snapshot()` sind
+  `SECURITY INVOKER`; `anon` und `PUBLIC` haben keine EXECUTE-Rechte.
+- `anon` hat auf beiden Tabellen keinerlei Tabellenrechte; SELECT, INSERT und
+  TRUNCATE werden verweigert (stichprobenartig live geprüft), ebenso alle drei
+  RPCs (HTTP 401/42501 bzw. `permission denied`).
+- `authenticated` **ohne** Mitgliedschaft: `is_household_member() = false`,
+  `records` und `household_members` liefern 0 Zeilen, `snapshot()` und
+  `apply_ops()` liefern `42501`, INSERT in `household_members` wird verweigert,
+  INSERT in `records` scheitert an der RLS-Policy.
+- `authenticated` hat nur `SELECT` auf `household_members` und
+  `SELECT/INSERT/UPDATE/DELETE` auf `records`; kein TRUNCATE.
+- Der `rev`-Trigger erhöht bei einem Update von 1 auf 2 (in einer Transaktion
+  mit `ROLLBACK` geprüft).
+- Der Bucket `recipe-images` ist privat, auf 10 MB pro Datei begrenzt und
+  akzeptiert nur die vorgesehenen Bild-MIME-Typen. Die vier Storage-Policies gelten für
+  `authenticated`.
+- `disable_signup = true`; anonyme Authentifizierung ist deaktiviert.
+- `pnpm supabase db advisors --type security` meldet keine Befunde.
+- Keine App-Daten vorhanden: `records`, `household_members` und `auth.users`
+  enthalten jeweils 0 Zeilen.
+
+**Noch offen – erfordert ein echtes Mitgliedskonto:**
+
+- `apply_ops()`-CAS und Atomizität als Mitglied (erwarteter Konflikt `PT409`).
+- Realtime-Zustellung eines INSERT/UPDATE/DELETE an einen echten Client.
+- Storage-Upload/Download als Mitglied inklusive signed URL.
+- Vollständiger Login über die spätere Auth-Oberfläche.
+
+Die RLS-Tests liefen direkt auf der Datenbank über
+`pnpm supabase db query --remote --yes -f <datei>` mit
+`BEGIN; SET LOCAL ROLE ...; SET LOCAL request.jwt.claim.sub ...; ROLLBACK;`.
+Es wurden keine Benutzer und keine dauerhaften Daten angelegt.
 
 ## Noch nicht enthalten
 

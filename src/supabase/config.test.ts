@@ -19,23 +19,23 @@ describe('parseCloudConfig', () => {
     expect(
       parseCloudConfig({
         VITE_SUPABASE_URL: `${URL_OK}/`,
-        VITE_SUPABASE_ANON_KEY: KEY_OK,
+        VITE_SUPABASE_PUBLISHABLE_KEY: KEY_OK,
       }),
-    ).toEqual({ url: URL_OK, anonKey: KEY_OK })
+    ).toEqual({ url: URL_OK, publishableKey: KEY_OK })
   })
 
   it('erlaubt HTTP nur für localhost', () => {
     expect(
       parseCloudConfig({
         VITE_SUPABASE_URL: 'http://localhost:54321',
-        VITE_SUPABASE_ANON_KEY: KEY_OK,
+        VITE_SUPABASE_PUBLISHABLE_KEY: KEY_OK,
       })?.url,
     ).toBe('http://localhost:54321')
 
     expect(() =>
       parseCloudConfig({
         VITE_SUPABASE_URL: 'http://example.com',
-        VITE_SUPABASE_ANON_KEY: KEY_OK,
+        VITE_SUPABASE_PUBLISHABLE_KEY: KEY_OK,
       }),
     ).toThrow(CloudConfigError)
   })
@@ -45,7 +45,7 @@ describe('parseCloudConfig', () => {
       parseCloudConfig({ VITE_SUPABASE_URL: URL_OK }),
     ).toThrow(/unvollständig/)
     expect(() =>
-      parseCloudConfig({ VITE_SUPABASE_ANON_KEY: KEY_OK }),
+      parseCloudConfig({ VITE_SUPABASE_PUBLISHABLE_KEY: KEY_OK }),
     ).toThrow(/unvollständig/)
   })
 
@@ -56,7 +56,7 @@ describe('parseCloudConfig', () => {
       'https://user:pass@abcdefgh.supabase.co',
     ]) {
       expect(() =>
-        parseCloudConfig({ VITE_SUPABASE_URL: url, VITE_SUPABASE_ANON_KEY: KEY_OK }),
+        parseCloudConfig({ VITE_SUPABASE_URL: url, VITE_SUPABASE_PUBLISHABLE_KEY: KEY_OK }),
       ).toThrow(CloudConfigError)
     }
   })
@@ -65,7 +65,7 @@ describe('parseCloudConfig', () => {
     expect(() =>
       parseCloudConfig({
         VITE_SUPABASE_URL: 'https://your-project-ref.supabase.co',
-        VITE_SUPABASE_ANON_KEY: KEY_OK,
+        VITE_SUPABASE_PUBLISHABLE_KEY: KEY_OK,
       }),
     ).toThrow(/Platzhalter/)
   })
@@ -74,7 +74,7 @@ describe('parseCloudConfig', () => {
     expect(() =>
       parseCloudConfig({
         VITE_SUPABASE_URL: URL_OK,
-        VITE_SUPABASE_ANON_KEY: 'sb_secret_abcdefghijklmnopqrstuvwxyz',
+        VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_secret_abcdefghijklmnopqrstuvwxyz',
       }),
     ).toThrow(/service_role/)
   })
@@ -83,7 +83,7 @@ describe('parseCloudConfig', () => {
     const key = jwt({ role: 'service_role', iss: 'supabase' })
     let message = ''
     try {
-      parseCloudConfig({ VITE_SUPABASE_URL: URL_OK, VITE_SUPABASE_ANON_KEY: key })
+      parseCloudConfig({ VITE_SUPABASE_URL: URL_OK, VITE_SUPABASE_PUBLISHABLE_KEY: key })
     } catch (error) {
       message = (error as Error).message
     }
@@ -94,13 +94,13 @@ describe('parseCloudConfig', () => {
   it('akzeptiert einen klassischen anon-JWT', () => {
     const key = jwt({ role: 'anon', iss: 'supabase' })
     expect(
-      parseCloudConfig({ VITE_SUPABASE_URL: URL_OK, VITE_SUPABASE_ANON_KEY: key })?.anonKey,
+      parseCloudConfig({ VITE_SUPABASE_URL: URL_OK, VITE_SUPABASE_PUBLISHABLE_KEY: key })?.publishableKey,
     ).toBe(key)
   })
 
   it('lehnt zu kurze Schlüssel ab', () => {
     expect(() =>
-      parseCloudConfig({ VITE_SUPABASE_URL: URL_OK, VITE_SUPABASE_ANON_KEY: 'kurz' }),
+      parseCloudConfig({ VITE_SUPABASE_URL: URL_OK, VITE_SUPABASE_PUBLISHABLE_KEY: 'kurz' }),
     ).toThrow(/zu kurz/)
   })
 })

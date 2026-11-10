@@ -5,7 +5,7 @@ interface ImportMetaEnv {
   /** Öffentliche Supabase-Projekt-URL, z. B. https://abcdefgh.supabase.co */
   readonly VITE_SUPABASE_URL?: string
   /** Öffentlicher Publishable-/Anon-Key. Niemals service_role. */
-  readonly VITE_SUPABASE_ANON_KEY?: string
+  readonly VITE_SUPABASE_PUBLISHABLE_KEY?: string
   /** Optionaler Pfad des URL-Import-Endpunkts. */
   readonly VITE_RECIPE_FETCH_ENDPOINT?: string
 }
