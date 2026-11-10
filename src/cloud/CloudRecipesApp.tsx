@@ -48,6 +48,7 @@ import { CloudRecipeEditorPage } from './CloudRecipeEditorPage'
 import { CloudUrlImportPage } from './CloudUrlImportPage'
 import { CloudImportPage } from './CloudImportPage'
 import { CloudBackupPage } from './CloudBackupPage'
+import { AboutPage } from '../pages/AboutPage'
 
 function CloudUnavailablePage() {
   return (
@@ -140,6 +141,8 @@ export function CloudRecipesApp({
     content = <CloudUrlImportPage store={store} images={imageService} />
   } else if (route.name === 'backup') {
     content = <CloudBackupPage store={store} storage={storage} />
+  } else if (route.name === 'about') {
+    content = <AboutPage />
   } else if (route.name === 'recipe-new') {
     content = <CloudRecipeEditorPage key="new" store={store} images={imageService} />
   } else if (route.name === 'recipe-edit') {
@@ -197,6 +200,13 @@ export function CloudRecipesApp({
                 aria-current={route.name === 'backup' ? 'page' : undefined}
               >
                 Backup
+              </a>
+              <a
+                href="#/about"
+                className={route.name === 'about' ? 'active' : ''}
+                aria-current={route.name === 'about' ? 'page' : undefined}
+              >
+                Über
               </a>
               <span className="cloud-user">{email}</span>
               <button

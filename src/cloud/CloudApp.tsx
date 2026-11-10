@@ -104,7 +104,10 @@ export function CloudApp() {
 
       <footer className="app-footer">
         <span>Familien-Cloud · Supabase</span>
-        <span>Abmelden beendet die Sitzung und den Realtime-Kanal.</span>
+        <span>
+          <a href="/legal/OFF-DATA-NOTICE.txt">Lizenzen</a> ·{' '}
+          <a href="/legal/ingredient-catalog.json">Zutatenkatalog</a>
+        </span>
       </footer>
     </div>
   )
