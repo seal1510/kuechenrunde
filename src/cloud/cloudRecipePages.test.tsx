@@ -1,0 +1,107 @@
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it, vi } from 'vitest'
+import type { CloudRecordsStore } from '../data/cloudRecords'
+import type { Recipe } from '../types'
+import { CloudLibraryPage } from './CloudLibraryPage'
+import { CloudRecipeDetailPage } from './CloudRecipeDetailPage'
+
+vi.mock('../components/Markdown', () => ({
+  Markdown: ({ text }: { text: string }) => <div data-markdown>{text}</div>,
+  useImageUrl: () => null,
+}))
+
+function recipe(id: string, title: string): Recipe {
+  return {
+    id,
+    importId: `manual-${id}`,
+    importSource: 'manual',
+    title,
+    description: 'Ein synthetisches Cloud-Testrezept.',
+    ingredientGroups: [],
+    ingredients: [],
+    instructions: [],
+    servingsText: '2 Portionen',
+    servingsNumber: 2,
+    prepTime: '5 min',
+    cookTime: '10 min',
+    totalTime: '15 min',
+    categories: [],
+    cuisine: [],
+    dishType: [],
+    effort: '',
+    tags: [],
+    notes: '',
+    nutrition: '',
+    sourceUrl: '',
+    favorite: false,
+    wantToCook: false,
+    melaDate: null,
+    raw: {},
+    createdAt: 1,
+    updatedAt: 1,
+  }
+}
+
+function fakeStore(recipes: Recipe[]): CloudRecordsStore {
+  const rows = recipes.map((entry, index) => ({
+    collection: 'recipes',
+    id: entry.id,
+    rev: index + 1,
+    data: entry,
+  }))
+  return {
+    getVersion: () => 1,
+    subscribe: () => () => {},
+    list: (collection: string) =>
+      collection === 'recipes' ? rows : [],
+    get: (collection: string, id: string) =>
+      collection === 'recipes' ? rows.find((row) => row.id === id) : undefined,
+  } as unknown as CloudRecordsStore
+}
+
+describe('Cloud-Rezeptseiten', () => {
+  it('zeigt die Cloud-Bibliothek ohne lokale Import-/Backup-Aktionen', () => {
+    const html = renderToStaticMarkup(
+      <CloudLibraryPage store={fakeStore([recipe('r1', 'Cloud-Curry')])} />,
+    )
+
+    expect(html).toContain('Rezeptbibliothek')
+    expect(html).toContain('Cloud-Curry')
+    expect(html).toContain('Neues Rezept')
+    expect(html).not.toContain('Zur Bibliothek')
+    expect(html).not.toContain('Import')
+    expect(html).not.toContain('Backup')
+    expect(html).not.toContain('Alles bleibt lokal')
+  })
+
+  it('zeigt den leeren Cloud-Bestand korrekt', () => {
+    const html = renderToStaticMarkup(<CloudLibraryPage store={fakeStore([])} />)
+    expect(html).toContain('Noch keine Cloud-Rezepte gespeichert.')
+    expect(html).toContain('Lege ein Rezept ohne Bild an.')
+    expect(html).not.toContain('Zum Import')
+  })
+
+  it('zeigt Cloud-Details mit Bearbeitung, aber ohne Planen/Kochen', () => {
+    const html = renderToStaticMarkup(
+      <CloudRecipeDetailPage
+        store={fakeStore([recipe('r1', 'Cloud-Curry')])}
+        id="r1"
+      />,
+    )
+
+    expect(html).toContain('Cloud-Curry')
+    expect(html).toContain('Zutaten')
+    expect(html).toContain('Zubereitung')
+    expect(html).toContain('Bearbeiten')
+    expect(html).toContain('Wochenplan, Kochmodus und Bilder')
+    expect(html).not.toContain('Einplanen')
+    expect(html).not.toContain('detail-cook')
+  })
+
+  it('zeigt bei unbekannter ID den Nicht-gefunden-Zustand', () => {
+    const html = renderToStaticMarkup(
+      <CloudRecipeDetailPage store={fakeStore([])} id="fehlt" />,
+    )
+    expect(html).toContain('Rezept nicht gefunden.')
+  })
+})

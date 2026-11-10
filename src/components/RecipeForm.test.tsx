@@ -189,4 +189,11 @@ describe('recipe editor form', () => {
     expect(html).toContain('aria-invalid="true"')
     expect(html).toContain('aria-describedby="recipe-editor-error"')
   })
+
+  it('blendet die Bildbearbeitung im Cloud-Modus aus', () => {
+    const html = renderForm({ imagesEnabled: false })
+    expect(html).toContain('Bilder werden im Cloud-Modus noch nicht unterstützt.')
+    expect(html).not.toContain('Bilder hinzufügen')
+    expect(html).not.toContain('Hauptbild')
+  })
 })

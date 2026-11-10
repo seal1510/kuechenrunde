@@ -1,0 +1,124 @@
+import { Markdown } from '../components/Markdown'
+import { RecipeBody } from '../components/RecipeCard'
+import type { CloudRecordsStore } from '../data/cloudRecords'
+import { formatDuration, effectiveDuration } from '../lib/format'
+import type { Recipe } from '../types'
+import { useCloudRecipe } from './useCloudRecipes'
+
+function servingsValue(recipe: Recipe): string {
+  const text = recipe.servingsText.trim()
+  if (/^\d+(\s*[-–]\s*\d+)?$/.test(text)) return text.replace(/\s*[-–]\s*/, '–')
+  if (recipe.servingsNumber !== null && recipe.servingsNumber > 0) {
+    return String(recipe.servingsNumber)
+  }
+  return text.replace(/\s*(portionen?|personen?|servings?)$/i, '').trim()
+}
+
+export function CloudRecipeDetailPage({
+  store,
+  id,
+}: {
+  store: CloudRecordsStore
+  id: string
+}) {
+  const row = useCloudRecipe(store, id)
+
+  if (row === undefined) {
+    return (
+      <div className="page">
+        <p className="empty-state">Lade Rezept …</p>
+      </div>
+    )
+  }
+
+  if (row === null) {
+    return (
+      <div className="page">
+        <div className="empty-state">
+          <p>Rezept nicht gefunden.</p>
+          <a className="button" href="#/">
+            Zur Bibliothek
+          </a>
+        </div>
+      </div>
+    )
+  }
+
+  const recipe = row.data
+  const totalTime = effectiveDuration(recipe)
+  const prep = formatDuration(recipe.prepTime)
+  const cook = formatDuration(recipe.cookTime)
+  const servings = servingsValue(recipe)
+  const facts = [
+    totalTime ? { label: 'Gesamtzeit', value: totalTime } : null,
+    prep ? { label: 'Vorbereitung', value: prep } : null,
+    cook ? { label: 'Kochzeit', value: cook } : null,
+    servings ? { label: 'Portionen', value: servings } : null,
+  ].filter((fact): fact is { label: string; value: string } => fact !== null)
+  const labels = Array.from(
+    new Set([...recipe.cuisine, ...recipe.dishType, ...recipe.categories]),
+  )
+
+  return (
+    <div className="page detail-page">
+      <div className="detail-topbar">
+        <a className="back-link" href="#/">
+          <svg
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            aria-hidden="true"
+            focusable="false"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12.5 8h-9M7 3.5 2.5 8 7 12.5" />
+          </svg>
+          Zur Bibliothek
+        </a>
+        <div className="detail-topbar-actions">
+          <a
+            className="button quiet detail-edit"
+            href={`#/recipe/${encodeURIComponent(recipe.id)}/edit`}
+            aria-label="Rezept bearbeiten"
+          >
+            Bearbeiten
+          </a>
+        </div>
+      </div>
+
+      <header className="recipe-header no-image">
+        <div className="recipe-heading">
+          {labels.length > 0 ? <p className="recipe-kicker">{labels.join(' · ')}</p> : null}
+          <h1>{recipe.title}</h1>
+          {facts.length > 0 ? (
+            <dl className="recipe-facts">
+              {facts.map((fact) => (
+                <div className="recipe-fact" key={fact.label}>
+                  <dt className="fact-label">{fact.label}</dt>
+                  <dd className="fact-value">{fact.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          {recipe.description ? (
+            <div className="recipe-description">
+              <Markdown text={recipe.description} />
+            </div>
+          ) : null}
+        </div>
+      </header>
+
+      <RecipeBody recipe={recipe} />
+
+      <p className="muted small">
+        Wochenplan, Kochmodus und Bilder sind im Cloud-Modus noch nicht
+        verfügbar. Die Rezeptdetails und die Bearbeitung funktionieren bereits
+        geräteübergreifend.
+      </p>
+    </div>
+  )
+}

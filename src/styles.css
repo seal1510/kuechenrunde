@@ -10409,8 +10409,7 @@ body.plan-panel-open {
 }
 
 .cloud-main {
-  display: grid;
-  align-items: center;
+  display: block;
 }
 
 .cloud-page {
@@ -10514,4 +10513,42 @@ body.plan-panel-open {
   font-family: var(--font-display);
   font-size: var(--text-2xl);
   line-height: 1.1;
+}
+
+.cloud-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 auto var(--space-5);
+  padding: 0 0 var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.cloud-nav a {
+  color: var(--muted);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.cloud-nav a:hover,
+.cloud-nav a.active {
+  color: var(--text);
+}
+
+.cloud-nav-note {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.cloud-user {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 640px) {
+  .cloud-user {
+    margin-left: 0;
+  }
 }

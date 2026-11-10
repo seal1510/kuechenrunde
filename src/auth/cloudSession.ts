@@ -54,10 +54,14 @@ export type CloudSessionState =
   | { status: 'membership-missing'; email: string }
   | { status: 'error'; email: string | null; message: string }
 
-export interface CloudSessionControllerOptions {
+export interface CloudSessionControllerOptions<
+  TStore extends CloudStorePort = CloudStorePort,
+> {
   auth: CloudAuthPort
-  createStore: () => CloudStorePort
+  createStore: () => TStore
   onChange: (state: CloudSessionState) => void
+  /** Wird beim Aufbau und beim Verwerfen des Stores aufgerufen. */
+  onStoreChange?: (store: TStore | null) => void
 }
 
 function errorMessage(cause: unknown, fallback: string): string {
@@ -74,9 +78,11 @@ function isMembershipError(cause: unknown): boolean {
   )
 }
 
-export class CloudSessionController {
+export class CloudSessionController<
+  TStore extends CloudStorePort = CloudStorePort,
+> {
   private state: CloudSessionState = { status: 'checking' }
-  private store: CloudStorePort | null = null
+  private store: TStore | null = null
   private unsubscribeAuth: (() => void) | null = null
   private session: CloudSession | null = null
   private sessionUserId: string | null = null
@@ -87,10 +93,15 @@ export class CloudSessionController {
   /** Läuft gerade ein Snapshot-Load? Mehrfache Auth-Events warten darauf. */
   private loadPromise: Promise<void> | null = null
 
-  constructor(private readonly options: CloudSessionControllerOptions) {}
+  constructor(private readonly options: CloudSessionControllerOptions<TStore>) {}
 
   getState(): CloudSessionState {
     return this.state
+  }
+
+  /** Der aktuell geladene Store, sonst null. */
+  getStore(): TStore | null {
+    return this.store
   }
 
   async start(): Promise<void> {
@@ -227,11 +238,12 @@ export class CloudSessionController {
     this.disposeStore()
     this.setState({ status: 'loading', email })
 
-    let store: CloudStorePort | null = null
+    let store: TStore | null = null
     let load: Promise<void> | null = null
     try {
       store = this.options.createStore()
       this.store = store
+      this.options.onStoreChange?.(store)
       load = store.load()
       this.loadPromise = load
       await load
@@ -271,13 +283,15 @@ export class CloudSessionController {
     if (!store) return
     this.store = null
     store.dispose()
+    this.options.onStoreChange?.(null)
   }
 
   /** Verwirft nur den Store, der zu diesem Ladevorgang gehört. */
-  private dropStore(store: CloudStorePort): void {
+  private dropStore(store: TStore): void {
     if (this.store !== store) return
     this.store = null
     store.dispose()
+    this.options.onStoreChange?.(null)
   }
 
   private setState(next: CloudSessionState): void {

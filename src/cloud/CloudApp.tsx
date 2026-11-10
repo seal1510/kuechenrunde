@@ -3,17 +3,43 @@
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Bewusst keine lokale Bibliothek und keine Navigation: Im Cloud-Modus wird
- * nach dem Bootstrap nur der Bereitschaftszustand gezeigt. Die vorhandenen
- * Seiten bleiben ausschließlich im lokalen Modus aktiv.
+ * Im Cloud-Modus ist nach dem Bootstrap die Rezeptbibliothek freigeschaltet.
+ * Wochenplan, Einkauf und Kochmodus bleiben vorerst deaktiviert. Lokale
+ * Dexie-Daten werden hier nie als Cloud-Bestand gerendert.
  */
 
 import { AuthProvider, useAuth } from '../auth/AuthProvider'
 import { cloudConfig, cloudConfigError } from '../supabase/client'
+import { CloudRecipesApp } from './CloudRecipesApp'
 import { CloudStatus } from './CloudStatus'
 
 function CloudGate() {
-  const { state, signIn, logout, retry } = useAuth()
+  const { state, store, signIn, logout, retry } = useAuth()
+
+  if (state.status === 'ready') {
+    if (!store) {
+      return (
+        <CloudStatus
+          state={{
+            status: 'error',
+            email: state.email,
+            message: 'Der Cloud-Speicher ist nicht verfügbar.',
+          }}
+          onSignIn={signIn}
+          onRetry={retry}
+          onLogout={logout}
+        />
+      )
+    }
+    return (
+      <CloudRecipesApp
+        store={store}
+        email={state.email}
+        onLogout={logout}
+      />
+    )
+  }
+
   return (
     <CloudStatus
       state={state}

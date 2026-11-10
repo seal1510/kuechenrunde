@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../db'
-import { deleteRecipe } from '../import/importer'
 import { EditorActionBar } from '../components/EditorActionBar'
 import { RecipeForm } from '../components/RecipeForm'
 import {
@@ -11,25 +8,28 @@ import {
   emptyDraft,
   type RecipeDraft,
 } from '../recipe/editor'
+import type {
+  RecipeEditorBackend,
+  RecipeEditorLoad,
+} from '../recipe/editorBackend'
 import { editorFingerprint, hasEditorChanges } from '../recipe/editorSession'
+import { localRecipeEditorBackend } from '../recipe/localEditorBackend'
+import type { EditorImage } from '../recipe/repository'
 import { useUnsavedChangesGuard } from '../recipe/unsavedChanges'
-import { saveRecipeWithImages, type EditorImage } from '../recipe/repository'
-import type { RecipeImage } from '../types'
 
-export function RecipeEditorPage({ id }: { id?: string }) {
-  const data = useLiveQuery(async () => {
-    if (!id) return { recipe: null, images: [] as RecipeImage[] }
-    const recipe = await db.recipes.get(id)
-    const images = recipe
-      ? await db.images.where('recipeId').equals(id).sortBy('position')
-      : []
-    return { recipe, images }
-  }, [id])
-
+export function RecipeEditorPage({
+  id,
+  backend = localRecipeEditorBackend,
+}: {
+  id?: string
+  backend?: RecipeEditorBackend
+}) {
+  const [data, setData] = useState<RecipeEditorLoad | null | undefined>(undefined)
+  const [loadError, setLoadError] = useState('')
+  const [loadToken, setLoadToken] = useState(0)
   const [draft, setDraft] = useState<RecipeDraft | null>(null)
   const [images, setImages] = useState<EditorImage[]>([])
   const [initialized, setInitialized] = useState(false)
-  const [notFound, setNotFound] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -37,7 +37,36 @@ export function RecipeEditorPage({ id }: { id?: string }) {
   const baselineRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (initialized || !data) return
+    let active = true
+    setData(undefined)
+    setLoadError('')
+    setInitialized(false)
+    setDraft(null)
+    setImages([])
+    baselineRef.current = null
+
+    void backend
+      .load(id)
+      .then((next) => {
+        if (active) setData(next)
+      })
+      .catch((cause: unknown) => {
+        if (!active) return
+        setData(null)
+        setLoadError(
+          cause instanceof Error && cause.message
+            ? cause.message
+            : 'Das Rezept konnte nicht geladen werden.',
+        )
+      })
+
+    return () => {
+      active = false
+    }
+  }, [backend, id, loadToken])
+
+  useEffect(() => {
+    if (initialized || data === undefined || data === null) return
     if (!id) {
       const nextDraft = emptyDraft()
       const nextImages: EditorImage[] = []
@@ -48,8 +77,7 @@ export function RecipeEditorPage({ id }: { id?: string }) {
       return
     }
     if (!data.recipe) {
-      setNotFound(true)
-      setInitialized(true)
+      setData(null)
       return
     }
     const nextDraft = draftFromRecipe(data.recipe)
@@ -85,11 +113,18 @@ export function RecipeEditorPage({ id }: { id?: string }) {
   async function handleDelete() {
     if (!id) return
     setDeleting(true)
+    setError('')
     try {
-      await deleteRecipe(id)
+      await backend.remove(id, data?.rev)
       allowNextNavigation('#/')
       baselineRef.current = null
       window.location.hash = '#/'
+    } catch (cause) {
+      setError(
+        cause instanceof Error && cause.message
+          ? cause.message
+          : 'Das Rezept konnte nicht gelöscht werden.',
+      )
     } finally {
       setDeleting(false)
     }
@@ -105,22 +140,52 @@ export function RecipeEditorPage({ id }: { id?: string }) {
     setSaving(true)
     setError('')
     try {
-      const existing = id ? await db.recipes.get(id) : undefined
+      const existing = data?.recipe ?? undefined
       if (id && !existing) throw new Error('Das Rezept wurde nicht gefunden.')
       const recipe = buildRecipeFromDraft(draft, existing)
-      await saveRecipeWithImages(recipe, images)
+      await backend.save(recipe, images, {
+        isNew: !id,
+        expectedRev: data?.rev,
+      })
       const targetHash = `#/recipe/${encodeURIComponent(recipe.id)}`
       allowNextNavigation(targetHash)
       baselineRef.current = editorFingerprint(draft, images)
       window.location.hash = targetHash
     } catch (cause) {
-      setError((cause as Error).message || 'Das Rezept konnte nicht gespeichert werden.')
+      setError(
+        cause instanceof Error && cause.message
+          ? cause.message
+          : 'Das Rezept konnte nicht gespeichert werden.',
+      )
     } finally {
       setSaving(false)
     }
   }
 
-  if (notFound) {
+  if (loadError) {
+    return (
+      <div className="page">
+        <div className="empty-state">
+          <p>Rezept konnte nicht geladen werden.</p>
+          <p className="muted">{loadError}</p>
+          <div className="notice-actions">
+            <button
+              type="button"
+              className="button primary"
+              onClick={() => setLoadToken((value) => value + 1)}
+            >
+              Erneut versuchen
+            </button>
+            <a className="button" href="#/">
+              Zur Bibliothek
+            </a>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (data === null) {
     return (
       <div className="page">
         <div className="empty-state">
@@ -153,9 +218,7 @@ export function RecipeEditorPage({ id }: { id?: string }) {
           </a>
           <h1>{id ? 'Rezept bearbeiten' : 'Neues Rezept'}</h1>
           <p className="muted small">
-            {id
-              ? 'Änderungen werden erst beim Speichern übernommen.'
-              : 'Wird lokal als manuelles Rezept gespeichert.'}
+            {id ? `Änderungen werden erst beim Speichern übernommen. ${backend.storageHint}` : backend.storageHint}
           </p>
         </div>
       </header>
@@ -166,6 +229,7 @@ export function RecipeEditorPage({ id }: { id?: string }) {
         onChange={setDraft}
         images={images}
         onImagesChange={setImages}
+        imagesEnabled={backend.supportsImages}
         onSubmit={handleSubmit}
         error={error}
         categoriesNote={data?.recipe?.categories.join(', ')}
@@ -173,12 +237,10 @@ export function RecipeEditorPage({ id }: { id?: string }) {
         {id ? (
           <section className="panel danger-zone">
             <h2>Rezept löschen</h2>
-            <p className="muted small">
-              Entfernt dieses Rezept und seine Bilder. Ein vorheriges Backup wird empfohlen.
-            </p>
+            <p className="muted small">{backend.deleteHint}</p>
             {confirmDelete ? (
               <div className="notice danger">
-                <p>Dieses Rezept und seine Bilder endgültig löschen?</p>
+                <p>Dieses Rezept endgültig löschen?</p>
                 <div className="notice-actions">
                   <button
                     type="button"

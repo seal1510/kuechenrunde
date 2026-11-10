@@ -6,6 +6,7 @@ import {
   CloudRecordsStore,
   type ApplyOpsPayload,
   type ApplyOpsResult,
+  type RecordChange,
   type RecordRow,
   type RecordsBackend,
   type RecordsSubscriptionHandlers,
@@ -45,6 +46,7 @@ function recipe(id: string, title: string, updatedAt: number): Recipe {
 
 class MinimalBackend implements RecordsBackend {
   readonly rows = new Map<string, RecordRow>()
+  private handlers: RecordsSubscriptionHandlers | null = null
 
   async snapshot(): Promise<RecordRow[]> {
     return [...this.rows.values()].map((row) => structuredClone(row))
@@ -86,8 +88,15 @@ class MinimalBackend implements RecordsBackend {
     return { applied, deleted }
   }
 
-  subscribe(_handlers: RecordsSubscriptionHandlers): () => void {
-    return () => {}
+  subscribe(handlers: RecordsSubscriptionHandlers): () => void {
+    this.handlers = handlers
+    return () => {
+      this.handlers = null
+    }
+  }
+
+  emit(change: RecordChange): void {
+    this.handlers?.onChange(change)
   }
 }
 
@@ -130,5 +139,32 @@ describe('CloudRecipeRepository (vertikaler Pfad)', () => {
     await repository.remove('r2', 1)
     expect(await repository.load('r2')).toBeNull()
     expect(backend.rows.size).toBe(0)
+  })
+
+  it('übernimmt Realtime-Änderungen in Liste und Detail', async () => {
+    await repository.create(recipe('r1', 'Alt', 10))
+    let notifications = 0
+    const unsubscribe = repository.subscribe(() => {
+      notifications += 1
+    })
+
+    backend.emit({
+      type: 'upsert',
+      row: {
+        collection: 'recipes',
+        id: 'r1',
+        rev: 2,
+        data: recipe('r1', 'Remote', 20),
+      },
+    })
+
+    expect(notifications).toBe(1)
+    expect((await repository.load('r1'))?.recipe.title).toBe('Remote')
+    expect(repository.list()[0]?.title).toBe('Remote')
+
+    backend.emit({ type: 'delete', collection: 'recipes', id: 'r1' })
+    expect(await repository.load('r1')).toBeNull()
+    expect(repository.list()).toHaveLength(0)
+    unsubscribe()
   })
 })

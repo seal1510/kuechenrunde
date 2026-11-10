@@ -11,8 +11,10 @@ import type { ReactNode } from 'react'
 import type { CloudSessionState } from '../auth/cloudSession'
 import { LoginPage } from '../pages/LoginPage'
 
+export type CloudStatusState = Exclude<CloudSessionState, { status: 'ready' }>
+
 export interface CloudStatusProps {
-  state: CloudSessionState
+  state: CloudStatusState
   onSignIn: (email: string, password: string) => void | Promise<void>
   onRetry: () => void | Promise<void>
   onLogout: () => void | Promise<void>
@@ -106,39 +108,5 @@ export function CloudStatus({
     )
   }
 
-  return (
-    <StatusCard>
-      <p className="cloud-eyebrow">Familien-Cloud</p>
-      <h1>Cloud verbunden</h1>
-      <p className="muted">Angemeldet als {state.email}.</p>
-      <dl className="cloud-counts">
-        <div>
-          <dt>Rezepte</dt>
-          <dd>{state.counts.recipes}</dd>
-        </div>
-        <div>
-          <dt>Essenstermine</dt>
-          <dd>{state.counts.mealPlans}</dd>
-        </div>
-        <div>
-          <dt>Einkaufslisten</dt>
-          <dd>{state.counts.shoppingLists}</dd>
-        </div>
-        <div>
-          <dt>Käufe</dt>
-          <dd>{state.counts.shoppingPurchases}</dd>
-        </div>
-      </dl>
-      <p>
-        Der gemeinsame Snapshot ist geladen. Die Rezeptbibliothek, Wochenplanung
-        und Einkaufsliste werden in der nächsten Etappe angebunden. Es werden
-        noch keine lokalen Dexie-Daten als Cloud-Bestand angezeigt.
-      </p>
-      <div className="cloud-actions">
-        <button type="button" className="button quiet" onClick={() => void onLogout()}>
-          Abmelden
-        </button>
-      </div>
-    </StatusCard>
-  )
+  return null
 }

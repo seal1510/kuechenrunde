@@ -13,12 +13,12 @@ Küchenrunde ist standardmäßig weiterhin eine **lokale WebApp**. Der Cloud-Mod
 wird ausschließlich über `VITE_DATA_MODE=cloud` aktiviert; allein vorhandene
 Supabase-Variablen schalten die App nicht um.
 
-Im Cloud-Modus sind derzeit **Anmeldung, Session-Verwaltung und das Laden des
-gemeinsamen Snapshots** implementiert. Danach zeigt die App einen
-Bereitschaftszustand. Die Rezeptbibliothek, Wochenplanung und Einkaufsliste
-sind noch **nicht** an den Cloud-Adapter angeschlossen; lokale Dexie-Daten
-werden dort nicht als Cloud-Bestand angezeigt. Eine Geräte-Synchronisierung
-der Oberfläche ist noch nicht freigegeben.
+Im Cloud-Modus stehen **Anmeldung, Session-Verwaltung und die gemeinsame
+Rezeptbibliothek** zur Verfügung: Rezepte lassen sich anlegen, öffnen,
+bearbeiten und löschen, Änderungen erscheinen über Supabase Realtime auch in
+anderen Sitzungen. Bilder, Wochenplanung, Einkaufsliste und Kochmodus sind
+noch **nicht** angebunden; lokale Dexie-Daten werden dort nicht als
+Cloud-Bestand angezeigt.
 
 Details zur Cloud-Grundlage stehen in [`supabase/README.md`](supabase/README.md).
 

@@ -100,6 +100,8 @@ export interface RecipeFormProps {
   onChange: (draft: RecipeDraft) => void
   images: EditorImage[]
   onImagesChange: (images: EditorImage[]) => void
+  /** Im Cloud-Modus werden Bilder noch nicht gespeichert. */
+  imagesEnabled?: boolean
   onSubmit: (event: FormEvent) => void
   error?: string
   categoriesNote?: string
@@ -112,6 +114,7 @@ export function RecipeForm({
   onChange,
   images,
   onImagesChange,
+  imagesEnabled = true,
   onSubmit,
   error,
   categoriesNote,
@@ -490,6 +493,7 @@ export function RecipeForm({
         </section>
 
         <div className="editor-bottom-grid">
+          {imagesEnabled ? (
           <section className="panel editor-panel editor-panel-images">
             <div className="editor-panel-head">
               <h2>Bilder</h2>
@@ -558,6 +562,17 @@ export function RecipeForm({
               </label>
             </div>
           </section>
+          ) : (
+            <section className="panel editor-panel editor-panel-images">
+              <div className="editor-panel-head">
+                <h2>Bilder</h2>
+              </div>
+              <p className="muted small">
+                Bilder werden im Cloud-Modus noch nicht unterstützt. Rezepte
+                ohne Bilder funktionieren vollständig.
+              </p>
+            </section>
+          )}
 
           <section className="panel editor-panel editor-advanced">
             <details>

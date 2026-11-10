@@ -93,38 +93,45 @@ Angewendete Migrationen:
   `authenticated`.
 - `disable_signup = true`; anonyme Authentifizierung ist deaktiviert.
 - `pnpm supabase db advisors --type security` meldet keine Befunde.
-- Keine App-Daten vorhanden: `records`, `household_members` und `auth.users`
-  enthalten jeweils 0 Zeilen.
+- `records` ist leer; `household_members` enthält das freigeschaltete
+  Betreiberkonto, `auth.users` genau diesen Benutzer.
 
-**Noch offen – erfordert ein echtes Mitgliedskonto:**
+**Noch offen (A3.1):**
 
-- `apply_ops()`-CAS und Atomizität als Mitglied (erwarteter Konflikt `PT409`).
-- Realtime-Zustellung eines INSERT/UPDATE/DELETE an einen echten Client.
-- Storage-Upload/Download als Mitglied inklusive signed URL.
-- Vollständiger Login über die spätere Auth-Oberfläche.
+- Storage-Upload/Download und signed URLs für Rezeptbilder.
+- Wochenplan, Einkaufsliste und Kochmodus im Cloud-Modus.
 
 Die RLS-Tests liefen direkt auf der Datenbank über
 `pnpm supabase db query --remote --yes -f <datei>` mit
 `BEGIN; SET LOCAL ROLE ...; SET LOCAL request.jwt.claim.sub ...; ROLLBACK;`.
 Es wurden keine Benutzer und keine dauerhaften Daten angelegt.
 
-## Frontend-Modus (A2)
+## Frontend-Modus (A2/A3.1)
 
 - **Standard:** `VITE_DATA_MODE` fehlt oder ist `local` → die bisherige lokale
   Dexie-App läuft unverändert.
 - **Cloud:** `VITE_DATA_MODE=cloud` plus `VITE_SUPABASE_URL` und
-  `VITE_SUPABASE_PUBLISHABLE_KEY` → Login, Session-Verwaltung und Laden des
-  gemeinsamen Snapshots. Danach zeigt die App nur einen Bereitschaftszustand.
+  `VITE_SUPABASE_PUBLISHABLE_KEY` → Login, Session-Verwaltung und gemeinsame
+  Rezeptbibliothek (ohne Bilder).
 - Die Supabase-Variablen allein schalten die App **nicht** um.
 - Im Cloud-Modus werden keine lokalen Dexie-Rezepte als Cloud-Daten angezeigt.
 - Login, Logout, Bootstrap, fehlende Mitgliedschaft und Netzwerkfehler sind
-  durch Unit-Tests abgedeckt. Der echte Login mit einem Familienkonto ist noch
-  offen.
+  unit-getestet und mit dem Betreiberkonto live durchgespielt.
+
+## Rezeptbibliothek im Cloud-Modus (A3.1)
+
+- Bibliothek, Detail und Editor verwenden die bestehenden React-Komponenten;
+  die Bildbearbeitung ist im Cloud-Modus deaktiviert.
+- **Live im Browser bestanden:** Rezept anlegen, bearbeiten und löschen;
+  Realtime für INSERT/UPDATE/DELETE zwischen zwei gleichzeitig geöffneten
+  Tabs; Konflikt beim gleichzeitigen Bearbeiten (`PT409`, kein Overwrite);
+  Testrezept anschließend gelöscht (`records = 0`).
+- **Nicht live getestet:** Storage/Bilder, Wochenplan, Einkauf und Kochmodus.
 
 ## Noch nicht enthalten
 
-- Umschaltung der App auf den Cloud-Adapter (`src/db.ts` bleibt lokal).
-- Login-Oberfläche und Auth-Gate.
+- Anbindung von Wochenplan, Einkaufsliste und Kochmodus (`src/db.ts` bleibt
+  für diese Bereiche lokal).
 - Bild-Upload/Download und signed URLs.
 - ZIP-Migration der lokalen Daten.
 - Cloudflare-Pages-Deployment und URL-Import-Function.

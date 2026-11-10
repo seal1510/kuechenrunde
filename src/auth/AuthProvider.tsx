@@ -29,6 +29,8 @@ import { createSupabaseAuthPort } from './supabaseAuthPort'
 
 export interface CloudAuthApi {
   state: CloudSessionState
+  /** Geladener Cloud-Store; null außerhalb des Bereitschaftszustands. */
+  store: CloudRecordsStore | null
   signIn: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
   retry: () => Promise<void>
@@ -38,17 +40,21 @@ const CloudAuthContext = createContext<CloudAuthApi | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<CloudSessionState>({ status: 'checking' })
-  const controllerRef = useRef<CloudSessionController | null>(null)
+  const [store, setStore] = useState<CloudRecordsStore | null>(null)
+  const controllerRef = useRef<CloudSessionController<CloudRecordsStore> | null>(
+    null,
+  )
 
   useEffect(() => {
     const client = supabase
     if (!client) return
 
-    const controller = new CloudSessionController({
+    const controller = new CloudSessionController<CloudRecordsStore>({
       auth: createSupabaseAuthPort(),
       createStore: () =>
         new CloudRecordsStore(createSupabaseRecordsBackend(client)),
       onChange: setState,
+      onStoreChange: setStore,
     })
     controllerRef.current = controller
     void controller.start()
@@ -76,8 +82,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo<CloudAuthApi>(
-    () => ({ state, signIn, logout, retry }),
-    [state, signIn, logout, retry],
+    () => ({ state, store, signIn, logout, retry }),
+    [state, store, signIn, logout, retry],
   )
 
   return <CloudAuthContext.Provider value={value}>{children}</CloudAuthContext.Provider>

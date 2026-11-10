@@ -1,11 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import type { CloudSessionState } from '../auth/cloudSession'
+import type { CloudStatusState } from './CloudStatus'
 import { CloudStatus } from './CloudStatus'
 
 const noop = () => {}
 
-function render(state: CloudSessionState): string {
+function render(state: CloudStatusState): string {
   return renderToStaticMarkup(
     <CloudStatus
       state={state}
@@ -51,26 +51,5 @@ describe('CloudStatus', () => {
     expect(html).toContain('Cloud-Daten werden geladen')
     expect(html).toContain('familie@example.org')
     expect(html).toContain('Abmelden')
-  })
-
-  it('zeigt nach dem Bootstrap nur den Cloud-Bereitschaftszustand', () => {
-    const html = render({
-      status: 'ready',
-      email: 'familie@example.org',
-      counts: {
-        recipes: 2,
-        mealPlans: 3,
-        shoppingLists: 1,
-        shoppingPurchases: 4,
-      },
-    })
-
-    expect(html).toContain('Cloud verbunden')
-    expect(html).toContain('familie@example.org')
-    expect(html).toContain('Es werden')
-    expect(html).toContain('Abmelden')
-    expect(html).not.toContain('Lokal im Browser gespeichert')
-    expect(html).not.toContain('main-nav')
-    expect(html).not.toContain('href="#/plan"')
   })
 })
