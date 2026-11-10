@@ -28,6 +28,44 @@ describe('Cloudflare Pages configuration', () => {
     expect(wrangler).not.toMatch(/sb_secret_/)
   })
 
+  it('ships secure HTTP headers for the static site', () => {
+    const headers = read('public/_headers')
+    expect(headers).toContain('X-Content-Type-Options: nosniff')
+    expect(headers).toContain('X-Frame-Options: DENY')
+    expect(headers).toContain('Referrer-Policy: strict-origin-when-cross-origin')
+    expect(headers).toContain('Strict-Transport-Security:')
+    expect(headers).toContain("default-src 'self'")
+    expect(headers).toContain("object-src 'none'")
+    expect(headers).toContain("frame-ancestors 'none'")
+    expect(headers).toContain('https://*.supabase.co')
+    expect(headers).toContain('wss://*.supabase.co')
+    expect(headers).not.toContain("'unsafe-eval'")
+    expect(headers).not.toContain('*;')
+  })
+
+  it('pins a supported Node version for Cloudflare Pages', () => {
+    const pkg = JSON.parse(read('package.json')) as {
+      engines?: { node?: string }
+      scripts?: Record<string, string>
+    }
+    expect(pkg.engines?.node).toBe('>=22')
+    expect(pkg.scripts?.build).toContain('tsc -p functions/tsconfig.json --noEmit')
+    expect(read('.nvmrc').trim()).toBe('22')
+  })
+
+  it('keeps legal notices complete and in sync', () => {
+    const notice = read('NOTICE')
+    expect(read('public/legal/NOTICE.txt')).toBe(notice)
+    expect(notice).toContain('@supabase/supabase-js')
+    expect(notice).toContain('tslib')
+    const thirdParty = read('public/legal/THIRD-PARTY-LICENSES.txt')
+    expect(thirdParty).toContain('@supabase/supabase-js')
+    expect(thirdParty).toContain('@supabase/phoenix')
+    expect(thirdParty).toContain('iceberg-js')
+    expect(thirdParty).toContain('tslib')
+    expect(read('public/legal/LICENSE.txt')).toBe(read('LICENSE'))
+  })
+
   it('keeps the Function source free of Node-only imports and APIs', () => {
     const files = [
       'functions/api/recipe-fetch.ts',

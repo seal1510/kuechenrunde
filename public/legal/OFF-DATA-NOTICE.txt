@@ -26,10 +26,20 @@ Der Quellcode des Open-Food-Facts-Servers steht unter AGPL-3.0:
 
   https://github.com/openfoodfacts/openfoodfacts-server/blob/main/LICENSE
 
-Die Taxonomiedateien liegen im AGPL-3.0-Repository, haben aber keine eigene,
-dateispezifische Lizenzangabe. Ihre konkrete Zuordnung zu ODbL/DbCL oder
-AGPL-3.0 ist daher offen. Vor einer öffentlichen Veröffentlichung ist diese
-Frage mit Open Food Facts zu klären.
+Die OFF-Nutzungsbedingungen und die OFF-Daten-Seite benennen für die Datenbank
+die ODbL 1.0 und für die Einzelinhalte die DbCL 1.0; der Servercode steht
+unter AGPL-3.0. Für die konkreten Taxonomiedateien wurde keine eigene,
+dateispezifische Lizenzangabe gefunden. Offen ist daher genau diese Frage:
+
+  Ist die kuratierte Übernahme aus ingredients.txt und
+  ingredients_processing.txt als Bestandteil der OFF-Datenbank (ODbL 1.0,
+  inklusive Share-Alike) oder als Einzelinhalt (DbCL 1.0) zu behandeln, und
+  welche Attributions- und Share-Alike-Pflichten folgen daraus für
+  src/domain/ingredientCatalogData.ts?
+
+Vor einer öffentlichen Veröffentlichung ist diese Frage schriftlich mit Open
+Food Facts zu klären (reuse@openfoodfacts.org) oder die kuratierte Auswahl
+durch eine belastbar lizenzierte Quelle zu ersetzen.
 
 Bis zur Klärung behauptet Küchenrunde keine bestimmte Lizenz für diese
 Taxonomiedateien. Sie werden als Datenquelle mit Attribution genannt.

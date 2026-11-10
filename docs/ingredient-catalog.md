@@ -133,12 +133,17 @@ Deliberately separate:
   <https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/food/ingredients.txt>
   used as reference for German names, synonyms, plant parts and international
   food vocabulary. Copyright (C) Open Food Facts contributors.
-  The OFF terms of use name the database as **ODbL 1.0** and individual
-  contents as **DbCL 1.0**:
-  <https://world.openfoodfacts.org/terms-of-use>. The OFF server code is
+  The OFF terms of use and the OFF data page name the database as **ODbL
+  1.0** and individual contents as **DbCL 1.0**:
+  <https://world.openfoodfacts.org/terms-of-use>,
+  <https://world.openfoodfacts.org/data>. The OFF server code is
   **AGPL-3.0**. The taxonomy files live in the AGPL repository but have no
-  file-specific licence statement; their exact licence assignment is still
-  open and must be clarified with Open Food Facts before a public release.
+  file-specific licence statement. Open question: is the curated selection
+  a part of the database (ODbL, including Share-Alike) or individual
+  contents (DbCL), and which attribution/Share-Alike obligations follow
+  for `src/domain/ingredientCatalogData.ts`? This must be clarified in
+  writing with Open Food Facts (`reuse@openfoodfacts.org`) or the selection
+  must be replaced by a clearly licensed source before a public release.
 - **Open Food Facts ingredients processing taxonomy**
   <https://github.com/openfoodfacts/openfoodfacts-server/blob/main/taxonomies/ingredients_processing.txt>
   used as reference for processing terms such as `frisch`, `getrocknet`,

@@ -10,6 +10,8 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_PUBLISHABLE_KEY?: string
   /** Optionaler Pfad des URL-Import-Endpunkts. */
   readonly VITE_RECIPE_FETCH_ENDPOINT?: string
+  /** Öffentliche Quellcode-URL für „Über Küchenrunde“. */
+  readonly VITE_SOURCE_CODE_URL?: string
 }
 
 interface ImportMeta {

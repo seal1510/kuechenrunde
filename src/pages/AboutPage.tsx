@@ -7,7 +7,22 @@
  * are copied into public/legal/ so they are part of the production build.
  */
 
-export function AboutPage() {
+function configuredSourceCodeUrl(): string | null {
+  const raw = import.meta.env.VITE_SOURCE_CODE_URL?.trim()
+  if (!raw) return null
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
+export function AboutPage({
+  sourceCodeUrl = configuredSourceCodeUrl(),
+}: {
+  sourceCodeUrl?: string | null
+} = {}) {
   return (
     <div className="page">
       <header className="page-head">
@@ -23,13 +38,15 @@ export function AboutPage() {
       <section className="panel">
         <h2>Die App</h2>
         <p>
-          Küchenrunde ist eine kostenlose, lokal laufende Rezept- und Familien-Einkaufslisten-WebApp.
-          Rezepte, Wochenplan, Einkaufslisten und Einstellungen bleiben im Browser gespeichert.
-          Es gibt keine Konten, keine Cloud und kein Tracking.
+          Küchenrunde ist eine kostenlose Rezept- und Familien-Einkaufslisten-WebApp. Sie läuft
+          standardmäßig lokal im Browser; im expliziten Cloud-Modus werden Rezepte, Bilder,
+          Wochenplan und Einkaufslisten über eine gemeinsame Familien-Cloud geteilt. Es gibt kein
+          Tracking.
         </p>
         <p className="muted">
-          Der aktuelle Stand ist eine lokale App. Eine gemeinsame Familien-Cloud mit
-          Synchronisierung ist geplant, aber noch nicht implementiert.
+          Der Cloud-Modus ist optional und wird nur mit <code>VITE_DATA_MODE=cloud</code>{' '}
+          aktiviert. Anmeldung und Zugriff erfolgen über den Familienhaushalt. Koch-Timer, Wake Lock
+          und der temporäre Kochfortschritt bleiben gerätelokal.
         </p>
       </section>
 
@@ -82,16 +99,27 @@ export function AboutPage() {
 
       <section className="panel">
         <h2>Quellcode</h2>
-        <p>
-          Ein öffentliches Quellcode-Repository ist noch nicht festgelegt. Vor einer
-          öffentlichen Veröffentlichung wird hier die URL des Repositorys mit dem exakten
-          Versions-Tag oder Commit ergänzt.
-        </p>
-        <p className="muted small">
-          Bis dahin gilt: Der zur ausgelieferten Version gehörende Quellcode ist auf Anfrage
-          beim Betreiber erhältlich. Kontaktangabe und Quellcode-URL sind vor dem öffentlichen
-          Release zu ergänzen.
-        </p>
+        {sourceCodeUrl ? (
+          <>
+            <p>
+              Der Quellcode dieser Version ist im{' '}
+              <a href={sourceCodeUrl} target="_blank" rel="noreferrer noopener">
+                öffentlichen Repository
+              </a>{' '}
+              verfügbar.
+            </p>
+            <p className="muted small">
+              Der Link wird beim Build über <code>VITE_SOURCE_CODE_URL</code> gesetzt. Das
+              Repository enthält den Quellcode zum veröffentlichten Stand.
+            </p>
+          </>
+        ) : (
+          <p>
+            Der zur ausgelieferten Version gehörende Quellcode ist beim Betreiber erhältlich.
+            Für eine öffentliche Veröffentlichung wird die Repository-URL beim Build hinterlegt;
+            eine unbekannte URL wird bewusst nicht erfunden.
+          </p>
+        )}
       </section>
 
       <section className="panel">
@@ -104,7 +132,12 @@ export function AboutPage() {
           Lizenzzuordnung der im Server-Repository liegenden Taxonomiedateien ist noch nicht
           eindeutig geklärt. Dieser offene Punkt ist im{' '}
           <a href="/legal/OFF-DATA-NOTICE.txt">OFF-Hinweis</a> dokumentiert und vor einer
-          öffentlichen Veröffentlichung zu klären.
+          öffentlichen Veröffentlichung mit Open Food Facts (reuse@openfoodfacts.org) zu klären.
+        </p>
+        <p>
+          Im Cloud-Modus werden die gemeinsamen Rezepte, Bilder, Pläne und Einkaufsdaten bei
+          Supabase gespeichert. Die App verwendet dafür ein Supabase-Projekt des Betreibers; die
+          Anmeldung erfolgt über Supabase Auth. Die lokalen Daten bleiben davon getrennt.
         </p>
         <p>
           Die Kategorienliste von einkaufslisten-card steht unter der MIT-Lizenz, Copyright (c)
