@@ -158,6 +158,15 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
+#
+# Diese Datei beschreibt den LOKALEN Stack. Das gehostete Projekt
+# (roalmqptpytcdfrcugyx) verwendet stattdessen:
+#   site_url: https://kuechenrunde.pages.dev
+#   Redirects: https://kuechenrunde.pages.dev/**, http://localhost:3000/**,
+#              http://127.0.0.1:3000/**
+# Diese gehosteten Werte wurden über die Supabase Management API gesetzt und
+# dürfen nicht durch einen ungeprüften `supabase config push` überschrieben
+# werden. Details: docs/family-access.md.
 site_url = "http://127.0.0.1:3000"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""

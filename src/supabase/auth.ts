@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Nur Anmeldung, Abmeldung und Session-Verwaltung. Es gibt bewusst keine
- * Registrierung: Familienmitglieder werden vom Betreiber im Supabase-Dashboard
- * angelegt und anschließend in public.household_members eingetragen.
+ * Registrierung: Familienmitglieder werden vom Betreiber per Supabase-Einladung
+ * angelegt und dabei in public.household_members eingetragen.
  */
 
 import type { AuthChangeEvent, AuthError, Session } from '@supabase/supabase-js'

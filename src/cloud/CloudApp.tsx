@@ -9,7 +9,10 @@
  * Cloud-Bestand gerendert.
  */
 
+import { useState } from 'react'
 import { AuthProvider, useAuth } from '../auth/AuthProvider'
+import { InviteSetupPage } from '../auth/InviteSetupPage'
+import { parseAuthRedirect } from '../auth/authRedirect'
 import { cloudConfig, cloudConfigError } from '../supabase/client'
 import { CloudRecipesApp } from './CloudRecipesApp'
 import { CloudStatus } from './CloudStatus'
@@ -73,6 +76,17 @@ function CloudConfigurationProblem({ message }: { message: string }) {
 }
 
 export function CloudApp() {
+  const [authRedirect] = useState(() =>
+    typeof window === 'undefined'
+      ? null
+      : parseAuthRedirect(window.location.hash) ??
+        parseAuthRedirect(window.location.search),
+  )
+
+  if (authRedirect && cloudConfig && !cloudConfigError) {
+    return <InviteSetupPage redirect={authRedirect} />
+  }
+
   return (
     <div className="app-shell cloud-shell">
       <header className="app-header">

@@ -27,15 +27,21 @@ temporäre Kochfortschritt bleiben bewusst gerätelokal.
 Im lokalen Modus bleiben alle Daten in IndexedDB. Es gibt keine automatische
 Migration lokaler Bestände in die Cloud und keinen Cloud-Reset.
 
+Familienmitglieder werden vom Betreiber per Supabase-Einladung angelegt und
+ausdrücklich in `household_members` freigeschaltet; siehe
+[`docs/family-access.md`](docs/family-access.md). Eine öffentliche Registrierung
+gibt es nicht.
+
 Details:
 
 - Cloud-Grundlage und RLS: [`supabase/README.md`](supabase/README.md)
+- Familienzugang und Einladungen: [`docs/family-access.md`](docs/family-access.md)
 - URL-Rezeptimport und Pages Function: [`docs/url-import-cloud.md`](docs/url-import-cloud.md)
 - Mela-Import und Cloud-Backup: [`docs/cloud-import-backup.md`](docs/cloud-import-backup.md)
 - Cloudflare-Pages-Deployment: [`docs/cloudflare-pages.md`](docs/cloudflare-pages.md)
 
-Cloudflare Pages ist noch nicht eingerichtet; es wurde nichts veröffentlicht.
-Der letzte vorbereitete Stand liegt auf `feat/cloud`.
+Cloudflare Pages ist eingerichtet; die Produktion läuft unter
+<https://kuechenrunde.pages.dev>.
 
 ## Funktionen
 

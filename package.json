@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "supabase": "supabase",
-    "typecheck:worker": "tsc -p functions/tsconfig.json --noEmit"
+    "typecheck:worker": "tsc -p functions/tsconfig.json --noEmit",
+    "invite-member": "node scripts/invite-family-member.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

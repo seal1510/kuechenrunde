@@ -25,17 +25,30 @@ und alle Seiten arbeiten weiterhin ausschließlich lokal mit Dexie.
    Keine manuellen SQL-Skripte parallel im Dashboard einspielen; sonst
    divergiert die Migrationshistorie.
 
-4. In **Authentication → Users** pro Familienmitglied ein Konto mit
-   E-Mail + Initialpasswort anlegen und „Auto Confirm User“ setzen.
-   Öffentliche Registrierung bleibt deaktiviert.
-5. Mitgliedschaft eintragen (nur über den Betreiber, nie aus der App):
+4. Familienmitglied über die offizielle Supabase-Einladung anlegen. Der
+   Betreiber ist einmalig mit der Supabase CLI angemeldet und führt aus:
+
+   ```bash
+   pnpm invite-member "Name des Mitglieds" mitglied@example.org --yes
+   ```
+
+   Das Skript verwendet `POST /auth/v1/invite` und trägt das Konto anschließend
+   ausdrücklich in `public.household_members` ein. Öffentliche Registrierung
+   bleibt deaktiviert; neue Konten werden nicht automatisch Mitglieder.
+5. Alternativ kann die Einladung im Dashboard unter **Authentication → Users →
+   Invite user** ausgelöst und die Mitgliedschaft anschließend nur über den
+   Betreiber eingetragen werden:
 
    ```sql
    insert into public.household_members (user_id, display_name)
    select id, 'Name des Mitglieds'
    from auth.users
-   where email = 'mitglied@example.org';
+   where email = 'mitglied@example.org'
+   on conflict (user_id) do update set display_name = excluded.display_name;
    ```
+
+   Der empfohlene Weg ist `pnpm invite-member`; Details stehen in
+   [`docs/family-access.md`](../docs/family-access.md).
 
 6. `.env.example` nach `.env` kopieren und `VITE_SUPABASE_URL` sowie
    `VITE_SUPABASE_PUBLISHABLE_KEY` eintragen. Nur der öffentliche

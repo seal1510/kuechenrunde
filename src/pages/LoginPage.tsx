@@ -100,8 +100,9 @@ export function LoginPage({
         </form>
 
         <p className="login-note">
-          Es gibt keine öffentliche Registrierung. Zugänge werden vom Betreiber
-          angelegt; bei Problemen mit dem Passwort hilft der Betreiber.
+          Es gibt keine öffentliche Registrierung. Familienmitglieder werden per
+          E-Mail eingeladen und legen im Einladungslink ihr eigenes Passwort
+          fest. Bei Problemen hilft der Betreiber.
         </p>
       </section>
     </div>

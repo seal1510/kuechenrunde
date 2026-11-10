@@ -46,8 +46,13 @@ function createCloudClient(config: CloudConfig): SupabaseClient {
         persistSession: true,
         autoRefreshToken: true,
         // Hash-Routing: Supabase darf die URL nicht nach Auth-Parametern
-        // durchsuchen. Der Login läuft ausschließlich über das Formular.
+        // durchsuchen. Einladungslinks werden in authRedirect.ts gezielt
+        // geparst; der normale Login läuft über das Formular.
         detectSessionInUrl: false,
+        // Einladungslinks werden auch in einem anderen Browser geöffnet.
+        // Der implizite Flow liefert die Sitzung im URL-Hash; PKCE würde einen
+        // im ausstellenden Browser gespeicherten Code-Verifier benötigen.
+        flowType: 'implicit',
         storageKey: 'kuechenrunde.auth.v1',
       },
       db: { schema: 'public' },
