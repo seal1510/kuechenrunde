@@ -47,7 +47,10 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest,txt}'],
+        // `json` gehört in den Precache: Der Navigation-Fallback beantwortet
+        // sonst auch direkte Aufrufe von /legal/ingredient-catalog.json mit
+        // index.html. txt/webmanifest decken die übrigen verlinkten Dateien ab.
+        globPatterns: ['**/*.{js,css,html,json,svg,png,ico,webmanifest,txt}'],
         navigateFallback: '/index.html',
         cleanupOutdatedCaches: true,
       },

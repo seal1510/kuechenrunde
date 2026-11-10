@@ -363,6 +363,19 @@ code {
   gap: 0.5rem;
 }
 
+/*
+ * iPhone-Notch im Querformat: `viewport-fit=cover` erlaubt Inhalte bis an den
+ * Bildschirmrand. Links und rechts muss deshalb zusätzlich der sichere Bereich
+ * eingehalten werden. Im Hochformat sind beide Insets 0, die Werte bleiben
+ * dort unverändert.
+ */
+.app-header-inner,
+.app-main,
+.app-footer {
+  padding-left: max(clamp(1rem, 2.4vw, 1.5rem), env(safe-area-inset-left));
+  padding-right: max(clamp(1rem, 2.4vw, 1.5rem), env(safe-area-inset-right));
+}
+
 .page {
   display: flex;
   flex-direction: column;

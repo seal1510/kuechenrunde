@@ -74,3 +74,22 @@ die Einladung über **Familie verwalten** der vorgesehene Weg.
   Beitrittsseite verarbeitet einen Bestätigungslink trotzdem, falls die
   Bestätigung später aktiviert wird.
 - Migration: `supabase/migrations/20261110232000_family_invites.sql`.
+
+## Eigene Domain
+
+Ein Wechsel von `kuechenrunde.pages.dev` auf eine eigene Domain braucht keine
+Codeänderung: Einladungs- und Bestätigungslinks werden aus der aktuellen
+Browser-URL gebaut (`buildJoinUrl`), Auth-Parameter werden aus `#…`/`?…`
+gelesen, und der Same-Origin-Schutz der Function vergleicht nur den Host der
+Anfrage. Sitzungen liegen pro Origin im Browser-Speicher, deshalb ist nach dem
+Domainwechsel eine einmalige Anmeldung nötig.
+
+Im gehosteten Supabase-Projekt müssen dafür zusätzlich eingetragen werden:
+
+- Site URL: die neue Domain, z. B. `https://kuechenrunde.app`
+- Erlaubte Redirect-URLs: `https://kuechenrunde.app` und
+  `https://kuechenrunde.app/**` (der bestehende `pages.dev`-Eintrag kann
+  vorerst bleiben).
+- Für den Einladungsweg der CLI `SUPABASE_INVITE_REDIRECT` auf die neue
+  Domain setzen; sonst fällt `scripts/invite-family-member.mjs` auf
+  `https://kuechenrunde.pages.dev/` zurück.
