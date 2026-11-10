@@ -431,8 +431,9 @@ export function JoinPage({ token, authRedirect }: JoinPageProps) {
       </form>
 
       <p className="login-note">
-        Der Einladungslink ist einmalig gültig. Dein Konto erhält erst durch diesen
-        Link Zugang zum Familienhaushalt.
+        Der Einladungslink gilt sieben Tage und kann von mehreren Familienmitgliedern
+        genutzt werden. Dein Konto erhält erst durch diesen Link Zugang zum
+        Familienhaushalt.
       </p>
     </JoinShell>
   )

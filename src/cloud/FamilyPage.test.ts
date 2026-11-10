@@ -6,17 +6,13 @@ const base: HouseholdInvite = {
   id: 'invite-1',
   createdAt: '2026-11-10T10:00:00.000Z',
   expiresAt: '2026-11-17T10:00:00.000Z',
-  redeemedAt: null,
   revokedAt: null,
 }
 
 describe('family invite status', () => {
-  it('distinguishes open, redeemed, revoked and expired links', () => {
+  it('distinguishes active, revoked and expired links without a single-use state', () => {
     const now = Date.parse('2026-11-12T10:00:00.000Z')
-    expect(inviteStatus(base, now)).toBe('open')
-    expect(inviteStatus({ ...base, redeemedAt: '2026-11-11T10:00:00.000Z' }, now)).toBe(
-      'redeemed',
-    )
+    expect(inviteStatus(base, now)).toBe('active')
     expect(inviteStatus({ ...base, revokedAt: '2026-11-11T10:00:00.000Z' }, now)).toBe(
       'revoked',
     )

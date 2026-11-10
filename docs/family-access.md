@@ -10,10 +10,10 @@ Cloudflare-Zugangskontrolle und keine eigene Einladungs- oder Token-Architektur.
    öffnen.
 2. **Einladungslink erstellen** wählen.
 3. Den Link kopieren oder über die native Teilen-Funktion (z. B. WhatsApp)
-   weitergeben. Der Link ist sieben Tage gültig und kann genau einmal
-   eingelöst werden.
-4. Offene Links können in derselben Ansicht widerrufen werden. Eingelöste,
-   abgelaufene und widerrufene Links werden dort angezeigt.
+   weitergeben. Derselbe Link ist sieben Tage gültig und kann von mehreren
+   Familienmitgliedern genutzt werden.
+4. Aktive Links können in derselben Ansicht widerrufen werden. Die Ansicht
+   zeigt **Aktiv**, **Abgelaufen** und **Widerrufen**.
 
 ## Beitritt für das Familienmitglied
 
@@ -31,8 +31,9 @@ Die Sitzung bleibt wie bisher erhalten.
 
 - Neue Konten werden nicht automatisch Haushaltsmitglieder. Der Zugang entsteht
   erst durch die Einlösung eines gültigen Einladungslinks.
-- Ein Link wird serverseitig atomar eingelöst. Zwei gleichzeitige Einlösungen
-  können nicht beide erfolgreich sein.
+- Ein Link wird serverseitig atomar geprüft. Mehrere Familienmitglieder können
+  denselben Link gleichzeitig einlösen; jedes Konto wird genau einmal
+  aufgenommen.
 - In der Datenbank liegt nur der SHA-256-Hash des Tokens. Der Klartext wird
   ausschließlich einmal beim Erstellen an den Administrator ausgeliefert.
 - Erstellen, Auflisten und Widerrufen sind serverseitig auf
@@ -42,8 +43,8 @@ Die Sitzung bleibt wie bisher erhalten.
   `authenticated` gesperrt; die RPCs sind der einzige Weg.
 - Die bestehenden RLS-Regeln für `records`, Bilder, Wochenplan und Einkäufe
   bleiben unverändert. Nichtmitglieder erhalten keinen Zugriff.
-- Ein vorhandenes Konto kann denselben Einladungslink nutzen. Es wird kein
-  zweiter Haushaltseintrag angelegt; der Link wird dabei nicht verbraucht.
+- Ein vorhandenes Konto kann denselben Einladungslink erneut öffnen. Es wird
+  kein zweiter Haushaltseintrag angelegt; der Link bleibt für andere gültig.
 - Die öffentliche Supabase-Registrierung ist aktiviert, damit die
   Selbstregistrierung funktioniert. Ohne gültigen Einladungslink entsteht
   daraus kein Haushaltszugriff.

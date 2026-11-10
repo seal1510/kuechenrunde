@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Die RPCs sind die einzige Schnittstelle. Tokens werden nur beim Erzeugen
- * einmalig zurückgegeben; in der Datenbank liegt ausschließlich ihr Hash.
+ * zurückgegeben; in der Datenbank liegt ausschließlich ihr Hash. Ein Link
+ * bleibt bis Ablauf oder Widerruf für mehrere Familienmitglieder gültig.
  */
 
 import { requireSupabase } from '../supabase/client'
@@ -13,7 +14,6 @@ export interface HouseholdInvite {
   id: string
   createdAt: string
   expiresAt: string
-  redeemedAt: string | null
   revokedAt: string | null
 }
 
@@ -34,7 +34,7 @@ export class NotFamilyAdminError extends Error {
 export class InviteUnavailableError extends Error {
   constructor() {
     super(
-      'Dieser Einladungslink ist abgelaufen, wurde widerrufen oder bereits eingelöst. Bitte den Administrator um einen neuen Link.',
+      'Dieser Einladungslink ist abgelaufen oder wurde widerrufen. Bitte den Administrator um einen neuen Link.',
     )
     this.name = 'InviteUnavailableError'
   }
@@ -50,7 +50,7 @@ function isPermissionError(error: { code?: string; message?: string } | null): b
 function isInviteUnavailable(error: { code?: string; message?: string } | null): boolean {
   return (
     error?.code === 'P0002' ||
-    /invite invalid|expired|revoked|already used/i.test(error?.message ?? '')
+    /invite invalid|expired|revoked/i.test(error?.message ?? '')
   )
 }
 
@@ -73,7 +73,6 @@ export async function listHouseholdInvites(): Promise<HouseholdInvite[]> {
     id: String(row.id ?? ''),
     createdAt: String(row.created_at ?? ''),
     expiresAt: String(row.expires_at ?? ''),
-    redeemedAt: row.redeemed_at ? String(row.redeemed_at) : null,
     revokedAt: row.revoked_at ? String(row.revoked_at) : null,
   }))
 }

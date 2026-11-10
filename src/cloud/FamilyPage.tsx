@@ -19,7 +19,7 @@ import {
 } from '../family/familyInvites'
 import { buildJoinUrl } from '../family/joinLink'
 
-export type InviteStatus = 'open' | 'redeemed' | 'revoked' | 'expired'
+export type InviteStatus = 'active' | 'revoked' | 'expired'
 
 export interface FamilyPageApi {
   isAdmin: () => Promise<boolean>
@@ -36,15 +36,13 @@ const defaultApi: FamilyPageApi = {
 }
 
 export function inviteStatus(invite: HouseholdInvite, now = Date.now()): InviteStatus {
-  if (invite.redeemedAt) return 'redeemed'
   if (invite.revokedAt) return 'revoked'
   if (Date.parse(invite.expiresAt) <= now) return 'expired'
-  return 'open'
+  return 'active'
 }
 
 const statusLabel: Record<InviteStatus, string> = {
-  open: 'Offen',
-  redeemed: 'Eingelöst',
+  active: 'Aktiv',
   revoked: 'Widerrufen',
   expired: 'Abgelaufen',
 }
@@ -122,7 +120,7 @@ export function FamilyPage({ api = defaultApi, baseHref }: FamilyPageProps) {
         expiresAt: createdInvite.expiresAt,
       })
       await reload()
-      setMessage('Einladungslink erstellt. Er ist sieben Tage gültig und einmalig.')
+      setMessage('Einladungslink erstellt. Er ist sieben Tage gültig und kann von mehreren Familienmitgliedern genutzt werden.')
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : 'Die Einladung konnte nicht erstellt werden.',
@@ -241,7 +239,7 @@ export function FamilyPage({ api = defaultApi, baseHref }: FamilyPageProps) {
             <h2>Einladungslink erstellen</h2>
             <p>
               Erstelle einen Link und schicke ihn zum Beispiel per WhatsApp. Der Link
-              gilt sieben Tage und kann genau einmal verwendet werden.
+              gilt sieben Tage und kann von mehreren Familienmitgliedern genutzt werden.
             </p>
             <div className="cloud-actions">
               <button
@@ -306,18 +304,18 @@ export function FamilyPage({ api = defaultApi, baseHref }: FamilyPageProps) {
                         <strong>{statusLabel[status]}</strong>
                         <span className="muted small">
                           Erstellt {formatDate(invite.createdAt)}
-                          {status === 'open'
+                          {status === 'active'
                             ? ` · gültig bis ${formatDate(invite.expiresAt)}`
                             : null}
-                          {status === 'redeemed' && invite.redeemedAt
-                            ? ` · eingelöst ${formatDate(invite.redeemedAt)}`
+                          {status === 'expired'
+                            ? ` · abgelaufen ${formatDate(invite.expiresAt)}`
                             : null}
                           {status === 'revoked' && invite.revokedAt
                             ? ` · widerrufen ${formatDate(invite.revokedAt)}`
                             : null}
                         </span>
                       </div>
-                      {status === 'open' ? (
+                      {status === 'active' ? (
                         <button
                           type="button"
                           className="button quiet"

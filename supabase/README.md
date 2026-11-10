@@ -27,8 +27,9 @@ und alle Seiten arbeiten weiterhin ausschließlich lokal mit Dexie.
 
 4. Familienmitglied einladen. Im Cloud-Modus gibt es dafür **Familie
    verwalten** (`#/family`): Der Administrator erstellt einen sieben Tage
-   gültigen Einladungslink, kopiert ihn oder teilt ihn nativ. Die eingeladene
-   Person registriert sich selbst oder meldet sich an; die Einlösung erfolgt
+   gültigen Einladungslink, kopiert ihn oder teilt ihn nativ. Derselbe Link
+   kann von mehreren Familienmitgliedern genutzt werden. Die eingeladene
+   Person registriert sich selbst oder meldet sich an; die Aufnahme erfolgt
    serverseitig und atomar über `redeem_household_invite()`.
 
    Details und Sicherheitsmodell: [`docs/family-access.md`](../docs/family-access.md).
@@ -81,6 +82,8 @@ Angewendete Migrationen:
   `TRIGGER`; TRUNCATE wird von RLS nicht geprüft.
 - `20261110232000_family_invites.sql` – `is_admin`, gehashte Einladungen und
   die serverseitigen Einlöse-RPCs.
+- `20261110234500_shared_family_invites.sql` – derselbe Link gilt sieben Tage
+  für mehrere Familienmitglieder; Status nur noch Aktiv/Abgelaufen/Widerrufen.
 
 **Live geprüft:**
 
