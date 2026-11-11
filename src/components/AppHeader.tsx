@@ -19,6 +19,8 @@ export interface AppHeaderProps {
    * previous non-link brand (`null`).
    */
   brandHref?: string | null
+  /** The short cloud subtitle stays visible on phones; long local subtitles do not. */
+  showMobileSubtitle?: boolean
 }
 
 export function AppHeader({
@@ -26,6 +28,7 @@ export function AppHeader({
   badge,
   children,
   brandHref = '#/',
+  showMobileSubtitle = false,
 }: AppHeaderProps) {
   const brand = (
     <>
@@ -39,7 +42,11 @@ export function AppHeader({
       />
       <span>
         <strong>Küchenrunde</strong>
-        <small className="brand-subtitle">{subtitle}</small>
+        <small
+          className={`brand-subtitle${showMobileSubtitle ? ' brand-subtitle--mobile' : ''}`}
+        >
+          {subtitle}
+        </small>
       </span>
     </>
   )

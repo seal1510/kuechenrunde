@@ -61,6 +61,8 @@ describe('mobile header menu', () => {
     expect(html).toContain('class="app-header"')
     expect(html).toContain('src="/icons/icon-192.png"')
     expect(html).toContain('class="main-nav"')
+    expect(html).toContain('brand-subtitle')
+    expect(html).not.toContain('brand-subtitle--mobile')
     expect(html).toContain('class="mobile-menu-button"')
     expect(html).toContain('aria-label="Mehr-Menü öffnen"')
     expect(html).toContain('aria-haspopup="dialog"')
@@ -69,6 +71,17 @@ describe('mobile header menu', () => {
     expect(html.match(/<circle/g)).toHaveLength(3)
     expect(html).not.toContain('role="dialog"')
     expect(html).not.toContain('URL-Rezeptimport')
+  })
+
+  it('keeps the short cloud subtitle explicitly visible on phones', () => {
+    const html = renderToStaticMarkup(
+      <MobileMoreMenuProvider>
+        <AppHeader subtitle="Familien-Cloud" showMobileSubtitle />
+      </MobileMoreMenuProvider>,
+    )
+
+    expect(html).toContain('brand-subtitle brand-subtitle--mobile')
+    expect(html).toContain('Familien-Cloud')
   })
 
   it('hides the trigger while the cloud account is not ready', () => {

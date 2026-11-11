@@ -11,6 +11,11 @@ const root = new URL('../', import.meta.url)
 const html = readFileSync(new URL('index.html', root), 'utf8')
 const viteConfig = readFileSync(new URL('vite.config.ts', root), 'utf8')
 const header = readFileSync(new URL('src/components/AppHeader.tsx', root), 'utf8')
+const cloudApp = readFileSync(new URL('src/cloud/CloudApp.tsx', root), 'utf8')
+const cloudRecipes = readFileSync(
+  new URL('src/cloud/CloudRecipesApp.tsx', root),
+  'utf8',
+)
 const css = readFileSync(new URL('src/styles.css', root), 'utf8')
 
 interface PngInfo {
@@ -44,6 +49,7 @@ describe('Küchenrunde logo and PWA icon references', () => {
     expect(header).toContain('width={34}')
     expect(header).toContain('height={34}')
     expect(header).not.toMatch(/>\s*kr\s*</)
+    expect(cloudApp).toContain('showMobileSubtitle')
   })
 
   it('wires the Apple touch icon and browser favicon in the document head', () => {
@@ -114,6 +120,56 @@ describe('phone shell styles', () => {
     expect(css).toContain('-webkit-backdrop-filter: none;')
     expect(css).toMatch(
       /\.app-header\s*\{[^}]*background: var\(--bg\);[^}]*backdrop-filter: none;/,
+    )
+  })
+
+  it('takes the phone brand out of the grayscale/legibility rendering path', () => {
+    expect(css).toMatch(
+      /\.brand\s*\{[^}]*text-rendering: auto;[^}]*\}/,
+    )
+    expect(css).toMatch(
+      /\.brand\s*\{[^}]*webkit-font-smoothing: auto;[^}]*\}/,
+    )
+    expect(css).toMatch(/\.brand\s*\{[^}]*text-shadow: none;[^}]*\}/)
+    expect(css).toMatch(
+      /\.brand strong\s*\{[^}]*font-size: 1\.0625rem;[^}]*letter-spacing: 0;/,
+    )
+  })
+
+  it('shows the short cloud subtitle with integer, crisp type metrics', () => {
+    expect(css).toMatch(
+      /\.brand small\.brand-subtitle\s*\{\s*display: none;/,
+    )
+    expect(css).toMatch(
+      /\.brand small\.brand-subtitle--mobile\s*\{[^}]*display: block;[^}]*font-size: 0\.625rem;[^}]*letter-spacing: 1px;[^}]*text-transform: uppercase;/,
+    )
+  })
+
+  it('keeps the cloud phone bar outside the padded main content', () => {
+    expect(cloudRecipes).toContain('<main className="app-main">')
+    expect(cloudRecipes).toMatch(
+      /<\/main>\s*\{route\.name === 'cook' \? null : <MobileNavigation route=\{route\} \/>\}/,
+    )
+    expect(cloudApp).toContain('contained={!ready || !store}')
+  })
+
+  it('keeps the bottom bar in the layout flow instead of fixing it to the viewport', () => {
+    expect(css).toMatch(
+      /\.mobile-nav\s*\{[^}]*position: sticky;[^}]*bottom: 0;/,
+    )
+    expect(css).not.toMatch(/\.mobile-nav\s*\{[^}]*position: fixed;/)
+    expect(css).toMatch(/\.mobile-nav\s*\{[^}]*background: var\(--surface\);/)
+    expect(css).not.toMatch(
+      /\.mobile-nav\s*\{[^}]*backdrop-filter:/,
+    )
+    expect(css).not.toMatch(
+      /\.mobile-nav\s*\{[^}]*transform:/,
+    )
+    expect(css).toMatch(
+      /html\.kr-keyboard-open \.mobile-nav\s*\{\s*display: none;/,
+    )
+    expect(css).toMatch(
+      /\.mobile-nav\s*\{[^}]*env\(safe-area-inset-bottom\)/,
     )
   })
 })

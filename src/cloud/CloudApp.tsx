@@ -21,15 +21,23 @@ import { MobileMoreMenuProvider } from '../navigation/MobileMoreMenu'
 import { CloudRecipesApp } from './CloudRecipesApp'
 import { CloudStatus } from './CloudStatus'
 
-function CloudFrame({ children }: { children: ReactNode }) {
+function CloudFrame({
+  children,
+  contained = true,
+}: {
+  children: ReactNode
+  /** The ready cloud app renders its own main and keeps the phone nav outside it. */
+  contained?: boolean
+}) {
   return (
     <div className="app-shell cloud-shell">
       <AppHeader
         subtitle="Familien-Cloud"
         badge={<span className="cloud-mode-badge">Cloud-Modus</span>}
         brandHref={null}
+        showMobileSubtitle
       />
-      <main className="app-main">{children}</main>
+      {contained ? <main className="app-main">{children}</main> : children}
       <footer className="app-footer">
         <span>Familien-Cloud · Supabase</span>
         <span>
@@ -104,7 +112,7 @@ function CloudAuthenticatedApp() {
       email={ready ? state.email : undefined}
       onLogout={ready ? logout : undefined}
     >
-      <CloudFrame>{content}</CloudFrame>
+      <CloudFrame contained={!ready || !store}>{content}</CloudFrame>
     </MobileMoreMenuProvider>
   )
 }

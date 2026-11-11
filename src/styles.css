@@ -10989,6 +10989,15 @@ body.mobile-sheet-open {
   .brand {
     gap: 0.55rem;
     min-width: 0;
+    /*
+     * The body uses grayscale antialiasing and legibility rendering globally.
+     * On the display serif and the small uppercase subtitle that reads as a
+     * soft, washed-out edge. The header uses the normal rendering path again.
+     */
+    -webkit-font-smoothing: auto;
+    -moz-osx-font-smoothing: auto;
+    text-rendering: auto;
+    text-shadow: none;
   }
 
   .brand-mark {
@@ -11034,11 +11043,33 @@ body.mobile-sheet-open {
   }
 
   .brand strong {
-    font-size: 1.04rem;
+    /* Integer CSS pixels avoid fractional glyph rasterisation on iOS. */
+    font-size: 1.0625rem;
     line-height: 1.1;
+    letter-spacing: 0;
   }
 
-  .brand-subtitle,
+  /*
+   * Long local subtitles stay out of the compact phone header. The short cloud
+   * subtitle is explicitly re-enabled below and gets a slightly larger,
+   * tighter and darker treatment so it renders crisply at phone size.
+   */
+  .brand small.brand-subtitle {
+    display: none;
+  }
+
+  .brand small.brand-subtitle--mobile {
+    display: block;
+    margin-top: 0.06rem;
+    color: var(--muted);
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    line-height: 1.15;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
   .cloud-mode-badge,
   .main-nav,
   .cloud-nav,
@@ -11055,13 +11086,21 @@ body.mobile-sheet-open {
     gap: 1rem;
   }
 
-  /* Permanent three-destination bar. */
+  /*
+   * Permanent three-destination bar. It is a normal flex item that sticks to
+   * the bottom of the document scrollport. This is deliberately not
+   * position: fixed: iOS 26 can paint fixed bottom elements below the visible
+   * viewport after scrolling or keyboard changes. Sticky stays in the layout
+   * flow, so its labels keep their full height and safe-area padding.
+   *
+   * The bar is opaque and has no backdrop-filter or transform/opacity
+   * transition; both would promote it to a separate compositing layer.
+   */
   .mobile-nav {
-    position: fixed;
-    right: 0;
+    position: sticky;
     bottom: 0;
-    left: 0;
     z-index: 40;
+    flex: 0 0 auto;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.1rem;
@@ -11069,13 +11108,8 @@ body.mobile-sheet-open {
       calc(0.3rem + env(safe-area-inset-bottom))
       max(0.4rem, env(safe-area-inset-right));
     border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
-    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    background: var(--surface);
     box-shadow: 0 -14px 34px -26px rgba(0, 0, 0, 0.55);
-    backdrop-filter: saturate(1.25) blur(18px);
-    -webkit-backdrop-filter: saturate(1.25) blur(18px);
-    transition:
-      transform var(--transition),
-      opacity var(--transition);
   }
 
   .mobile-nav-item {
@@ -11137,9 +11171,7 @@ body.mobile-sheet-open {
 
   /* Keyboard-aware hide: form controls stay above the keyboard. */
   html.kr-keyboard-open .mobile-nav {
-    transform: translateY(calc(100% + 1rem));
-    opacity: 0;
-    pointer-events: none;
+    display: none;
   }
 
   /*

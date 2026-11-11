@@ -165,82 +165,84 @@ export function CloudRecipesApp({
       <ShoppingBackendProvider value={shoppingBackend}>
         <CookBackendProvider value={cookBackend}>
           <NavigationGuardProvider applyRoute={applyRoute}>
-            <nav className="cloud-nav" aria-label="Cloud-Navigation">
-              <a
-                href="#/"
-                className={isLibraryArea(route) ? 'active' : ''}
-                aria-current={isLibraryArea(route) ? 'page' : undefined}
-              >
-                Rezeptbibliothek
-              </a>
-              <a
-                href="#/plan"
-                className={route.name === 'plan' ? 'active' : ''}
-                aria-current={route.name === 'plan' ? 'page' : undefined}
-              >
-                Wochenplan
-              </a>
-              <a
-                href="#/shopping"
-                className={route.name === 'shopping' ? 'active' : ''}
-                aria-current={route.name === 'shopping' ? 'page' : undefined}
-              >
-                Einkaufsliste
-              </a>
-              <a
-                href="#/import"
-                className={route.name === 'import' || route.name === 'import-url' ? 'active' : ''}
-                aria-current={
-                  route.name === 'import' || route.name === 'import-url' ? 'page' : undefined
-                }
-              >
-                Import
-              </a>
-              <a
-                href="#/backup"
-                className={route.name === 'backup' ? 'active' : ''}
-                aria-current={route.name === 'backup' ? 'page' : undefined}
-              >
-                Backup
-              </a>
-              <a
-                href="#/family"
-                className={route.name === 'family' ? 'active' : ''}
-                aria-current={route.name === 'family' ? 'page' : undefined}
-              >
-                Familie
-              </a>
-              <a
-                href="#/about"
-                className={route.name === 'about' ? 'active' : ''}
-                aria-current={route.name === 'about' ? 'page' : undefined}
-              >
-                Über
-              </a>
-              <span className="cloud-user">{email}</span>
-              <button
-                type="button"
-                className="button quiet"
-                onClick={handleLogout}
-              >
-                Abmelden
-              </button>
-            </nav>
-            {notice ? (
-              <div className="notice cloud-image-notice" role="status">
-                <p>{notice}</p>
-                <div className="notice-actions">
-                  <button
-                    type="button"
-                    className="button quiet"
-                    onClick={clearCloudImageNotice}
-                  >
-                    Hinweis schließen
-                  </button>
+            <main className="app-main">
+              <nav className="cloud-nav" aria-label="Cloud-Navigation">
+                <a
+                  href="#/"
+                  className={isLibraryArea(route) ? 'active' : ''}
+                  aria-current={isLibraryArea(route) ? 'page' : undefined}
+                >
+                  Rezeptbibliothek
+                </a>
+                <a
+                  href="#/plan"
+                  className={route.name === 'plan' ? 'active' : ''}
+                  aria-current={route.name === 'plan' ? 'page' : undefined}
+                >
+                  Wochenplan
+                </a>
+                <a
+                  href="#/shopping"
+                  className={route.name === 'shopping' ? 'active' : ''}
+                  aria-current={route.name === 'shopping' ? 'page' : undefined}
+                >
+                  Einkaufsliste
+                </a>
+                <a
+                  href="#/import"
+                  className={route.name === 'import' || route.name === 'import-url' ? 'active' : ''}
+                  aria-current={
+                    route.name === 'import' || route.name === 'import-url' ? 'page' : undefined
+                  }
+                >
+                  Import
+                </a>
+                <a
+                  href="#/backup"
+                  className={route.name === 'backup' ? 'active' : ''}
+                  aria-current={route.name === 'backup' ? 'page' : undefined}
+                >
+                  Backup
+                </a>
+                <a
+                  href="#/family"
+                  className={route.name === 'family' ? 'active' : ''}
+                  aria-current={route.name === 'family' ? 'page' : undefined}
+                >
+                  Familie
+                </a>
+                <a
+                  href="#/about"
+                  className={route.name === 'about' ? 'active' : ''}
+                  aria-current={route.name === 'about' ? 'page' : undefined}
+                >
+                  Über
+                </a>
+                <span className="cloud-user">{email}</span>
+                <button
+                  type="button"
+                  className="button quiet"
+                  onClick={handleLogout}
+                >
+                  Abmelden
+                </button>
+              </nav>
+              {notice ? (
+                <div className="notice cloud-image-notice" role="status">
+                  <p>{notice}</p>
+                  <div className="notice-actions">
+                    <button
+                      type="button"
+                      className="button quiet"
+                      onClick={clearCloudImageNotice}
+                    >
+                      Hinweis schließen
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ) : null}
-            <CloudImageUrlProvider cache={imageUrls}>{content}</CloudImageUrlProvider>
+              ) : null}
+              <CloudImageUrlProvider cache={imageUrls}>{content}</CloudImageUrlProvider>
+            </main>
             {route.name === 'cook' ? null : <MobileNavigation route={route} />}
           </NavigationGuardProvider>
         </CookBackendProvider>
