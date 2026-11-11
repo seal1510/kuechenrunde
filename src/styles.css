@@ -11000,6 +11000,14 @@ body.mobile-sheet-open {
     text-shadow: none;
   }
 
+  .brand strong,
+  .brand small {
+    -webkit-font-smoothing: auto;
+    -moz-osx-font-smoothing: auto;
+    text-rendering: auto;
+    text-shadow: none;
+  }
+
   .brand-mark {
     width: 1.95rem;
     height: 1.95rem;

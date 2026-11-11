@@ -132,6 +132,9 @@ describe('phone shell styles', () => {
     )
     expect(css).toMatch(/\.brand\s*\{[^}]*text-shadow: none;[^}]*\}/)
     expect(css).toMatch(
+      /\.brand strong,\s*\.brand small\s*\{[^}]*text-rendering: auto;[^}]*text-shadow: none;/,
+    )
+    expect(css).toMatch(
       /\.brand strong\s*\{[^}]*font-size: 1\.0625rem;[^}]*letter-spacing: 0;/,
     )
   })
