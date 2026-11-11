@@ -115,12 +115,27 @@ describe('phone shell styles', () => {
     )
   })
 
-  it('removes the composited backdrop layer from the phone header', () => {
+  it('paints an opaque sticky top strip instead of the iOS status-bar blur', () => {
     expect(css).toContain('backdrop-filter: none;')
     expect(css).toContain('-webkit-backdrop-filter: none;')
     expect(css).toMatch(
-      /\.app-header\s*\{[^}]*background: var\(--bg\);[^}]*backdrop-filter: none;/,
+      /\.app-header\s*\{[^}]*position: sticky;[^}]*top: 0;[^}]*padding-top: env\(safe-area-inset-top\);[^}]*background: var\(--bg\);[^}]*backdrop-filter: none;[^}]*filter: none;/,
     )
+  })
+
+  it('keeps the phone header free of page-level blur and shadow effects', () => {
+    const mobileHeader = css.match(
+      /\.app-header\s*\{[^}]*background: var\(--bg\);[^}]*\}/,
+    )?.[0]
+    expect(mobileHeader).toBeDefined()
+    expect(mobileHeader).toContain('backdrop-filter: none;')
+    expect(mobileHeader).toContain('-webkit-backdrop-filter: none;')
+    expect(mobileHeader).toContain('filter: none;')
+    expect(mobileHeader).toContain('box-shadow: none;')
+    expect(mobileHeader).not.toContain('backdrop-filter: blur')
+    expect(mobileHeader).not.toContain('filter: blur')
+    expect(mobileHeader).not.toContain('transform:')
+    expect(mobileHeader).not.toContain('text-shadow:')
   })
 
   it('takes the phone brand out of the grayscale/legibility rendering path', () => {
@@ -156,11 +171,11 @@ describe('phone shell styles', () => {
     expect(cloudApp).toContain('contained={!ready || !store}')
   })
 
-  it('keeps the bottom bar in the layout flow instead of fixing it to the viewport', () => {
+  it('fixes the bottom bar to the viewport instead of leaving it at the document end', () => {
     expect(css).toMatch(
-      /\.mobile-nav\s*\{[^}]*position: sticky;[^}]*bottom: 0;/,
+      /\.mobile-nav\s*\{[^}]*position: fixed;[^}]*right: 0;[^}]*bottom: 0;[^}]*left: 0;/,
     )
-    expect(css).not.toMatch(/\.mobile-nav\s*\{[^}]*position: fixed;/)
+    expect(css).not.toMatch(/\.mobile-nav\s*\{[^}]*position: sticky;/)
     expect(css).toMatch(/\.mobile-nav\s*\{[^}]*background: var\(--surface\);/)
     expect(css).not.toMatch(
       /\.mobile-nav\s*\{[^}]*backdrop-filter:/,
@@ -168,11 +183,20 @@ describe('phone shell styles', () => {
     expect(css).not.toMatch(
       /\.mobile-nav\s*\{[^}]*transform:/,
     )
+    expect(css).not.toMatch(
+      /\.mobile-nav\s*\{[^}]*transition:/,
+    )
     expect(css).toMatch(
       /html\.kr-keyboard-open \.mobile-nav\s*\{\s*display: none;/,
     )
     expect(css).toMatch(
       /\.mobile-nav\s*\{[^}]*env\(safe-area-inset-bottom\)/,
+    )
+  })
+
+  it('reserves room above the fixed bottom bar so content is not covered', () => {
+    expect(css).toMatch(
+      /\.app-main\s*\{[^}]*padding-bottom: calc\(var\(--mobile-nav-total\) \+ 1\.25rem\);/,
     )
   })
 })

@@ -10962,21 +10962,29 @@ body.mobile-sheet-open {
   }
 
   /*
-   * The header scrolls away with the content and keeps only the small app
-   * mark and the product name; the cloud badge and the long subtitle are
-   * intentionally not rendered on the phone.
+   * The phone header keeps only the small app mark and the product name; the
+   * cloud badge and the long subtitle are intentionally not rendered.
    *
-   * Keeping a backdrop-filter here only creates a composited layer that iOS
-   * Safari rasterises at the wrong scale: the logo and wordmark look soft
-   * while the rest of the page stays crisp. An opaque background keeps the
-   * palette and removes that layer without adding header height.
+   * iOS 26/27 home-screen web apps composite a system blur over the top of
+   * the page. It is not caused by `backdrop-filter` on this header, and
+   * `backdrop-filter: none` cannot remove it. A sticky header whose opaque
+   * background extends into the safe area makes iOS paint a solid top strip
+   * instead of that live blur, so the wordmark stays crisp while scrolling and
+   * after navigation.
+   *
+   * The mobile header must not add a compositing effect of its own: no
+   * backdrop filter, filter, transform, animation or text shadow.
    */
   .app-header {
-    position: static;
+    position: sticky;
+    top: 0;
+    z-index: 20;
     padding-top: env(safe-area-inset-top);
     background: var(--bg);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    filter: none;
+    box-shadow: none;
   }
 
   .app-header-inner {
@@ -10990,9 +10998,9 @@ body.mobile-sheet-open {
     gap: 0.55rem;
     min-width: 0;
     /*
-     * The body uses grayscale antialiasing and legibility rendering globally.
-     * On the display serif and the small uppercase subtitle that reads as a
-     * soft, washed-out edge. The header uses the normal rendering path again.
+     * Remove every inherited page-level text-rendering effect from the brand.
+     * This is a defensive reset, not the cause of the iOS status-bar blur:
+     * the body opts into grayscale smoothing and legible rendering globally.
      */
     -webkit-font-smoothing: auto;
     -moz-osx-font-smoothing: auto;
@@ -11095,20 +11103,21 @@ body.mobile-sheet-open {
   }
 
   /*
-   * Permanent three-destination bar. It is a normal flex item that sticks to
-   * the bottom of the document scrollport. This is deliberately not
-   * position: fixed: iOS 26 can paint fixed bottom elements below the visible
-   * viewport after scrolling or keyboard changes. Sticky stays in the layout
-   * flow, so its labels keep their full height and safe-area padding.
+   * Permanent three-destination bar, fixed to the viewport bottom.
    *
-   * The bar is opaque and has no backdrop-filter or transform/opacity
-   * transition; both would promote it to a separate compositing layer.
+   * `position: fixed` is required here: a sticky last flex item only pins once
+   * its flow position reaches the scrollport, so on a long page it stays at
+   * the document end and its labels get clipped while scrolling. The bar is a
+   * direct child of the app shell, outside every scroll container, opaque, and
+   * has no backdrop-filter or transform/opacity transition, so iOS neither
+   * composites nor shifts it.
    */
   .mobile-nav {
-    position: sticky;
+    position: fixed;
+    right: 0;
     bottom: 0;
+    left: 0;
     z-index: 40;
-    flex: 0 0 auto;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.1rem;
