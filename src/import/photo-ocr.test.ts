@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   OcrFormatError,
   applyOcrConsistencyChecks,
+  buildOcrAssemblyPayload,
   extractJsonObject,
+  isPlausibleOcrAssemblySteps,
+  mergePhotoOcrUsage,
   splitQuantityAndUnit,
+  validateOcrAssemblySteps,
   validateOcrPageReports,
   validateOcrRecipe,
   type OcrRecipe,
@@ -81,6 +85,164 @@ describe('validateOcrRecipe', () => {
     expect(() => validateOcrRecipe([])).toThrow(OcrFormatError)
     expect(() => validateOcrRecipe(minimalRecipe({ title: 42 }))).toThrow(OcrFormatError)
     expect(() => validateOcrRecipe(minimalRecipe({ ingredients: 'Mehl' }))).toThrow(OcrFormatError)
+  })
+})
+
+describe('buildOcrAssemblyPayload', () => {
+  it('liefert nummerierbare Transkriptionszeilen und die validierten Zutaten', () => {
+    const recipe = validateOcrRecipe(
+      minimalRecipe({
+        ingredients: [
+          { group: 'Teig', quantity: '250', unit: 'g', name: 'Mehl', purchaseNote: 'Type 550' },
+        ],
+      }),
+    )
+    const payload = buildOcrAssemblyPayload(recipe, '  Titel  \n\n1 EL Öl\r\nAlles mischen.\n')
+    expect(payload.transcriptionLines).toEqual(['Titel', '1 EL Öl', 'Alles mischen.'])
+    expect(payload.ingredients).toEqual([
+      {
+        group: 'Teig',
+        quantity: '250',
+        unit: 'g',
+        name: 'Mehl',
+        purchaseNote: 'Type 550',
+        preparationNote: '',
+      },
+    ])
+  })
+
+  it('begrenzt eine überlange Transkription, ohne undefined weiterzureichen', () => {
+    expect(buildOcrAssemblyPayload(validateOcrRecipe(minimalRecipe()), '')).toEqual({
+      transcriptionLines: [],
+      ingredients: [
+        {
+          group: '',
+          quantity: '250',
+          unit: 'g',
+          name: 'Mehl',
+          purchaseNote: '',
+          preparationNote: '',
+        },
+      ],
+    })
+  })
+})
+
+describe('validateOcrAssemblySteps', () => {
+  it('akzeptiert zusätzliche Modellfelder und verwirft sie', () => {
+    const steps = validateOcrAssemblySteps({
+      usageCheck: [{ ingredient: 'Mehl', step: 1 }],
+      steps: [
+        { text: '  Mehl und Wasser verrühren.  ', uncertain: false, uncertainty: '', sourceLines: [2, 3] },
+      ],
+    })
+    expect(steps).toEqual([
+      { text: 'Mehl und Wasser verrühren.', uncertain: false, uncertainty: '' },
+    ])
+    expect(steps[0]).not.toHaveProperty('sourceLines')
+  })
+
+  it('sortiert Schritte anhand der Quellzeilen in die Originalreihenfolge', () => {
+    const steps = validateOcrAssemblySteps({
+      steps: [
+        { text: 'Zweiter Schritt.', sourceLines: [5] },
+        { text: 'Erster Schritt.', sourceLines: [2] },
+        { text: 'Dritter Schritt.', sourceLines: [7] },
+      ],
+    })
+    expect(steps.map((step) => step.text)).toEqual([
+      'Erster Schritt.',
+      'Zweiter Schritt.',
+      'Dritter Schritt.',
+    ])
+  })
+
+  it('lässt die Modellreihenfolge stehen, wenn Quellzeilen fehlen', () => {
+    const steps = validateOcrAssemblySteps({
+      steps: [{ text: 'Erst.' }, { text: 'Dann.' }],
+    })
+    expect(steps.map((step) => step.text)).toEqual(['Erst.', 'Dann.'])
+  })
+
+  it('lehnt fehlende, leere oder falsche Schritte ab', () => {
+    expect(() => validateOcrAssemblySteps(null)).toThrow(OcrFormatError)
+    expect(() => validateOcrAssemblySteps({ steps: 'keine Liste' })).toThrow(OcrFormatError)
+    expect(() => validateOcrAssemblySteps({ steps: [] })).toThrow(OcrFormatError)
+    expect(() => validateOcrAssemblySteps({ steps: [{ text: '   ' }] })).toThrow(OcrFormatError)
+  })
+})
+
+describe('isPlausibleOcrAssemblySteps', () => {
+  const recipe = (): OcrRecipe =>
+    validateOcrRecipe(
+      minimalRecipe({
+        ingredients: [
+          { quantity: '250', unit: 'g', name: 'Mehl' },
+          { quantity: '2', unit: '', name: 'Eier' },
+          { quantity: '100', unit: 'ml', name: 'Milch' },
+          { quantity: '1', unit: 'TL', name: 'Salz' },
+        ],
+        steps: [
+          { text: 'Mehl, Eier, Milch und Salz verrühren.' },
+          { text: 'Teig ruhen lassen.' },
+          { text: 'Backen.' },
+          { text: 'Abkühlen lassen.' },
+        ],
+      }),
+    )
+  const step = (text: string): { text: string; uncertain: boolean; uncertainty: string } => ({
+    text,
+    uncertain: false,
+    uncertainty: '',
+  })
+
+  it('akzeptiert eine vollständige, plausible Schrittliste', () => {
+    expect(
+      isPlausibleOcrAssemblySteps(
+        [
+          step('Mehl, Eier, Milch und Salz zu einem Teig verrühren.'),
+          step('Den Teig ruhen lassen und anschließend backen.'),
+          step('Den Kuchen abkühlen lassen.'),
+        ],
+        recipe(),
+      ),
+    ).toBe(true)
+  })
+
+  it('verwirft einzelne oder inhaltsleere Fehlantworten', () => {
+    expect(isPlausibleOcrAssemblySteps([step('Alles anrichten.')], recipe())).toBe(false)
+    expect(isPlausibleOcrAssemblySteps([], recipe())).toBe(false)
+    expect(
+      isPlausibleOcrAssemblySteps([step('Mehl mit Milch servieren.')], recipe()),
+    ).toBe(false)
+  })
+
+  it('verwirft wiederholte oder ausufernde Listen', () => {
+    expect(
+      isPlausibleOcrAssemblySteps(
+        [step('Den Teig verrühren und backen.'), step('Den Teig verrühren und backen.')],
+        recipe(),
+      ),
+    ).toBe(false)
+    const many = Array.from({ length: 14 }, (_, index) => step(`Schritt Nummer ${index} ausführen.`))
+    expect(isPlausibleOcrAssemblySteps(many, recipe())).toBe(false)
+  })
+})
+
+describe('mergePhotoOcrUsage', () => {
+  it('summiert vorhandene Tokenzahlen und lässt fehlende null', () => {
+    expect(
+      mergePhotoOcrUsage(
+        { promptTokens: 100, completionTokens: 20 },
+        { promptTokens: 50, completionTokens: null },
+      ),
+    ).toEqual({ promptTokens: 150, completionTokens: 20 })
+    expect(
+      mergePhotoOcrUsage(
+        { promptTokens: null, completionTokens: null },
+        { promptTokens: null, completionTokens: null },
+      ),
+    ).toEqual({ promptTokens: null, completionTokens: null })
   })
 })
 

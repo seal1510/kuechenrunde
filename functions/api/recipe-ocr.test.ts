@@ -8,9 +8,14 @@ import {
   type RecipeOcrDependencies,
 } from './recipe-ocr'
 import { HttpError } from '../lib/http'
-import { PHOTO_AI_TRUNCATED_MESSAGE, type AiBinding } from '../lib/photo-ai'
+import {
+  PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE,
+  PHOTO_AI_TRUNCATED_MESSAGE,
+  type AiBinding,
+} from '../lib/photo-ai'
 import type { AuthorizedMember } from '../lib/supabase-auth'
 import {
+  OCR_ASSEMBLY_SYSTEM_PROMPT,
   PHOTO_OCR_CONTRACT_VERSION,
   PHOTO_OCR_ERROR_MESSAGES,
   PHOTO_OCR_MODEL,
@@ -349,6 +354,145 @@ describe('Pages Function /api/recipe-ocr', () => {
     expect(payload.ok).toBe(false)
     expect(payload.code).toBe('invalid-ai-response')
     expect(payload.error).toBe(PHOTO_AI_TRUNCATED_MESSAGE)
+  })
+
+  it('baut die Schritte in einem zweiten, text-only Aufruf neu und summiert die Nutzung', async () => {
+    const recipeWithTranscription = {
+      ...recipeJson,
+      transcription: 'Titel\n250 g Mehl\nAlles verrühren.',
+    }
+    const recognized = {
+      response: 'Hier ist das Rezept:\n```json\n' + JSON.stringify(recipeWithTranscription) + '\n```',
+      usage: { prompt_tokens: 1234, completion_tokens: 567 },
+    }
+    const assembled = {
+      response: JSON.stringify({
+        steps: [
+          {
+            text: 'Mehl und Wasser zu einem glatten Teig verrühren und kurz ruhen lassen.',
+            uncertain: false,
+            uncertainty: '',
+          },
+        ],
+      }),
+      usage: { prompt_tokens: 200, completion_tokens: 30 },
+    }
+    let call = 0
+    const run = vi.fn(async (_model: string, _input: unknown) => {
+      call += 1
+      return call === 1 ? recognized : assembled
+    })
+
+    const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
+    expect(response.status).toBe(200)
+    expect(run).toHaveBeenCalledTimes(2)
+
+    const secondInput = run.mock.calls[1]![1] as {
+      temperature: number
+      max_completion_tokens: number
+      messages: Array<{ role: string; content: unknown }>
+    }
+    expect(secondInput.temperature).toBe(0)
+    expect(secondInput.max_completion_tokens).toBe(2048)
+    expect(secondInput.messages[0]).toEqual({
+      role: 'system',
+      content: OCR_ASSEMBLY_SYSTEM_PROMPT,
+    })
+    expect(typeof secondInput.messages[1]!.content).toBe('string')
+    expect(secondInput.messages[1]!.content as string).toContain('transcriptionLines')
+
+    const payload = (await response.json()) as {
+      recipe: { steps: Array<Record<string, unknown>> }
+      usage: Record<string, unknown>
+    }
+    expect(payload.recipe.steps).toEqual([
+      {
+        text: 'Mehl und Wasser zu einem glatten Teig verrühren und kurz ruhen lassen.',
+        uncertain: false,
+        uncertainty: '',
+      },
+    ])
+    expect(payload.usage).toEqual({ promptTokens: 1434, completionTokens: 597 })
+  })
+
+  it('behält die erkannten Schritte und warnt, wenn die Aufbereitung fehlschlägt', async () => {
+    const recipeWithTranscription = {
+      ...recipeJson,
+      transcription: 'Titel\n250 g Mehl\nAlles verrühren.',
+    }
+    const recognized = {
+      response: JSON.stringify(recipeWithTranscription),
+      usage: { prompt_tokens: 1000, completion_tokens: 500 },
+    }
+    let call = 0
+    const run = vi.fn(async (_model: string, _input: unknown) => {
+      call += 1
+      if (call === 1) return recognized
+      throw aiError(3036)
+    })
+
+    const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
+    expect(response.status).toBe(200)
+    expect(run).toHaveBeenCalledTimes(2)
+    const payload = (await response.json()) as {
+      recipe: { steps: Array<Record<string, unknown>>; warnings: string[] }
+      usage: Record<string, unknown>
+    }
+    expect(payload.recipe.steps).toEqual(recipeJson.steps)
+    expect(payload.recipe.warnings).toContain(PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE)
+    expect(payload.usage).toEqual({ promptTokens: 1000, completionTokens: 500 })
+  })
+
+  it('verwirft eine unplausible Aufbereitung und behält die erkannten Schritte', async () => {
+    const recipeWithTranscription = {
+      ...recipeJson,
+      transcription: 'Titel\n250 g Mehl\nAlles verrühren.',
+    }
+    let call = 0
+    const run = vi.fn(async (_model: string, _input: unknown) => {
+      call += 1
+      if (call === 1) {
+        return {
+          response: JSON.stringify(recipeWithTranscription),
+          usage: { prompt_tokens: 1000, completion_tokens: 500 },
+        }
+      }
+      return {
+        response: JSON.stringify({
+          steps: [{ text: 'Alles anrichten.', uncertain: false, uncertainty: '' }],
+        }),
+        usage: { prompt_tokens: 100, completion_tokens: 10 },
+      }
+    })
+    const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
+    expect(response.status).toBe(200)
+    const payload = (await response.json()) as {
+      recipe: { steps: Array<Record<string, unknown>>; warnings: string[] }
+      usage: Record<string, unknown>
+    }
+    expect(payload.recipe.steps).toEqual(recipeJson.steps)
+    expect(payload.recipe.warnings).toContain(PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE)
+    expect(payload.usage).toEqual({ promptTokens: 1100, completionTokens: 510 })
+  })
+
+  it('fällt bei unbrauchbarer Aufbereitungsantwort auf die erkannten Schritte zurück', async () => {
+    const recipeWithTranscription = {
+      ...recipeJson,
+      transcription: 'Titel\n250 g Mehl\nAlles verrühren.',
+    }
+    let call = 0
+    const run = vi.fn(async (_model: string, _input: unknown) => {
+      call += 1
+      if (call === 1) return { response: JSON.stringify(recipeWithTranscription) }
+      return { response: 'kein json' }
+    })
+    const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
+    expect(response.status).toBe(200)
+    const payload = (await response.json()) as {
+      recipe: { steps: Array<Record<string, unknown>>; warnings: string[] }
+    }
+    expect(payload.recipe.steps).toEqual(recipeJson.steps)
+    expect(payload.recipe.warnings).toContain(PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE)
   })
 
   it('accepts recognized:false as a successful result and fills the page report', async () => {

@@ -197,8 +197,11 @@ describe.skipIf(!LIVE_RUN_CONFIGURED)(
         }
         expect(body.ok).toBe(true)
         expect(body.contractVersion).toBe(PHOTO_OCR_CONTRACT_VERSION)
-        expect(aiCalls).toHaveLength(1)
-        expect(body.usage?.promptTokens ?? 0).toBeGreaterThan(0)
+        // Zwei Aufrufe: Erkennung (mit Bild) und Aufbereitung (text-only).
+        expect(aiCalls).toHaveLength(2)
+        expect(aiCalls[0]!.promptTokens ?? 0).toBeGreaterThan(0)
+        expect(aiCalls[1]!.promptTokens ?? 0).toBeGreaterThan(0)
+        expect(body.usage?.promptTokens ?? 0).toBeGreaterThan(aiCalls[0]!.promptTokens ?? 0)
 
         const recipe = validateOcrRecipe(body.recipe)
         const pages = validateOcrPageReports(body.pages, 1)
@@ -210,11 +213,14 @@ describe.skipIf(!LIVE_RUN_CONFIGURED)(
           liveCase.expectedTitle.toLocaleLowerCase('de'),
         )
 
-        const call = aiCalls[0]
+        const recognition = aiCalls[0]!
+        const assembly = aiCalls[1]!
+        const totalNeurons = (recognition.neurons ?? 0) + (assembly.neurons ?? 0)
         console.log(
           `[handler-live] ${liveCase.file}: ${recipe.title} · ${recipe.ingredients.length} Zutaten · ` +
-            `${recipe.steps.length} Schritte · ${call.promptTokens} prompt / ${call.completionTokens} completion ` +
-            `· ${call.neurons?.toFixed(2)} Neuronen`,
+            `${recipe.steps.length} Schritte · Erkennung ${recognition.promptTokens} prompt / ` +
+            `${recognition.completionTokens} completion · Aufbereitung ${assembly.promptTokens} prompt / ` +
+            `${assembly.completionTokens} completion · ${totalNeurons.toFixed(2)} Neuronen`,
         )
       }, 180_000)
     }

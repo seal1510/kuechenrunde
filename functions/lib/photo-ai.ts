@@ -18,8 +18,11 @@
  */
 
 import {
+  OCR_ASSEMBLY_SYSTEM_PROMPT,
   OCR_SYSTEM_PROMPT,
   PHOTO_OCR_ALLOWED_MIME_TYPES,
+  PHOTO_OCR_ASSEMBLY_MAX_OUTPUT_TOKENS,
+  PHOTO_OCR_ASSEMBLY_TEMPERATURE,
   PHOTO_OCR_CHAT_TEMPLATE_KWARGS,
   PHOTO_OCR_ERROR_MESSAGES,
   PHOTO_OCR_MAX_OUTPUT_TOKENS,
@@ -28,7 +31,9 @@ import {
   PHOTO_OCR_MAX_TOTAL_BYTES,
   PHOTO_OCR_MODEL,
   PHOTO_OCR_TEMPERATURE,
+  buildOcrAssemblyPayload,
   buildOcrUserPrompt,
+  type OcrRecipe,
   type PhotoOcrErrorCode,
   type PhotoOcrMimeType,
   type PhotoOcrPage,
@@ -234,6 +239,61 @@ export async function runPhotoOcr(
 ): Promise<unknown> {
   return ai.run(PHOTO_OCR_MODEL, buildPhotoOcrInput(pages))
 }
+
+/* ------------------------------------------------------------------ *
+ * Zweiter Aufruf: Aufbereitung der Zubereitungsschritte
+ * ------------------------------------------------------------------ */
+
+/**
+ * Eingabe des zweiten Modellaufrufs. Bewusst text-only: Transkription und
+ * validierte Zutatenliste, keine Bilder und keine fragmentierten
+ * Erkennungsschritte (die haben die Formulierung im Test verschlechtert).
+ */
+export interface PhotoOcrAssemblyInput {
+  messages: PhotoOcrChatMessage[]
+  temperature: number
+  max_completion_tokens: number
+  chat_template_kwargs: typeof PHOTO_OCR_CHAT_TEMPLATE_KWARGS
+  /** Erzwingt gültiges JSON; verhindert englische Notizen mitten im Objekt. */
+  response_format: { type: 'json_object' }
+}
+
+/** Baut die text-only-Nachricht für den Aufbereitungsaufruf. */
+export function buildPhotoOcrAssemblyInput(
+  recipe: OcrRecipe,
+  transcription: string,
+): PhotoOcrAssemblyInput {
+  const payload = buildOcrAssemblyPayload(recipe, transcription)
+  return {
+    messages: [
+      { role: 'system', content: OCR_ASSEMBLY_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content:
+          'Hier ist das erkannte Rezept als JSON. Formuliere daraus die endgültigen ' +
+          'Zubereitungsschritte.\n\n' +
+          JSON.stringify(payload),
+      },
+    ],
+    temperature: PHOTO_OCR_ASSEMBLY_TEMPERATURE,
+    max_completion_tokens: PHOTO_OCR_ASSEMBLY_MAX_OUTPUT_TOKENS,
+    chat_template_kwargs: PHOTO_OCR_CHAT_TEMPLATE_KWARGS,
+    response_format: { type: 'json_object' },
+  }
+}
+
+/** Ruft den Aufbereitungsaufruf auf; Fehler klassifiziert der Aufrufer. */
+export async function runPhotoOcrAssembly(
+  ai: AiBinding,
+  recipe: OcrRecipe,
+  transcription: string,
+): Promise<unknown> {
+  return ai.run(PHOTO_OCR_MODEL, buildPhotoOcrAssemblyInput(recipe, transcription))
+}
+
+/** Sichtbarer Hinweis, wenn die Aufbereitung fehlschlägt (Erkennung bleibt). */
+export const PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE =
+  'Die Zubereitungsschritte konnten nicht automatisch aufbereitet werden. Die erkannten Schritte wurden unverändert übernommen; bitte mit dem Foto abgleichen.'
 
 /* ------------------------------------------------------------------ *
  * Antwort-Extraktion

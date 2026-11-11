@@ -447,10 +447,11 @@ Hinweise zur Tabelle:
 Nach dem Umbau wurde `functions/api/recipe-ocr.ts` mit dem neuen Modell und
 einem REST-gestützten AI-Binding-Ersatz live ausgeführt (nur die
 Haushaltsprüfung ist gemockt): gedrucktes und handschriftliches synthetisches
-Fixture, beide mit korrektem Titel und 8 Zutaten erkannt (5 bzw. 6 Schritte),
-**55,9 bzw. 55,2 Neuronen**, 11,9 s bzw. 29,3 s. Damit sind Prompt, neue
-Modellparameter, JSON-Extraktion und Vertragsvalidierung im echten Serverpfad
-live bestätigt.
+Fixture, beide mit korrektem Titel und 8 Zutaten erkannt, jeweils 7 aufbereitete
+Schritte, **86,6 bzw. 84,1 Neuronen** für Erkennung + Aufbereitung, 38,4 s bzw.
+31,4 s. Damit sind beide Modellaufrufe, die Schrittaufbereitung samt
+Reihenfolge-Sortierung, JSON-Extraktion und Vertragsvalidierung im echten
+Serverpfad live bestätigt.
 
 ### 10.5 Kosten und Grenzen
 
@@ -464,3 +465,105 @@ live bestätigt.
   einem echten gedruckten Familienrezept nötig; ein zweites echtes
   Handschriftfoto lag nicht vor.
 - Rohantworten und Ground Truth werden nicht ins Repository aufgenommen.
+
+## 11. Zubereitungsschritte: vorher/nachher (2026-11-11)
+
+Anlass: Die Handschrifterkennung lieferte mit Gemma 4 fast alle Zutaten,
+Mengen und Gruppen korrekt – die Zubereitung blieb aber unbrauchbar:
+Ein-Wort-Fragmente ohne Objekt („Marinieren.“, „Anbraten.“), ein falsch
+interpretierter Satz am Blattrand („… damit anrichten“ statt „Fleisch
+untermischen“) und ein fehlender Schritt, in dem das Fleisch zurück in die
+Soße kommt.
+
+### 11.1 Ursachen
+
+1. **Erkennung, nicht Parser:** Die letzte, sehr schwer lesbare Handschriftzeile
+   wurde bereits in der Transkription falsch gelesen. Der Fehler steckt damit
+   in der Bilderkennung; höhere Auflösung (3072/4096 px) und eine
+   Kontrast-/Schärfe-Vorverarbeitung behoben ihn nicht (getestet). Wichtig für
+   die Einordnung: Es war kein JSON- oder Mapping-Fehler.
+2. **Fragmentierung durch die Erkennungsstufe:** Die „+“-Zeilen des Originals
+   sind kurze Handlungsnotizen ohne Objekt (das Objekt steht in der
+   Zutatenliste). Der Prompt erlaubte zwar, das Objekt zu ergänzen, erzwang es
+   aber nicht – deshalb entstanden Mini-Schritte.
+3. **Keine Aufbereitungsstufe:** Es fehlte ein Schritt, der Transkription und
+   Zutatenliste zu vollständigen Sätzen verbindet und den Ablauf auf
+   Vollständigkeit prüft (z. B. Fleisch wird herausgenommen, aber nie wieder
+   verwendet). Genau dort entstand auch der falsche Anrichte-Satz.
+
+### 11.2 Lösung (gezielt, ohne Modellwechsel)
+
+- **Zweiter, text-only Modellaufruf** (Aufbereitung) mit Transkription +
+  validierter Zutatenliste. Die fragmentierten Erkennungsschritte gehen
+  bewusst **nicht** ein – mit ihnen war die Formulierung messbar schlechter.
+- Prompt-Regeln: vollständige Sätze mit Objekt, keine Stichwort-Schritte,
+  Zusammenfassen nur eng zusammengehöriger Zeilen, Ziel 7–9 Schritte,
+  verbindliche Reihenfolge, Quellzeilen pro Schritt (`sourceLines`),
+  Ergänzung eines fehlenden Schritts nur aus dem Ablauf und dann
+  `uncertain=true`, Beilagen werden nicht untergemischt, Zutaten nur mit den
+  Namen aus der Zutatenliste, keine erfundenen Mengen/Temperaturen/Zutaten,
+  keine erfundenen Anrichte-/Servier-Anweisungen, Topping als eigener letzter
+  Schritt. Temperatur 0, maximal 2048 Ausgabe-Tokens, JSON-Modus
+  (`response_format`).
+- **Plausibilitätsgate:** Liefert die Aufbereitung nur einen einzelnen falschen
+  Satz, Duplikate, mehr als zwölf Schritte oder eine deutlich zu kurze Liste,
+  wird sie verworfen und der Import behält die erkannten Schritte – mit
+  sichtbarem Warnhinweis. Damit erreichen katastrophale Modellantworten den
+  Editor nicht mehr.
+- **Server sortiert** die Schritte anhand der Quellzeilen deterministisch in
+  die Originalreihenfolge – ein rekonstruierter Schritt kann so nicht nach
+  vorn rutschen. Zusätzliche Modellfelder (Quellzeilen, Usage-Checkliste)
+  werden wie bisher verworfen.
+- **Fehlertoleranz:** Schlägt der zweite Aufruf fehl (Format, Timeout,
+  Kontingent), bleibt der Import mit den erkannten Schritten nutzbar und zeigt
+  einen deutlichen Warnhinweis. Es wird nie automatisch gespeichert.
+
+### 11.3 Messung am echten Familienrezept
+
+Vier Läufe der finalen Fassung auf demselben Originalfoto (private Daten nur
+lokal):
+
+| Kriterium | vorher (nur Erkennung) | nachher (Erkennung + Aufbereitung) |
+| --- | --- | --- |
+| Schritte | 10 | 8–9 |
+| Kurzbefehle ≤ 3 Wörter | 6 | 0–1 (nur Topping-Satz) |
+| Ein-Wort-Schritte | 2 | 0 |
+| Pflichtinhalte (9) | 7/9 | 9/9 |
+| „Fleisch untermischen“ | fehlt bzw. falsch | vorhanden, als ergänzt/unsicher markiert |
+| erfundene Anrichte-Anweisung | ja („… damit anrichten“) | nein |
+| Zutaten/Gruppen | korrekt | korrekt |
+| Neuronen pro Rezept | ca. 65 | ca. 100–115 |
+| Latenz | 9–35 s | 20–60 s |
+
+Einordnung: Ein Teil der Läufe enthielt zusätzlich einen Hinweis, die Beilage
+(z. B. Reis) dazu zu servieren. Das ist aus der Original-Beilage abgeleitet,
+kein erfundener Inhalt, und im Editor löschbar. Die Schrittgranularität
+schwankt leicht (7–9 Schritte). In etwa jedem siebten Aufbereitungslauf lieferte
+das Modell eine unbrauchbare Antwort (malformed JSON, Wiederholungsschleife
+oder ein einzelner falscher Satz); genau diese Fälle fängt das
+Plausibilitätsgate ab, sodass der Editor die erkannten Schritte samt Warnung
+erhält statt einer falschen Zubereitung.
+
+### 11.4 Gegenprüfung an weiteren Rezepten
+
+- **Gedrucktes Rezept** (synthetisches Fixture): 7 Schritte, Inhalt vollständig
+  erhalten, Zutatenbezüge präzisiert (z. B. Öl/Sorte statt „das Öl“), keine
+  erfundenen Zutaten.
+- **Zweites handschriftliches Rezept** (synthetisches Fixture): 7 Schritte,
+  Inhalt vollständig erhalten; eine als „Notiz:“ erkannte Zeile wurde korrekt
+  zu einem letzten Arbeitsschritt. Keine erfundenen Zutaten.
+- **Einschränkung:** Ein zweites **echtes** Handschriftfoto lag nicht vor. Die
+  Gegenprüfung mit echten Handschriften bleibt eine manuelle Abnahme.
+
+### 11.5 Kosten und Grenzen
+
+- Der zweite Aufruf kostet je nach Antwortlänge ca. 20–48 Neuronen; zusammen
+  mit der Erkennung sind es rund 100–115 Neuronen pro einseitigem Rezept.
+  Im Free-Tier (10.000/Tag) sind damit grob 85–100 vollständige Importe pro Tag
+  möglich; es entstehen keine Kosten, kein Tarifwechsel, keine Abos.
+- Die Aufbereitung läuft nur bei erkannter Transkription und mindestens einer
+  Zutat; sonst bleibt es beim bisherigen Verhalten.
+- Mehrseitige Rezepte wurden mit dem Zusatzaufruf nicht neu gemessen; die
+  Aufbereitung fällt bei Timeout auf die erkannten Schritte zurück.
+- Rohantworten, Ground Truth und das Foto bleiben ausschließlich lokal
+  (`fixtures-private/` bzw. `/tmp`) und werden nicht ins Repository aufgenommen.

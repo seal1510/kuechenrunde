@@ -14,9 +14,12 @@
  *     die Foto-Erkennung im Deployment nicht aktiviert ist).
  *  4. Body mit hartem 12-MiB-Limit lesen, Seiten streng prüfen
  *     (MIME, Base64, Größen, Magic Bytes).
- *  5. Genau ein Modellaufruf; Antworttext extrahieren und gegen den gemeinsamen
- *     Vertrag validieren. Strukturfehler werden generisch als 502 gemeldet –
- *     niemals mit Modell-Rohdaten oder Rezeptinhalt.
+ *  5. Erkennungsaufruf; Antworttext extrahieren und gegen den gemeinsamen
+ *     Vertrag validieren. Danach ein zweiter, text-only Aufruf, der aus
+ *     Transkription + Zutatenliste verständliche Zubereitungsschritte baut
+ *     (Fehler dort sind nicht fatal). Strukturfehler der Erkennung werden
+ *     generisch als 502 gemeldet – niemals mit Modell-Rohdaten oder
+ *     Rezeptinhalt.
  *
  * Kein CORS, kein Cache, keine Logs mit Bild-/Rezeptdaten. Die Rate-Limits
  * leben isolate-lokal (kein KV/Durable Object) und sind eine Missbrauchsbremse,
@@ -27,14 +30,19 @@ import {
   PHOTO_OCR_CONTRACT_VERSION,
   PHOTO_OCR_ERROR_MESSAGES,
   PHOTO_OCR_MAX_REQUEST_BYTES,
+  PHOTO_OCR_MAX_WARNINGS,
   PHOTO_OCR_MODEL,
   OcrFormatError,
   applyOcrConsistencyChecks,
   extractJsonObject,
+  isPlausibleOcrAssemblySteps,
+  mergePhotoOcrUsage,
+  validateOcrAssemblySteps,
   validateOcrPageReports,
   validateOcrRecipe,
   type PhotoOcrErrorCode,
   type PhotoOcrSuccess,
+  type OcrRecipe,
 } from '../../src/import/photo-ocr'
 import {
   clientKey,
@@ -44,6 +52,7 @@ import {
   jsonResponse,
 } from '../lib/http'
 import {
+  PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE,
   PHOTO_AI_MISSING_BINDING_MESSAGE,
   PHOTO_AI_TRUNCATED_MESSAGE,
   classifyPhotoAiError,
@@ -51,6 +60,7 @@ import {
   extractPhotoAiUsage,
   isTruncatedModelResponse,
   runPhotoOcr,
+  runPhotoOcrAssembly,
   validatePhotoPages,
   type AiBinding,
 } from '../lib/photo-ai'
@@ -219,9 +229,44 @@ export async function handleRecipeOcr(
         return errorResponse(502, 'invalid-ai-response', PHOTO_AI_TRUNCATED_MESSAGE)
       }
       const value = extractJsonObject(text)
+      const recipe = validateOcrRecipe(value)
+      const transcription =
+        isRecordValue(value) && typeof value.transcription === 'string'
+          ? value.transcription
+          : ''
+
+      let usage = extractPhotoAiUsage(raw)
+      // Zweiter, text-only Aufruf: aus Transkription + validierter
+      // Zutatenliste verständliche Schritte bauen. Schlägt er fehl, bleibt die
+      // Erkennung nutzbar; die Schritte werden dann nur als unsicher markiert.
+      if (recipe.recognized && recipe.ingredients.length > 0 && transcription.trim()) {
+        try {
+          const assembled = await runPhotoOcrAssembly(ai, recipe, transcription)
+          if (isTruncatedModelResponse(assembled)) {
+            addAssemblyFallbackWarning(recipe)
+          } else {
+            const assembledSteps = validateOcrAssemblySteps(
+              extractJsonObject(extractModelText(assembled)),
+            )
+            // Die Nutzung ist auch bei einer verworfenen Antwort angefallen.
+            usage = mergePhotoOcrUsage(usage, extractPhotoAiUsage(assembled))
+            if (isPlausibleOcrAssemblySteps(assembledSteps, recipe)) {
+              recipe.steps = assembledSteps
+            } else {
+              addAssemblyFallbackWarning(recipe)
+            }
+          }
+        } catch {
+          // Auch Quota-, Format- und Netzwerkfehler des zweiten Aufrufs dürfen
+          // den bereits erfolgreichen Import nicht scheitern lassen.
+          addAssemblyFallbackWarning(recipe)
+        }
+      }
+
       // Zusätzlich zur Schema-Validierung: doppelte Zutaten mit
-      // unterschiedlichen Mengen sichtbar als unklar markieren.
-      const recipe = applyOcrConsistencyChecks(validateOcrRecipe(value))
+      // unterschiedlichen Mengen und offensichtlich vermischte Zeilen sichtbar
+      // als unklar markieren – auf den finalen Schritten.
+      const checkedRecipe = applyOcrConsistencyChecks(recipe)
       // validateOcrRecipe hat den Objektcharakter bereits geprüft.
       const pageReports = validateOcrPageReports(
         (value as Record<string, unknown>).pages,
@@ -231,9 +276,9 @@ export async function handleRecipeOcr(
         ok: true,
         contractVersion: PHOTO_OCR_CONTRACT_VERSION,
         model: PHOTO_OCR_MODEL,
-        recipe,
+        recipe: checkedRecipe,
         pages: pageReports,
-        usage: extractPhotoAiUsage(raw),
+        usage,
       }
       return jsonResponse(200, success)
     } catch (error) {
@@ -248,6 +293,21 @@ export async function handleRecipeOcr(
     }
   } catch (error) {
     return errorToResponse(error)
+  }
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Sichtbarer, aber nicht fataler Hinweis, wenn die Schrittaufbereitung
+ * fehlschlägt. Der Import bleibt mit den erkannten Schritten möglich.
+ */
+function addAssemblyFallbackWarning(recipe: OcrRecipe): void {
+  if (recipe.warnings.length >= PHOTO_OCR_MAX_WARNINGS) return
+  if (!recipe.warnings.includes(PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE)) {
+    recipe.warnings.push(PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE)
   }
 }
 

@@ -80,6 +80,16 @@ export const PHOTO_OCR_TEMPERATURE = 0.1
  */
 export const PHOTO_OCR_MAX_OUTPUT_TOKENS = 6144
 
+/**
+ * Zweiter Aufruf: Aufbereitung der Zubereitungsschritte aus der Transkription
+ * und der validierten Zutatenliste. Bewusst deterministisch (Temperatur 0) und
+ * mit kleinem Ausgabelimit: Es wird nur eine kurze Schritte-Liste erzeugt.
+ */
+export const PHOTO_OCR_ASSEMBLY_TEMPERATURE = 0
+export const PHOTO_OCR_ASSEMBLY_MAX_OUTPUT_TOKENS = 2048
+/** Obergrenze der Transkription, die in den zweiten Aufruf übernommen wird. */
+export const PHOTO_OCR_MAX_TRANSCRIPTION_CHARS = 8_000
+
 /** Nur für die maximal erlaubte Anzahl Seiten pro Erkennung. */
 export const PHOTO_OCR_MAX_INGREDIENTS = 100
 export const PHOTO_OCR_MAX_STEPS = 100
@@ -157,6 +167,21 @@ export interface PhotoOcrPage {
 export interface PhotoOcrUsage {
   promptTokens: number | null
   completionTokens: number | null
+}
+
+/**
+ * Summiert den Tokenverbrauch von Erkennungs- und Aufbereitungsaufruf. Fehlt
+ * ein Wert, bleibt die Summe null statt geschätzt zu werden.
+ */
+export function mergePhotoOcrUsage(first: PhotoOcrUsage, second: PhotoOcrUsage): PhotoOcrUsage {
+  const sum = (left: number | null, right: number | null): number | null => {
+    if (left === null && right === null) return null
+    return (left ?? 0) + (right ?? 0)
+  }
+  return {
+    promptTokens: sum(first.promptTokens, second.promptTokens),
+    completionTokens: sum(first.completionTokens, second.completionTokens),
+  }
 }
 
 export type PhotoOcrErrorCode =
@@ -281,6 +306,74 @@ Regeln:
 20. Prüfe vor der Ausgabe still: Ist jede sichtbare Zutatenzeile genau einmal als Zutat enthalten? Enthält "ingredients" keine Handlungssätze? Sind alle "+"-Zeilen als Schritte enthalten? Ist "1½"/"1 1/2" vollständig? Stimmen die Wörter exakt mit dem Original überein?
 21. Baue Schritte ausschließlich aus sichtbaren Handlungszeilen. Erfinde keine Servier-, Beilagen- oder Anrichteanweisungen: Steht bei einer Beilage nur "Reis", ist das eine Zutat, kein Schritt.
 22. Lass unleserliche Handlungszeilen nicht weg: Übernimm sie als Schritt mit uncertain=true und beschreibe in uncertainty, was vermutet wird. Die Reihenfolge der Schritte muss der Reihenfolge im Original entsprechen.`
+
+/**
+ * Eingabe für den zweiten Aufruf: Transkription + validierte Zutatenliste.
+ * Bewusst ohne die vorläufigen Schritte – die fragmentierten Erkennungs-
+ * Schritte haben im Test die Formulierung verschlechtert.
+ */
+export interface OcrAssemblyIngredient {
+  group: string
+  quantity: string
+  unit: string
+  name: string
+  purchaseNote: string
+  preparationNote: string
+}
+
+export interface OcrAssemblyInput {
+  /** Transkription zeilenweise; Index 1 = erste Zeile (für `sourceLines`). */
+  transcriptionLines: string[]
+  ingredients: OcrAssemblyIngredient[]
+}
+
+export function buildOcrAssemblyPayload(
+  recipe: OcrRecipe,
+  transcription: string,
+): OcrAssemblyInput {
+  const source = (typeof transcription === 'string' ? transcription : '')
+    .replace(/\r\n?/g, '\n')
+    .slice(0, PHOTO_OCR_MAX_TRANSCRIPTION_CHARS)
+  return {
+    transcriptionLines: source
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0),
+    ingredients: recipe.ingredients.map((ingredient) => ({
+      group: ingredient.group,
+      quantity: ingredient.quantity,
+      unit: ingredient.unit,
+      name: ingredient.name,
+      purchaseNote: ingredient.purchaseNote,
+      preparationNote: ingredient.preparationNote,
+    })),
+  }
+}
+
+/** Prompt des zweiten Aufrufs (Zubereitungsschritte aus Transkription + Zutaten). */
+export const OCR_ASSEMBLY_SYSTEM_PROMPT = `Du bekommst die Transkription einer handschriftlichen Rezeptseite als nummerierte Zeilen (Feld "transcriptionLines"; Nummer 1 = erste Zeile) und die daraus erkannte Zutatenliste mit Gruppen, Mengen und Einheiten. Formuliere daraus die endgültigen, gut nachkochbaren Zubereitungsschritte. Transkription und Zutatenliste sind die einzigen Quellen; erfinde nichts hinzu.
+
+Vorgehen:
+1. Prüfe zuerst jede Zutat mit Mengenangabe aus der Zutatenliste: Wird sie in der Transkription verwendet? Trage das Ergebnis in "usageCheck" ein (Schrittnummer, 1-basiert; oder eine kurze Begründung, wenn sie nur Beilage ist). Eine Zutat, die vorbereitet und danach nie wieder verwendet wird, ist ein Fehler im Ablauf.
+2. Formuliere danach die endgültigen Schritte.
+
+Regeln:
+1. Ordne jede Handlungszeile der Transkription genau einem Schritt zu, in der Reihenfolge des Originals. Lass keine Handlungszeile weg.
+2. Jeder Schritt muss Objekt und Handlung nennen. Stichwort- oder Ein-Wort-Schritte sind verboten: Nenne die betroffene Zutat aus der Zutatenliste oder den Zwischenschritt ("die Soße", "das Fleisch"). Verwende für Zutaten ausschließlich die Bezeichnungen aus der Zutatenliste. Weicht die Transkription ab (z. B. ein anderes Kraut), gilt die Zutatenliste; ist die Zuordnung unklar, markiere den Schritt mit uncertain=true. Beispiele: statt "Anbraten." → "Die Zutaten anbraten."; statt "Pürieren." → "Die Soße pürieren."; statt "Marinieren." → "Das Fleisch marinieren."
+3. Jede eigenständige Handlung ist ein eigener Schritt. Typische eigenständige Handlungen sind: Marinieren, Anbraten, Soßenzutaten anbraten, Flüssigkeit oder Tomaten zugeben/ablöschen, Kochen, Pürieren, Joghurt einrühren, Fleisch untermischen, Bestreuen. Fasse nur Zeilen zusammen, die ohne eigenes Objekt sind oder unmittelbar dieselbe Handlung fortsetzen. Ziel: sieben bis neun Schritte. Fasse das Bestreuen nicht mit anderen Handlungen zusammen.
+3a. Die Reihenfolge ist zwingend: Verschiebe keinen Schritt. Gib zu jedem Schritt "sourceLines" an: die Nummern der Transkriptionszeilen, aus denen er entsteht. Bei einem ergänzten oder rekonstruierten Schritt die Zeile, an deren Stelle er gehört. Die endgültige Reihenfolge wird anhand dieser Nummern geprüft.
+4. Erfinde keine Mengen, Temperaturen, Garzeiten, Zutaten oder Küchengeräte. Übernimm nur Angaben aus Transkription und Zutatenliste.
+5. Wenn eine Zutat vorbereitet und beiseitegestellt wird (z. B. Fleisch anbraten und herausnehmen) und in keinem späteren Schritt wieder auftaucht, ergänze den fehlenden Schritt aus dem Ablauf (z. B. "Das Fleisch wieder in die Soße geben und untermischen.") und markiere ihn mit uncertain=true, wenn die Vorlage an dieser Stelle unleserlich ist. Eine Zutat mit "herausnehmen"/"rausnehmen"/"beiseitelegen" MUSS in einem späteren Schritt wieder in das Gericht gelangen. Eine Beilage (Gruppe "Beilage" oder ausdrücklich als Beilage genannt, z. B. Reis) wird nicht untergemischt und nicht als Hauptzutat verwendet; sie wird höchstens serviert. Nennt die Transkription an der Stelle der unleserlichen Zeile eine Beilage, ist das ein Lesefehler; die Handlung gehört zur vorher beiseitegestellten Hauptzutat.
+6. "anrichten" und "servieren" nur verwenden, wenn die Transkription eine klare, sinnvolle Servieranweisung enthält. Eine unleserliche Zeile, die nur wie eine Servieranweisung klingt, ist keine Servieranweisung. Eine Beilage (z. B. Reis), zu der die Transkription keine Handlung nennt, wird NICHT zu einem eigenen Schritt und nicht mit dem Bestreuen zusammengefasst; sie bleibt in der Zutatenliste.
+7. Randnotizen und Alternativen aus der Transkription (z. B. "alternativ: im Ofen garen", "abgedeckt") müssen im zugehörigen Schritt vorkommen: Formuliere daraus "oder alternativ grillen" bzw. "abgedeckt beiseitelegen". Eine Randnotiz darf nicht wegfallen.
+8. Eine unleserliche Handlungszeile nicht durch eine andere, "passender" klingende Handlung ersetzen. Übernimm die wahrscheinlichste Lesart und markiere sie mit uncertain=true. Ergibt eine Zeile keinen sinnvollen deutschen Küchensatz oder enthält sie ein unpassendes Wort, übernimm sie nicht wörtlich: Rekonstruiere die aus dem Ablauf notwendige Handlung und markiere sie mit uncertain=true; die Unsicherheit gehört in "uncertainty", nicht in den Schritttext.
+8b. Übernimm keine unleserlichen Wörter in den Schritttext. Ist der Sinn klar, formuliere ihn mit korrektem Deutsch (z. B. "darüberstreuen" statt einer Buchstabenfolge); ist er unklar, markiere den Schritt mit uncertain=true.
+8a. Nimm in den Schritttext nur Handlungen auf, die sicher aus Transkription oder Zutatenliste hervorgehen. Wörter wie "anrichten" oder "servieren" nur dann in den Schritttext schreiben, wenn die Transkription an dieser Stelle eine klar lesbare, sinnvolle Servieranweisung enthält. Ein unklares Wort in einer Zeile wird nicht als Verb in den Schritttext übernommen.
+9. Zutaten, die laut Transkription am Ende nur bestreut oder darübergegeben werden (z. B. ein Gewürz oder Topping), als eigenen letzten Schritt nennen. Steht in einer Zeile eine Zutat mit einer Handlung (z. B. "1 TL Petersilie darüberstreuen"), erscheint die Zutat in der Zutatenliste UND die Handlung als eigener letzter Schritt. Der letzte Bestreu-/Topping-Schritt darf nicht mit dem Servieren oder einer anderen Handlung zusammengefasst werden und darf nicht wegfallen.
+10. Unleserliche Wörter: uncertain=true und uncertainty kurz beschreiben ("evtl. …"). Keine sinnlosen Buchstabenfolgen in den Schritttext übernehmen.
+11. Sprache: Deutsch, Umlaute, verständliche Kochsprache, komplette Sätze. Keine Aufzählungszeichen im Text.
+12. Schreibe höchstens neun Schritte; jeder Schritt erscheint genau einmal, keine Wiederholungen. Antworte ausschließlich mit einem JSON-Objekt nach diesem Schema, ohne Markdown-Zäune und ohne Erklärung:
+{"usageCheck":[{"ingredient":"","step":0,"note":""}],"steps":[{"text":"","uncertain":false,"uncertainty":"","sourceLines":[1]}]}`
 
 export function buildOcrUserPrompt(pageCount: number): string {
   const count = Math.max(1, Math.min(PHOTO_OCR_MAX_PAGES, Math.trunc(pageCount)))
@@ -650,6 +743,114 @@ const OCR_ACTION_VERB_PATTERN =
 /** Zutatenzeilen beginnen typischerweise mit Menge und Einheit. */
 const OCR_INGREDIENT_LINE_PATTERN =
   /^\s*\d+(?:[.,]\d+)?\s*(?:g|kg|ml|l|tl|el|msp|prise|prisen|stk|pck|tüten|tuten|cm|scheiben?|zehen?|stangen?)\b/i
+
+/**
+ * Validiert die Antwort des zweiten Aufrufs. Er akwartet ausschließlich eine
+ * `steps`-Liste; Zusatzfelder (z. B. eine Zutaten-Usage-Checkliste) werden wie
+ * bei der Rezeptvalidierung verworfen. Leere oder strukturell falsche Listen
+ * sind ein Formatfehler – der Aufrufer fällt dann auf die Erkennungsschritte
+ * zurück.
+ */
+export function validateOcrAssemblySteps(value: unknown): OcrStep[] {
+  if (!isRecord(value)) {
+    throw new OcrFormatError('Die Aufbereitung ist kein JSON-Objekt.')
+  }
+  const stepsValue = value.steps
+  if (!Array.isArray(stepsValue)) {
+    throw new OcrFormatError('Die Aufbereitung enthält keine Schritte-Liste.')
+  }
+  if (stepsValue.length === 0) {
+    throw new OcrFormatError('Die Aufbereitung enthält keine Schritte.')
+  }
+  if (stepsValue.length > PHOTO_OCR_MAX_STEPS) {
+    throw new OcrFormatError('Die Aufbereitung enthält zu viele Schritte.')
+  }
+
+  const parsed: Array<{ step: OcrStep; sourceLine: number | null }> = []
+  stepsValue.forEach((entry, index) => {
+    const step = readStep(entry, index)
+    if (!step) return
+    let sourceLine: number | null = null
+    if (isRecord(entry) && Array.isArray(entry.sourceLines)) {
+      const numbers = entry.sourceLines
+        .filter((item): item is number => typeof item === 'number' && Number.isFinite(item))
+        .map((item) => Math.trunc(item))
+        .filter((item) => item > 0)
+      if (numbers.length > 0) sourceLine = Math.min(...numbers)
+    }
+    parsed.push({ step, sourceLine })
+  })
+  if (parsed.length === 0) {
+    throw new OcrFormatError('Die Aufbereitung enthält keine lesbaren Schritte.')
+  }
+
+  // Die Reihenfolge des Originals ist verbindlich. Wenn das Modell für alle
+  // Schritte Quellzeilen angibt, wird danach stabil sortiert; das verhindert,
+  // dass ein rekonstruierter Schritt nach vorn rutscht. Ohne Quellzeilen bleibt
+  // die Modellreihenfolge erhalten.
+  if (parsed.every((entry) => entry.sourceLine !== null)) {
+    parsed.sort((left, right) => (left.sourceLine ?? 0) - (right.sourceLine ?? 0))
+  }
+  return parsed.map((entry) => entry.step)
+}
+
+/**
+ * Normalisiert Text für den Plausibilitätsabgleich (Kleinschreibung,
+ * Diakritika, Satzzeichen).
+ */
+function normalizeAssemblyMatch(value: string): string {
+  return value
+    .toLocaleLowerCase('de')
+    .replace(/ß/g, 'ss')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Grobe Plausibilitätsprüfung der Aufbereitungsantwort, bevor sie die
+ * Erkennungsschritte ersetzt. Sie verhindert katastrophale Modellantworten
+ * (z. B. einen einzigen falschen Satz oder eine wiederholte Schleife), ohne
+ * inhaltlich zu korrigieren: Unplausible Antworten werden verworfen und der
+ * Import fällt auf die erkannten Schritte zurück.
+ */
+export function isPlausibleOcrAssemblySteps(steps: readonly OcrStep[], recipe: OcrRecipe): boolean {
+  if (steps.length === 0) return false
+  if (steps.length > 12) return false
+  // Eine Aufbereitung, die deutlich weniger Schritte liefert als die
+  // Erkennung, ist meist eine Fehlantwort (die Erkennung hatte die Zeilen).
+  if (recipe.steps.length >= 4 && steps.length < 3) return false
+  if (recipe.steps.length > 0 && steps.length < Math.min(2, recipe.steps.length)) return false
+
+  const normalized = steps.map((step) => normalizeAssemblyMatch(step.text))
+  const combined = normalized.join(' ')
+  if (combined.length < 40) return false
+
+  const seen = new Set<string>()
+  for (const text of normalized) {
+    if (seen.has(text)) return false
+    seen.add(text)
+  }
+
+  if (recipe.ingredients.length >= 4) {
+    const haystack = ` ${combined} `
+    let covered = 0
+    for (const ingredient of recipe.ingredients) {
+      const tokens = normalizeAssemblyMatch(ingredient.name)
+        .split(' ')
+        .filter((token) => token.length >= 4)
+      if (tokens.length === 0) {
+        covered += 1
+        continue
+      }
+      if (tokens.some((token) => haystack.includes(` ${token} `))) covered += 1
+    }
+    if (covered / recipe.ingredients.length < 0.4) return false
+  }
+  return true
+}
 
 /**
  * Deterministische Zusatzprüfung, unabhängig von der Modellausgabe:

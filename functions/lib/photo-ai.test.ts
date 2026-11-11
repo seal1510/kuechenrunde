@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  buildPhotoOcrAssemblyInput,
   buildPhotoOcrInput,
   classifyPhotoAiError,
   decodeBase64Strict,
@@ -8,11 +9,13 @@ import {
   extractPhotoAiUsage,
   isTruncatedModelResponse,
   runPhotoOcr,
+  runPhotoOcrAssembly,
   validatePhotoPages,
   type AiBinding,
 } from './photo-ai'
 import { HttpError } from './http'
 import {
+  OCR_ASSEMBLY_SYSTEM_PROMPT,
   OCR_SYSTEM_PROMPT,
   PHOTO_OCR_ERROR_MESSAGES,
   PHOTO_OCR_MAX_PAGE_BYTES,
@@ -238,6 +241,63 @@ describe('runPhotoOcr', () => {
     expect(modelInput.max_completion_tokens).toBe(6144)
     expect(modelInput.chat_template_kwargs).toEqual({ enable_thinking: false, thinking: false })
     expect(modelInput.messages).toHaveLength(2)
+  })
+})
+
+describe('buildPhotoOcrAssemblyInput / runPhotoOcrAssembly', () => {
+  function recipe(): Parameters<typeof buildPhotoOcrAssemblyInput>[0] {
+    return {
+      recognized: true,
+      title: 'Testrezept',
+      description: '',
+      servingsText: '2 Portionen',
+      prepTime: '',
+      cookTime: '',
+      totalTime: '',
+      notes: '',
+      ingredients: [
+        {
+          group: 'Teig',
+          quantity: '250',
+          unit: 'g',
+          name: 'Mehl',
+          purchaseNote: '',
+          preparationNote: '',
+          uncertain: false,
+          uncertainty: '',
+        },
+      ],
+      steps: [{ text: 'Fragmente.', uncertain: false, uncertainty: '' }],
+      uncertainties: [],
+      warnings: [],
+    }
+  }
+
+  it('baut einen text-only Aufbereitungsaufruf ohne Bilder und ohne Entwurfsschritte', () => {
+    const input = buildPhotoOcrAssemblyInput(recipe(), 'Zeile 1\nZeile 2')
+    expect(input.temperature).toBe(0)
+    expect(input.max_completion_tokens).toBe(2048)
+    expect(input.chat_template_kwargs).toEqual({ enable_thinking: false, thinking: false })
+    expect(input.response_format).toEqual({ type: 'json_object' })
+    expect(input.messages).toHaveLength(2)
+    expect(input.messages[0]).toEqual({ role: 'system', content: OCR_ASSEMBLY_SYSTEM_PROMPT })
+
+    const user = input.messages[1]!
+    expect(typeof user.content).toBe('string')
+    const text = user.content as string
+    expect(text).toContain('transcriptionLines')
+    expect(text).toContain('Zeile 2')
+    expect(text).toContain('Mehl')
+    expect(text).not.toContain('Fragmente.')
+    expect(text).not.toContain('image_url')
+  })
+
+  it('ruft genau ein Modell mit dem Aufbereitungs-Prompt auf', async () => {
+    const run = vi.fn(async (_model: string, _input: unknown) => ({ response: '{"steps":[]}' }))
+    const ai: AiBinding = { run }
+    await runPhotoOcrAssembly(ai, recipe(), 'Zeile 1')
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run.mock.calls[0]![0]).toBe(PHOTO_OCR_MODEL)
   })
 })
 

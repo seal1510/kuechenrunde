@@ -47,8 +47,16 @@ gespeichert (`importSource: 'photo'`, Rohmetadaten in `raw`).
   generischer Formatfehler.
 - Aufruf: ausschließlich serverseitig über das Workers-AI-Binding
   (`env.AI.run`) der Pages Function; gebunden in `wrangler.toml` (`[ai]`).
-- Ein Aufruf pro Erkennung, auch bei mehreren Seiten. Die Seiten werden in der
-  vom Nutzer festgelegten Reihenfolge als ein Rezept zusammengeführt.
+- Zwei getrennte Aufgaben, wie im echten Familienrezept-Test begründet:
+  1. **Erkennung** (1 Aufruf, mit allen Seitenbildern): Transkription,
+     Zutaten, Mengen, Gruppen, vorläufige Schritte.
+  2. **Aufbereitung der Zubereitung** (1 text-only Aufruf, nur wenn eine
+     Transkription vorliegt): Aus Transkription + validierter Zutatenliste
+     werden verständliche, vollständige Schritte gebaut. Die fragmentierten
+     Erkennungsschritte gehen dabei bewusst **nicht** ein, weil sie die
+     Formulierung im Test verschlechtert haben.
+  Die Seiten werden in der vom Nutzer festgelegten Reihenfolge als ein Rezept
+  zusammengeführt.
 - Kein automatischer Modell-Fallback und keine kostenpflichtige Alternative im
   Code. Schlägt die Erkennung fehl oder ist das Tageskontingent erschöpft,
   erscheint eine verständliche Meldung samt manuellem Fallback.
@@ -60,8 +68,23 @@ gespeichert (`importSource: 'photo'`, Rohmetadaten in `raw`).
   „+“, „→“ oder Imperativ sind Zubereitungsschritte), exakte Wortwiedergabe
   ohne „Verbesserung“ ähnlicher Wörter, vollständige Brüche („1½“ ist
   eins-einhalb) und sichtbare Zutatengruppen.
-- Nach der Modellvalidierung laufen deterministische Zusatzprüfungen auf dem
-  Server: doppelte Zutatennamen mit unterschiedlichen Mengen werden als
+- Der Aufbereitungs-Prompt arbeitet nur mit der Transkription und der
+  Zutatenliste. Er verlangt vollständige Sätze mit Objekt (keine
+  „Marinieren.“-Fragmente), verbindet zusammengehörige Kurznotizen, behält
+  die Originalreihenfolge (jeder Schritt nennt seine Quellzeilen, der Server
+  sortiert danach) und ergänzt einen fehlenden Schritt nur dann aus dem
+  Ablauf, wenn eine Zutat vorbereitet und beiseitegestellt wurde (dann
+  `uncertain=true`). Erfinden von Mengen, Temperaturen, Garzeiten oder
+  Zutaten ist verboten; unleserliche Stellen werden als unsicher markiert.
+  Der Aufbereitungsaufruf nutzt zusätzlich `response_format: { type:
+  'json_object' }` und ein deterministisches Plausibilitätsgate: Liefert das
+  Modell nur einen einzelnen falschen Satz, Duplikate, eine Schleife oder
+  deutlich weniger Schritte als die Erkennung, wird die Antwort verworfen.
+  Schlägt der zweite Aufruf fehl (Format, Plausibilität, Netzwerk, Kontingent),
+  bleibt der Import mit den erkannten Schritten nutzbar und zeigt einen
+  deutlichen Warnhinweis.
+- Nach Erkennung und Aufbereitung laufen deterministische Zusatzprüfungen auf
+  dem Server: doppelte Zutatennamen mit unterschiedlichen Mengen werden als
   unklar markiert (typisch für durchgestrichene Korrekturen),
   zusammengeschriebene bekannte Einheiten („2 EL“) werden wieder in Menge und
   Einheit getrennt, verworfene Zutaten-/Schrittzeilen und leere Listen
@@ -161,11 +184,12 @@ Verarbeitung.
 - Modellpreis laut Cloudflare: **Gemma 4** 9.091 Neuronen pro Mio.
   Input-Tokens und 27.273 pro Mio. Output-Tokens (Llama 4 Scout zum Vergleich:
   24.545 / 77.273).
-- Gemessen in den Live-Tests: echte Handschriftseite **52–60 Neuronen** mit
-  Gemma 4 (Llama 4 Scout: 135–169 Neuronen bei derselben Seite); synthetische
-  Ein-Seiten-Rezepte im echten Handler **48–49 Neuronen**. Das entspricht grob
-  **160–190 Ein-Seiten-Erkennungen pro Tag** im Free-Tier. Die genauen
-  Messwerte stehen in
+- Gemessen in den Live-Tests (Erkennung + Aufbereitung): echte Handschriftseite
+  **rund 100–115 Neuronen** mit Gemma 4 – davon ca. 65 für die Erkennung und
+  30–45 für die Aufbereitung. Zum Vergleich: die reine Erkennung ohne
+  Aufbereitung lag bei 52–65 Neuronen, Llama 4 Scout bei 135–169. Das
+  entspricht grob **85–100 vollständigen Rezeptimporten pro Tag** im Free-Tier.
+  Die genauen Messwerte stehen in
   [`docs/photo-ocr-test-results.md`](photo-ocr-test-results.md).
 - Bei erschöpftem Kontingent erscheint eine deutsche Meldung mit dem Hinweis,
   dass keine Kosten entstehen, und ein Link zum manuellen Anlegen. Es gibt
@@ -242,9 +266,11 @@ Lesereihenfolge vor der Erkennung prüfen.
   Pflicht.
 - **Seitenlimit 4**: Rezepte über mehr als vier Seiten müssen auf mehrere
   Importe aufgeteilt oder manuell ergänzt werden.
-- **Latenz**: Gemma 4 brauchte in den Live-Tests 13–46 s pro Seite,
-  Moondream-Aufrufe waren nicht auswertbar. Die Oberfläche zeigt währenddessen
-  einen Ladezustand, erlaubt Abbruch und wartet bis zu 180 s.
+- **Latenz**: Erkennung 9–35 s pro Seite plus Aufbereitung 3–25 s, in den
+  Live-Tests insgesamt rund 20–60 s pro einseitigem Rezept. Die Oberfläche
+  zeigt währenddessen einen Ladezustand, erlaubt Abbruch und wartet bis zu
+  180 s. Mehrseitige Rezepte können die Obergrenze erreichen; die Aufbereitung
+  fällt bei Timeout auf die erkannten Schritte zurück.
 - **HEIC**: iPhones liefern Fotos meist als JPEG an das Datei-Eingabefeld bzw.
   Safari kann HEIC dekodieren; falls ein Browser ein Format nicht öffnen kann,
   erscheint ein Hinweis, das Foto als JPEG zu speichern.
@@ -293,7 +319,9 @@ CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... \
 
 Der erste Lauf misst die Modellqualität an synthetischen Fixtures, der zweite
 führt den echten Handler aus `functions/api/recipe-ocr.ts` mit einem
-REST-gestützten AI-Binding-Ersatz und gemockter Haushaltsprüfung aus.
+REST-gestützten AI-Binding-Ersatz und gemockter Haushaltsprüfung aus. Der
+Handler-Lauf umfasst seit der Schrittaufbereitung zwei Modellaufrufe pro Fall
+(Erkennung + text-only Aufbereitung) und prüft damit den vollständigen Pfad.
 Für Modellvergleiche auf einem echten Foto dient zusätzlich
 `server/photo-ocr-model-compare.test.ts`; Bild und Ground Truth liegen aus
 Datenschutzgründen nur lokal unter `fixtures-private/` und werden nie
