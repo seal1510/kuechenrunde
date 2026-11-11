@@ -1,6 +1,9 @@
 # Dependencies, build output and caches
 node_modules/
 .pnpm-store/
+.pnpm-cache/
+# Local Wrangler/OAuth state (never commit Cloudflare credentials)
+.wrangler-home/
 dist/
 dev-dist/
 coverage/

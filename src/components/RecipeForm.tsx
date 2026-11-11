@@ -113,6 +113,8 @@ export interface RecipeFormProps {
   images: EditorImage[]
   onImagesChange: (images: EditorImage[]) => void
   imagesEnabled?: boolean
+  /** Optionaler Hinweis, wenn die Bildbearbeitung bewusst deaktiviert ist. */
+  imagesDisabledNote?: string
   /** Optional allow-list of the backing storage (cloud bucket). */
   allowedImageTypes?: readonly string[]
   onSubmit: (event: FormEvent) => void
@@ -128,6 +130,7 @@ export function RecipeForm({
   images,
   onImagesChange,
   imagesEnabled = true,
+  imagesDisabledNote,
   allowedImageTypes,
   onSubmit,
   error,
@@ -588,8 +591,8 @@ export function RecipeForm({
                 <h2>Bilder</h2>
               </div>
               <p className="muted small">
-                Bilder werden in diesem Datenmodus nicht unterstützt. Rezepte
-                ohne Bilder funktionieren vollständig.
+                {imagesDisabledNote ??
+                  'Bilder werden in diesem Datenmodus nicht unterstützt. Rezepte ohne Bilder funktionieren vollständig.'}
               </p>
             </section>
           )}

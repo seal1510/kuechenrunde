@@ -15,3 +15,10 @@ compatibility_flags = ["global_fetch_strictly_public"]
 # Keine Secrets in dieser Datei. SUPABASE_URL und SUPABASE_PUBLISHABLE_KEY
 # werden im Pages-Projekt als Umgebungsvariablen gesetzt. Ein
 # service_role-/Secret-Key darf hier niemals eingetragen werden.
+
+# Workers AI für die Foto-Erkennung (`POST /api/recipe-ocr`). Das Binding
+# stellt `env.AI` ausschließlich der Pages Function bereit; Fotos und
+# Rezeptinhalte werden weder gespeichert noch geloggt. Fehlt das Binding,
+# antwortet die Function mit 503 not-configured.
+[ai]
+binding = "AI"

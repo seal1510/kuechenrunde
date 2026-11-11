@@ -70,6 +70,7 @@ describe('Cloud-Rezeptseiten', () => {
     expect(html).toContain('Neues Rezept')
     expect(html).not.toContain('Zur Bibliothek')
     expect(html).toContain('URL-Import')
+    expect(html).toContain('Foto / Scan')
     expect(html).toContain('Mela-Import')
     expect(html).toContain('Backup')
     expect(html).not.toContain('Alles bleibt lokal')

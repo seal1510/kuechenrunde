@@ -18,7 +18,7 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { BottomSheet } from '../components/BottomSheet'
 import { usePhoneLayout } from '../lib/phoneLayout'
 import type { Recipe } from '../types'
-import { URL_IMPORT_HASH } from '../routing/routes'
+import { PHOTO_IMPORT_HASH, URL_IMPORT_HASH } from '../routing/routes'
 import { filterValues, matchesRecipeFilters } from './editor'
 import {
   EMPTY_LIBRARY_FILTERS,
@@ -393,6 +393,9 @@ export function RecipeLibraryView({
               <a className="button quiet library-action-secondary" href={URL_IMPORT_HASH}>
                 URL-Import
               </a>
+              <a className="button quiet library-action-secondary" href={PHOTO_IMPORT_HASH}>
+                Foto / Scan
+              </a>
               <a className="button quiet library-action-secondary" href="#/import">
                 Mela-Import
               </a>
@@ -422,6 +425,12 @@ export function RecipeLibraryView({
                 <strong>URL-Rezeptimport</strong>
                 <span>Rezept von einer Webseite übernehmen</span>
               </a>
+              {cloudMode ? (
+                <a className="library-import-option" href={PHOTO_IMPORT_HASH}>
+                  <strong>Foto / Scan</strong>
+                  <span>Familienrezept abfotografieren oder PDF scannen</span>
+                </a>
+              ) : null}
               <a className="library-import-option" href="#/import">
                 <strong>Mela-Import</strong>
                 <span>Mela-Datei auswählen und prüfen</span>
@@ -581,6 +590,9 @@ export function RecipeLibraryView({
               <>
                 <a className="button library-empty-import" href={URL_IMPORT_HASH}>
                   Rezept per URL importieren
+                </a>
+                <a className="button library-empty-import" href={PHOTO_IMPORT_HASH}>
+                  Foto / Scan importieren
                 </a>
                 <a className="button library-empty-import" href="#/import">
                   Mela-Datei importieren

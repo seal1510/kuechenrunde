@@ -17,6 +17,7 @@ const areas: Array<[Route, string | null]> = [
   [{ name: 'shopping' }, 'shopping'],
   [{ name: 'import' }, null],
   [{ name: 'import-url' }, null],
+  [{ name: 'import-photo' }, null],
   [{ name: 'backup' }, null],
   [{ name: 'family' }, null],
   [{ name: 'about' }, null],
@@ -70,6 +71,7 @@ describe('mobile More menu', () => {
       'URL-Rezeptimport',
       'Mela-Import',
       'Backup',
+      'Foto / Scan',
       'Familie verwalten',
       'Über Küchenrunde',
     ])
@@ -78,6 +80,7 @@ describe('mobile More menu', () => {
   it('omits the cloud-only family page in local mode', () => {
     const labels = moreMenuLinks(false).map((link) => link.label)
     expect(labels).not.toContain('Familie verwalten')
+    expect(labels).not.toContain('Foto / Scan')
     expect(labels).toContain('Über Küchenrunde')
   })
 
@@ -86,6 +89,7 @@ describe('mobile More menu', () => {
       'import-url',
       'import',
       'backup',
+      'import-photo',
       'family',
       'about',
     ])

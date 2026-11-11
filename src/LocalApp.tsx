@@ -16,6 +16,46 @@ import { MobileNavigation } from './navigation/MobileNavigation'
 import { NavigationGuardProvider } from './routing/NavigationGuard'
 import { parseRoute, type Route } from './routing/routes'
 
+/**
+ * Der Foto-/Scan-Import ist ein Cloud-Dienst. Ein direkt aufgerufener Link
+ * (`#/import/foto`) führt im lokalen Modus zu einem freundlichen Hinweis statt
+ * zu einer leeren Seite.
+ */
+function LocalPhotoImportNotice() {
+  return (
+    <div className="page">
+      <header className="page-head">
+        <div>
+          <h1>Foto / Scan</h1>
+          <p className="muted">Gedruckte und handschriftliche Familienrezepte abfotografieren.</p>
+        </div>
+      </header>
+      <section className="panel">
+        <h2>Nur im Cloud-Modus verfügbar</h2>
+        <p>
+          Die Foto-Erkennung läuft über den abgesicherten Dienst der Familien-Cloud und ist im
+          lokalen Modus bewusst nicht verfügbar. Die Rezeptbibliothek funktioniert hier weiterhin
+          vollständig ohne Konto.
+        </p>
+        <p className="muted small">
+          Alternativ kannst du eine Mela-Datei importieren oder das Rezept manuell anlegen.
+        </p>
+        <div className="notice-actions">
+          <a className="button" href="#/import">
+            Zum Import
+          </a>
+          <a className="button" href="#/recipe/new">
+            Neues Rezept
+          </a>
+          <a className="button primary" href="#/">
+            Zur Bibliothek
+          </a>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 export function LocalApp() {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash))
   const applyRoute = useCallback((hash: string) => {
@@ -88,6 +128,7 @@ export function LocalApp() {
             {route.name === 'shopping' ? <ShoppingPage /> : null}
             {route.name === 'import' ? <LocalImportPage /> : null}
             {route.name === 'import-url' ? <LocalUrlImportPage /> : null}
+            {route.name === 'import-photo' ? <LocalPhotoImportNotice /> : null}
             {route.name === 'backup' ? <LocalBackupPage /> : null}
             {route.name === 'about' ? <AboutPage /> : null}
           </main>

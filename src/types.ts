@@ -138,7 +138,7 @@ export interface Recipe {
   id: string
   /** Stable Mela id (or a content hash when Mela supplied no id); manual ids are prefixed. */
   importId: string
-  importSource: 'mela' | 'manual' | 'url'
+  importSource: 'mela' | 'manual' | 'url' | 'photo'
   title: string
   description: string
   ingredientGroups: IngredientGroup[]

@@ -10,7 +10,7 @@ import type {
   MelaInspection,
   ParsedMelaRecipe,
 } from '../types'
-import { URL_IMPORT_HASH } from '../routing/routes'
+import { PHOTO_IMPORT_HASH, URL_IMPORT_HASH } from '../routing/routes'
 
 type PreviewRecipe = { recipe: ParsedMelaRecipe; duplicate: boolean }
 type Status = 'idle' | 'inspecting' | 'ready' | 'importing' | 'done'
@@ -130,6 +130,11 @@ export function ImportPage({
           </p>
         </div>
         <div className="page-head-actions">
+          {cloud ? (
+            <a className="button" href={PHOTO_IMPORT_HASH}>
+              Foto / Scan
+            </a>
+          ) : null}
           <a className="button primary" href={URL_IMPORT_HASH}>
             Rezept per URL
           </a>
@@ -138,6 +143,27 @@ export function ImportPage({
           </a>
         </div>
       </header>
+
+      {cloud ? (
+        <section className="panel photo-import-entry">
+          <div className="photo-import-entry-head">
+            <span className="photo-import-entry-icon" aria-hidden="true">
+              📷
+            </span>
+            <div>
+              <h2>Foto / Scan</h2>
+              <p className="muted">
+                Gedruckte oder handschriftliche Familienrezepte abfotografieren oder einscannen.
+                Die Seiten werden im vorhandenen Rezepteditor geprüft und erst nach Bestätigung in
+                der Familien-Cloud gespeichert.
+              </p>
+            </div>
+          </div>
+          <a className="button primary" href={PHOTO_IMPORT_HASH}>
+            Foto / Scan starten
+          </a>
+        </section>
+      ) : null}
 
       <section className="panel">
         <h2>Webseite statt Datei</h2>

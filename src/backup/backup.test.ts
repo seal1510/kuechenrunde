@@ -171,6 +171,41 @@ describe('backup roundtrip', () => {
     expect((await db.settings.get('householdSize'))?.value).toBe(3)
   })
 
+  it('preserves the photo import source and its raw metadata', async () => {
+    const photoRecipe: Recipe = {
+      ...recipe,
+      id: 'r-photo',
+      importId: 'photo-1700000000000-abc',
+      importSource: 'photo',
+      title: 'Foto-Rezept',
+      raw: { source: 'photo-ocr', model: 'test-model', pageCount: 2, recognizedAt: 1 },
+    }
+    delete photoRecipe.importUrl
+    delete photoRecipe.importMeta
+    await db.recipes.put(photoRecipe)
+
+    const { bytes: archive } = await exportBackup()
+    await clearAll()
+    const inspection = await inspectBackup(toArrayBuffer(archive))
+    expect(inspection.recipes[0]?.importSource).toBe('photo')
+    expect(inspection.recipes[0]?.raw).toEqual({
+      source: 'photo-ocr',
+      model: 'test-model',
+      pageCount: 2,
+      recognizedAt: 1,
+    })
+
+    await restoreBackup(inspection, 'merge')
+    const restored = await db.recipes.get('r-photo')
+    expect(restored?.importSource).toBe('photo')
+    expect(restored?.raw).toEqual({
+      source: 'photo-ocr',
+      model: 'test-model',
+      pageCount: 2,
+      recognizedAt: 1,
+    })
+  })
+
   it('can inspect a backup without reading local conflicts for the cloud path', async () => {
     await seed()
     const { bytes: archive } = await exportBackup()

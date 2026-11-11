@@ -138,6 +138,8 @@ Die folgenden Pakete werden in das Browser-Bundle ausgeliefert:
 - iceberg-js 0.8.1 — MIT
 - tslib 2.8.1 — 0BSD
 - workbox-window 7.4.1 — MIT
+- pdfjs-dist 6.5.438 (PDF.js, Mozilla) — Apache-2.0; wird nur für den
+  optionalen PDF-Import dynamisch geladen
 
 Die vollständigen Lizenztexte und Copyright-Zeilen stehen in
 public/legal/THIRD-PARTY-LICENSES.txt.

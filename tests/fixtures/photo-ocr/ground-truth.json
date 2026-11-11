@@ -1,0 +1,635 @@
+{
+  "version": 1,
+  "generator": "scripts/generate-photo-ocr-fixtures.py",
+  "description": "Synthetische, ausschließlich frei erfundene deutsche Rezepte für den Live-Test des Foto-Imports. Keine echten Familienrezepte, keine privaten Daten.",
+  "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
+  "jpeg": {
+    "quality": 85,
+    "longEdgePx": [
+      2000,
+      2400
+    ],
+    "maxBytes": 2500000
+  },
+  "fixtures": {
+    "printed-basic.jpg": {
+      "title": "Cremige Kürbis-Kokos-Suppe",
+      "servingsText": "4 Portionen",
+      "prepTime": "15 Min.",
+      "cookTime": "25 Min.",
+      "totalTime": "40 Min.",
+      "ingredients": [
+        {
+          "quantity": "800",
+          "unit": "g",
+          "name": "Hokkaido-Kürbis"
+        },
+        {
+          "quantity": "1",
+          "unit": "Stk.",
+          "name": "Zwiebel"
+        },
+        {
+          "quantity": "2",
+          "unit": "EL",
+          "name": "Olivenöl"
+        },
+        {
+          "quantity": "1",
+          "unit": "TL",
+          "name": "Currypulver"
+        },
+        {
+          "quantity": "700",
+          "unit": "ml",
+          "name": "Gemüsebrühe"
+        },
+        {
+          "quantity": "400",
+          "unit": "ml",
+          "name": "Kokosmilch"
+        },
+        {
+          "quantity": "1/2",
+          "unit": "TL",
+          "name": "Muskatnuss"
+        },
+        {
+          "quantity": "1",
+          "unit": "Prise",
+          "name": "Chiliflocken"
+        }
+      ],
+      "steps": [
+        "Den Kürbis waschen, entkernen und in 2 cm große Würfel schneiden. Die Zwiebel fein würfeln.",
+        "Das Öl in einem großen Topf erhitzen und die Zwiebel glasig dünsten. Den Kürbis kurz mitbraten.",
+        "Currypulver einrühren, mit Gemüsebrühe und Kokosmilch ablöschen und aufkochen lassen.",
+        "Zugedeckt 25 Min. bei mittlerer Hitze köcheln lassen.",
+        "Die Suppe fein pürieren und mit Muskatnuss und Chiliflocken abschmecken."
+      ],
+      "expectedUncertainties": [],
+      "notes": "Gedruckte, gut lesbare Referenzseite (helles Papier, ~200 dpi)."
+    },
+    "printed-photo.jpg": {
+      "title": "Cremige Kürbis-Kokos-Suppe",
+      "servingsText": "4 Portionen",
+      "prepTime": "15 Min.",
+      "cookTime": "25 Min.",
+      "totalTime": "40 Min.",
+      "ingredients": [
+        {
+          "quantity": "800",
+          "unit": "g",
+          "name": "Hokkaido-Kürbis"
+        },
+        {
+          "quantity": "1",
+          "unit": "Stk.",
+          "name": "Zwiebel"
+        },
+        {
+          "quantity": "2",
+          "unit": "EL",
+          "name": "Olivenöl"
+        },
+        {
+          "quantity": "1",
+          "unit": "TL",
+          "name": "Currypulver"
+        },
+        {
+          "quantity": "700",
+          "unit": "ml",
+          "name": "Gemüsebrühe"
+        },
+        {
+          "quantity": "400",
+          "unit": "ml",
+          "name": "Kokosmilch"
+        },
+        {
+          "quantity": "1/2",
+          "unit": "TL",
+          "name": "Muskatnuss"
+        },
+        {
+          "quantity": "1",
+          "unit": "Prise",
+          "name": "Chiliflocken"
+        }
+      ],
+      "steps": [
+        "Den Kürbis waschen, entkernen und in 2 cm große Würfel schneiden. Die Zwiebel fein würfeln.",
+        "Das Öl in einem großen Topf erhitzen und die Zwiebel glasig dünsten. Den Kürbis kurz mitbraten.",
+        "Currypulver einrühren, mit Gemüsebrühe und Kokosmilch ablöschen und aufkochen lassen.",
+        "Zugedeckt 25 Min. bei mittlerer Hitze köcheln lassen.",
+        "Die Suppe fein pürieren und mit Muskatnuss und Chiliflocken abschmecken."
+      ],
+      "expectedUncertainties": [],
+      "notes": "Gleiches Rezept wie printed-basic.jpg als Handyfoto: ca. 3° Rotation, ungleichmäßiges Licht, Rauschen, grauer Hintergrund. Ground Truth entspricht printed-basic.jpg."
+    },
+    "handwritten-basic.jpg": {
+      "title": "Gedeckter Apfelkuchen",
+      "servingsText": "8 Stück",
+      "prepTime": "30 Min.",
+      "cookTime": "45 Min.",
+      "totalTime": "1 Std. 15 Min.",
+      "ingredients": [
+        {
+          "quantity": "250",
+          "unit": "g",
+          "name": "Mehl"
+        },
+        {
+          "quantity": "125",
+          "unit": "g",
+          "name": "Butter"
+        },
+        {
+          "quantity": "100",
+          "unit": "g",
+          "name": "Zucker"
+        },
+        {
+          "quantity": "2",
+          "unit": "",
+          "name": "Eier"
+        },
+        {
+          "quantity": "1",
+          "unit": "Pck.",
+          "name": "Backpulver"
+        },
+        {
+          "quantity": "750",
+          "unit": "g",
+          "name": "Äpfel"
+        },
+        {
+          "quantity": "1",
+          "unit": "TL",
+          "name": "Zimt"
+        },
+        {
+          "quantity": "2",
+          "unit": "EL",
+          "name": "Semmelbrösel"
+        }
+      ],
+      "steps": [
+        "Mehl, Butter, Zucker, Eier und Backpulver zu einem glatten Teig verkneten.",
+        "Eine Springform (26 cm) fetten und den Teig darin auslegen, dabei einen Rand formen.",
+        "Die Äpfel schälen, entkernen und in Spalten schneiden. Mit Zimt mischen.",
+        "Semmelbrösel auf dem Teig verteilen und die Apfelspalten darauf anordnen.",
+        "Bei 180 °C ca. 45 Min. backen. Vor dem Anschneiden vollständig abkühlen lassen."
+      ],
+      "expectedUncertainties": [],
+      "notes": "Gut lesbare Handschrift (Bradley Hand) mit liniertem Papier, 8 Zutaten, 5 Schritten und Temperaturangabe."
+    },
+    "handwritten-hard.jpg": {
+      "title": "Mohn-Zitronen-Kuchen",
+      "servingsText": "12 Stück",
+      "prepTime": "20 Min.",
+      "cookTime": "50 Min.",
+      "totalTime": "1 Std. 10 Min.",
+      "ingredients": [
+        {
+          "quantity": "300",
+          "unit": "g",
+          "name": "Mehl"
+        },
+        {
+          "quantity": "200",
+          "unit": "g",
+          "name": "gemahlener Mohn"
+        },
+        {
+          "quantity": "180",
+          "unit": "g",
+          "name": "Zucker"
+        },
+        {
+          "quantity": "4",
+          "unit": "",
+          "name": "Eier"
+        },
+        {
+          "quantity": "1",
+          "unit": "Pck.",
+          "name": "Backpulver"
+        },
+        {
+          "quantity": "200",
+          "unit": "ml",
+          "name": "Milch"
+        },
+        {
+          "quantity": "1",
+          "unit": "",
+          "name": "Zitrone"
+        }
+      ],
+      "steps": [
+        "Mehl, Mohn und Backpulver in einer Schüssel mischen.",
+        "Eier mit Zucker schaumig schlagen und die Milch langsam einrühren.",
+        "Die trockenen Zutaten unterheben und den Zitronenabrieb sowie den Saft zugeben.",
+        "In eine gefettete Form füllen und bei 170 °C ca. 50 Min. backen.",
+        "Nach dem Backen 10 Min. in der Form abkühlen lassen."
+      ],
+      "expectedUncertainties": [
+        {
+          "reference": "Zutat 3, Menge",
+          "kind": "korrigiert",
+          "expectUncertain": true,
+          "mustNotInvent": [
+            "200 g als gültige Zucker-Menge (durchgestrichen)"
+          ]
+        }
+      ],
+      "notes": "Absichtlich schwer: dünne kleine Schrift, schwacher Kontrast, leichte Verkippung. '200 g Zucker' ist durchgestrichen und durch '180 g Zucker' korrigiert; maßgeblich ist die Korrektur."
+    },
+    "multi-page-1.jpg": {
+      "title": "Gemüse-Lasagne mit Béchamelsauce",
+      "servingsText": "6 Portionen",
+      "prepTime": "30 Min.",
+      "cookTime": "40 Min.",
+      "totalTime": "1 Std. 10 Min.",
+      "ingredients": [
+        {
+          "quantity": "2",
+          "unit": "Stk.",
+          "name": "Zucchini",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "1",
+          "unit": "Stk.",
+          "name": "Aubergine",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "2",
+          "unit": "Stk.",
+          "name": "rote Paprika",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "2",
+          "unit": "EL",
+          "name": "Olivenöl",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "1",
+          "unit": "TL",
+          "name": "Oregano",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "400",
+          "unit": "g",
+          "name": "gehackte Tomaten",
+          "group": "Füllung"
+        }
+      ],
+      "steps": [],
+      "expectedUncertainties": [],
+      "notes": "Seite 1 von 2: Titel, Portionen, Zeiten und Zutaten der Füllung."
+    },
+    "multi-page-2.jpg": {
+      "title": "",
+      "servingsText": "",
+      "prepTime": "",
+      "cookTime": "",
+      "totalTime": "",
+      "ingredients": [
+        {
+          "quantity": "40",
+          "unit": "g",
+          "name": "Butter",
+          "group": "Béchamelsauce"
+        },
+        {
+          "quantity": "40",
+          "unit": "g",
+          "name": "Mehl",
+          "group": "Béchamelsauce"
+        },
+        {
+          "quantity": "500",
+          "unit": "ml",
+          "name": "Milch",
+          "group": "Béchamelsauce"
+        },
+        {
+          "quantity": "250",
+          "unit": "g",
+          "name": "Lasagneplatten",
+          "group": "Außerdem"
+        },
+        {
+          "quantity": "80",
+          "unit": "g",
+          "name": "Parmesan",
+          "group": "Außerdem"
+        }
+      ],
+      "steps": [
+        "Den Backofen auf 180 °C vorheizen.",
+        "Zucchini, Aubergine und Paprika waschen und in kleine Würfel schneiden.",
+        "Das Öl in einer Pfanne erhitzen, das Gemüse 8 Min. anbraten, Oregano und Tomaten zugeben und 10 Min. köcheln lassen.",
+        "Für die Béchamelsauce die Butter schmelzen, das Mehl einrühren und die Milch unter Rühren zugießen. Mit Muskatnuss würzen.",
+        "Gemüse, Sauce und Lasagneplatten abwechselnd in eine Auflaufform schichten. Mit Parmesan bestreuen.",
+        "Bei 180 °C ca. 40 Min. backen und vor dem Servieren 10 Min. ruhen lassen."
+      ],
+      "expectedUncertainties": [],
+      "notes": "Seite 2 von 2: Fortsetzung der Zutaten und Zubereitung; nur mit Seite 1 vollständig."
+    },
+    "unclear-quantities.jpg": {
+      "title": "Schoko-Kirsch-Muffins",
+      "servingsText": "12 Stück",
+      "prepTime": "20 Min.",
+      "cookTime": "25 Min.",
+      "totalTime": "45 Min.",
+      "ingredients": [
+        {
+          "quantity": "",
+          "unit": "g",
+          "name": "Butter"
+        },
+        {
+          "quantity": "250",
+          "unit": "",
+          "name": "Mehl"
+        },
+        {
+          "quantity": "250",
+          "unit": "",
+          "name": "Zucker"
+        },
+        {
+          "quantity": "2",
+          "unit": "EL",
+          "name": "Salz"
+        },
+        {
+          "quantity": "3",
+          "unit": "",
+          "name": "Eier"
+        },
+        {
+          "quantity": "1",
+          "unit": "Pck.",
+          "name": "Backpulver"
+        },
+        {
+          "quantity": "200",
+          "unit": "g",
+          "name": "Kirschen"
+        }
+      ],
+      "steps": [
+        "Den Backofen auf 180 °C vorheizen und ein Muffinblech mit Papierförmchen auslegen.",
+        "Die weiche Butter mit dem Zucker cremig rühren, dann die Eier einzeln unterrühren.",
+        "Mehl und Backpulver mischen und unter den Teig heben. Zuletzt die Kirschen vorsichtig unterheben.",
+        "Im vorgeheizten Ofen bei 1?? °C ca. 25 Min. backen. Die Muffins in der Form abkühlen lassen."
+      ],
+      "expectedUncertainties": [
+        {
+          "reference": "Zutat 1, Menge",
+          "kind": "unkenntlich",
+          "expectUncertain": true,
+          "mustNotInvent": [
+            "eine konkrete Buttermenge"
+          ]
+        },
+        {
+          "reference": "Zutat 2, Einheit",
+          "kind": "mehrdeutig",
+          "expectUncertain": true,
+          "mustNotInvent": [
+            "eine konkrete Einheit (z. B. g)"
+          ]
+        },
+        {
+          "reference": "Zutat 3, Einheit",
+          "kind": "fehlend",
+          "expectUncertain": true,
+          "mustNotInvent": [
+            "eine Einheit für den Zucker"
+          ]
+        },
+        {
+          "reference": "Zutat 4, Einheit",
+          "kind": "unplausibel",
+          "expectUncertain": false,
+          "mustNotInvent": [
+            "Umrechnung oder Korrektur der Einheit EL"
+          ]
+        },
+        {
+          "reference": "Schritt 4, Temperatur",
+          "kind": "unleserlich",
+          "expectUncertain": true,
+          "mustNotInvent": [
+            "eine genaue Temperatur (z. B. 180 °C)"
+          ]
+        }
+      ],
+      "notes": "Absichtlich unleserliche bzw. mehrdeutige Stellen: Tipp-Ex über der Buttermenge, Einheit '?' beim Mehl, fehlende Einheit beim Zucker, unplausible Einheit '2 EL Salz', unleserliche Backtemperatur '1?? °C'. Unveränderte Stellen sind wörtlich zu übernehmen; nichts raten."
+    },
+    "printed-abbreviations.jpg": {
+      "title": "Apfel-Streuselkuchen",
+      "servingsText": "12 Stück",
+      "prepTime": "25 Min.",
+      "cookTime": "45 Min.",
+      "totalTime": "1 Std. 10 Min.",
+      "ingredients": [
+        {
+          "quantity": "500",
+          "unit": "g",
+          "name": "Mehl",
+          "group": "Teig"
+        },
+        {
+          "quantity": "1",
+          "unit": "Pck.",
+          "name": "Trockenhefe",
+          "group": "Teig"
+        },
+        {
+          "quantity": "1/4",
+          "unit": "l",
+          "name": "Milch",
+          "group": "Teig"
+        },
+        {
+          "quantity": "80",
+          "unit": "g",
+          "name": "Zucker",
+          "group": "Teig"
+        },
+        {
+          "quantity": "2",
+          "unit": "Stk.",
+          "name": "Eier",
+          "group": "Teig"
+        },
+        {
+          "quantity": "1",
+          "unit": "Prise",
+          "name": "Salz",
+          "group": "Teig"
+        },
+        {
+          "quantity": "1",
+          "unit": "kg",
+          "name": "Äpfel",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "2",
+          "unit": "EL",
+          "name": "Zitronensaft",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "1",
+          "unit": "Msp.",
+          "name": "Zimt",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "100",
+          "unit": "ml",
+          "name": "Sahne",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "200",
+          "unit": "g",
+          "name": "Mehl",
+          "group": "Streusel"
+        },
+        {
+          "quantity": "150",
+          "unit": "g",
+          "name": "Butter",
+          "group": "Streusel"
+        },
+        {
+          "quantity": "100",
+          "unit": "g",
+          "name": "Zucker",
+          "group": "Streusel"
+        },
+        {
+          "quantity": "1 1/2",
+          "unit": "TL",
+          "name": "Zimt",
+          "group": "Streusel"
+        }
+      ],
+      "steps": [
+        "Für den Teig das Mehl in eine Schüssel geben und mit der Trockenhefe mischen. Die Milch lauwarm erwärmen.",
+        "Milch, Zucker, Eier und Salz zum Mehl geben und alles zu einem glatten Teig verkneten. 60 Min. zugedeckt gehen lassen.",
+        "Für die Füllung die Äpfel schälen, entkernen und in Spalten schneiden. Mit Zitronensaft, Zimt und Sahne mischen.",
+        "Für die Streusel Mehl, Butter, Zucker und Zimt mit den Fingern verreiben.",
+        "Den Teig in eine Springform (26 cm) drücken, die Äpfel darauf verteilen und die Streusel darüber streuen. Bei 180 °C ca. 45 Min. backen. Vor dem Servieren 1 Std. abkühlen lassen."
+      ],
+      "expectedUncertainties": [],
+      "notes": "Gedruckt mit vielen Abkürzungen (EL, TL, Msp., Prise, Stk., Pck., g, kg, ml, l, Min., Std., °C), Brüchen (1/4, 1 1/2) und Zutatengruppen (Teig, Füllung, Streusel)."
+    }
+  },
+  "combined": {
+    "multi-page": {
+      "pages": [
+        "multi-page-1.jpg",
+        "multi-page-2.jpg"
+      ],
+      "title": "Gemüse-Lasagne mit Béchamelsauce",
+      "servingsText": "6 Portionen",
+      "prepTime": "30 Min.",
+      "cookTime": "40 Min.",
+      "totalTime": "1 Std. 10 Min.",
+      "ingredients": [
+        {
+          "quantity": "2",
+          "unit": "Stk.",
+          "name": "Zucchini",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "1",
+          "unit": "Stk.",
+          "name": "Aubergine",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "2",
+          "unit": "Stk.",
+          "name": "rote Paprika",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "2",
+          "unit": "EL",
+          "name": "Olivenöl",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "1",
+          "unit": "TL",
+          "name": "Oregano",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "400",
+          "unit": "g",
+          "name": "gehackte Tomaten",
+          "group": "Füllung"
+        },
+        {
+          "quantity": "40",
+          "unit": "g",
+          "name": "Butter",
+          "group": "Béchamelsauce"
+        },
+        {
+          "quantity": "40",
+          "unit": "g",
+          "name": "Mehl",
+          "group": "Béchamelsauce"
+        },
+        {
+          "quantity": "500",
+          "unit": "ml",
+          "name": "Milch",
+          "group": "Béchamelsauce"
+        },
+        {
+          "quantity": "250",
+          "unit": "g",
+          "name": "Lasagneplatten",
+          "group": "Außerdem"
+        },
+        {
+          "quantity": "80",
+          "unit": "g",
+          "name": "Parmesan",
+          "group": "Außerdem"
+        }
+      ],
+      "steps": [
+        "Den Backofen auf 180 °C vorheizen.",
+        "Zucchini, Aubergine und Paprika waschen und in kleine Würfel schneiden.",
+        "Das Öl in einer Pfanne erhitzen, das Gemüse 8 Min. anbraten, Oregano und Tomaten zugeben und 10 Min. köcheln lassen.",
+        "Für die Béchamelsauce die Butter schmelzen, das Mehl einrühren und die Milch unter Rühren zugießen. Mit Muskatnuss würzen.",
+        "Gemüse, Sauce und Lasagneplatten abwechselnd in eine Auflaufform schichten. Mit Parmesan bestreuen.",
+        "Bei 180 °C ca. 40 Min. backen und vor dem Servieren 10 Min. ruhen lassen."
+      ],
+      "expectedUncertainties": [],
+      "notes": "Vollständiges, über zwei Seiten verteiltes Rezept."
+    }
+  }
+}

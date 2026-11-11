@@ -1251,7 +1251,9 @@ function normalizeRecipe(value: unknown, index: number): Recipe {
         ? 'manual'
         : value.importSource === 'url'
           ? 'url'
-          : 'mela',
+          : value.importSource === 'photo'
+            ? 'photo'
+            : 'mela',
     title,
     description: asString(value.description),
     ingredientGroups: Array.isArray(value.ingredientGroups)

@@ -24,6 +24,8 @@ describe('Mela import page', () => {
     expect(html).toContain('lokal in IndexedDB')
     expect(html).toContain('Testdaten')
     expect(html).not.toContain('Familien-Cloud')
+    expect(html).not.toContain('Foto / Scan')
+    expect(html).not.toContain('href="#/import/foto"')
   })
 
   it('uses the cloud copy and hides the local reset', () => {
@@ -36,6 +38,8 @@ describe('Mela import page', () => {
     )
     expect(html).toContain('gespeichert wird in der Familien-Cloud')
     expect(html).toContain('im privaten Familienspeicher')
+    expect(html).toContain('Foto / Scan')
+    expect(html).toContain('href="#/import/foto"')
     expect(html).not.toContain('Testdaten')
     expect(html).not.toContain('lokal in IndexedDB')
   })

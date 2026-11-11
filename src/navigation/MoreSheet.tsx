@@ -33,6 +33,20 @@ function LinkIcon({ icon }: { icon: MoreMenuLink['icon'] }) {
       </svg>
     )
   }
+  if (icon === 'photo') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path
+          d="M4.5 8.5h3l1.4-2h6.2l1.4 2h3v10h-15v-10Zm7.5 2.3a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4Z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    )
+  }
   if (icon === 'mela') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">

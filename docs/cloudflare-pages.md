@@ -1,182 +1,141 @@
-# GitHub und Cloudflare Pages – Veröffentlichungscheckliste
+# Cloudflare Pages – Deployment und Betrieb
 
-Stand: vorbereitet, **nicht veröffentlicht**. Es existiert noch kein
-GitHub-Remote und Cloudflare Pages ist noch nicht eingerichtet.
+Stand: **veröffentlicht** (Produktion auf `main`).
 
-## 1. Repository
+- Produktions-URL: <https://kuechenrunde.pages.dev>
+- Eigene Domain: <https://kuechenrunde.com>
+- Cloudflare-Pages-Projekt: `kuechenrunde`
+- Produktionsbranch: `main`
+- Build: `pnpm build` → `dist`
+- Node.js: `>= 22` (`package.json`, `.nvmrc`)
 
-Aktueller Stand:
+Ein Push auf `main` löst über die bestehende Git-Integration einen neuen
+Produktions-Deploy aus. `wrangler.toml` ist dabei die maßgebliche
+Pages-Konfiguration (Source of Truth); deshalb stehen Bindings und
+Kompatibilitätsoptionen im Repository und nicht nur im Dashboard.
 
-- Branch: `feat/cloud`
-- Letzter Commit: `e778f9e` (A4.1); für A5 kommt ein weiterer lokaler Commit
-  hinzu.
-- Kein Git-Remote, kein GitHub-Repository, `gh` ist auf dem Rechner nicht
-  installiert.
-- `main` enthält noch den Stand vor der Cloud-Integration. Für den ersten
-  kontrollierten Deploy ist deshalb `feat/cloud` der Produktionsbranch.
+## Pages Functions
 
-Sobald ein GitHub-Konto und eine Anmeldung verfügbar sind:
+| Route | Datei | Zweck |
+| --- | --- | --- |
+| `POST /api/recipe-fetch` | `functions/api/recipe-fetch.ts` | URL-Rezeptimport (JSON-LD) |
+| `POST /api/recipe-ocr` | `functions/api/recipe-ocr.ts` | Foto-/Scan-Erkennung über Workers AI |
 
-```bash
-# einmalig, interaktiv
-gh auth login
+Beide Routen sind ausschließlich in `public/_routes.json` eingetragen; statische
+Assets lösen keine Function aus. Beide Endpunkte verlangen ein gültiges
+Supabase-Access-Token **und** die Mitgliedschaft im Familienhaushalt
+(`public.is_household_member()`), sind same-origin-only und liefern keine
+CORS-Header.
 
-# privates Repository anlegen; <GITHUB-OWNER> durch das eigene Konto/Organisation ersetzen
-gh repo create <GITHUB-OWNER>/kuechenrunde --private --source=. --remote=origin
+## Workers-AI-Binding
 
-# feat/cloud veröffentlichen (kein öffentlicher Push)
-git push -u origin feat/cloud
-git push -u origin main
+`wrangler.toml` bindet Workers AI:
+
+```toml
+[ai]
+binding = "AI"
 ```
 
-Alternativ über die GitHub-Weboberfläche ein **privates** Repository
-`kuechenrunde` anlegen und das Remote manuell eintragen:
+Die Foto-Erkennung ruft damit serverseitig
+`@cf/meta/llama-4-scout-17b-16e-instruct` auf (`env.AI.run(...)`). Der Browser
+spricht **nie** direkt mit Cloudflare Workers AI und enthält keine
+Cloudflare-Zugangsdaten.
 
-```bash
-git remote add origin git@github.com:<GITHUB-OWNER>/kuechenrunde.git
-git push -u origin feat/cloud
-git push -u origin main
-```
+Voraussetzungen im Cloudflare-Konto:
 
-Vor dem ersten Push prüfen:
+1. Workers AI ist für das Konto verfügbar (Free-Tier genügt).
+2. Die Modellbedingungen von Meta Llama 4 wurden im Dashboard einmalig
+   akzeptiert. Fehlt die Zustimmung, antwortet `/api/recipe-ocr` mit
+   `503 not-configured` und einem verständlichen Hinweis; es wird **kein
+   Tarifwechsel** ausgelöst.
+3. Das Free-Tier umfasst **10.000 Neuronen pro Tag** (Reset 00:00 UTC). Ist das
+   Kontingent erschöpft, liefert die Function `429 quota-exhausted` mit einer
+   verständlichen Meldung; es entstehen keine Kosten und es gibt keinen
+   automatischen Upgrade.
 
-```bash
-git status
-git log --oneline -5
-git ls-files | grep -E '^(\.env|fixtures-private/|backups/)' || true
-```
+Falls ein Deployment das AI-Binding nicht übernimmt, kann es im Dashboard unter
+**Workers & Pages → kuechenrunde → Settings → Bindings** als
+„Workers AI“-Binding mit dem Variablennamen `AI` ergänzt werden; danach ist ein
+neuer Deploy nötig. `wrangler` wird für den regulären Deploy nicht benötigt.
 
-`fixtures-private/`, `.env`, lokale Backups und `.DS_Store` sind gitignored.
-Die Git-Historie wurde auf typische Secret-Muster geprüft; es wurden keine
-echten service_role-/Secret-Keys, JWTs, Datenbank-URLs oder privaten
-Rezeptdateien gefunden. Der alte Legacy-service_role-Key aus dem lokalen
-Tool-Protokoll ist **nicht** im Repository.
+## Build-Umgebungsvariablen (öffentlich)
 
-## 2. Cloudflare Pages
-
-### Projekt anlegen
-
-1. Cloudflare Dashboard → **Workers & Pages** → **Create** → **Pages** →
-   **Connect to Git**.
-2. Repository `kuechenrunde` auswählen (privat ist in Ordnung).
-3. Produktionsbranch für den ersten Deploy: **`feat/cloud`**.
-   Nach der Abnahme kann auf `main` gewechselt werden, sobald `feat/cloud`
-   dorthin gemerged wurde.
-4. Framework-Preset: **Vite** (oder „None“ mit den Werten unten).
-5. Build-Befehl: `pnpm build`
-6. Ausgabeverzeichnis: `dist`
-7. Root-Verzeichnis: `/`
-8. Node.js-Version: **22** (`NODE_VERSION=22` als Build-Umgebungsvariable;
-   `package.json` verlangt `>=22`).
-
-### Build-Umgebungsvariablen
-
-Diese Werte sind öffentlich und werden in das Browser-Bundle eingebaut:
+Diese Werte landen im Browser-Bundle und sind keine Secrets:
 
 - `VITE_DATA_MODE=cloud`
 - `VITE_SUPABASE_URL=https://<projekt-ref>.supabase.co`
-- `VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_…` oder der klassische
-  Anon-Key
+- `VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_…` (oder klassischer Anon-Key)
 - `VITE_SOURCE_CODE_URL=https://github.com/<GITHUB-OWNER>/kuechenrunde`
-  (für den Quellcode-Link unter „Über Küchenrunde“; beim Release setzen)
 - `NODE_VERSION=22`
 
-### Runtime-Umgebungsvariablen der Pages Function
+## Runtime-Umgebungsvariablen der Pages Functions
 
-Diese Werte werden **nicht** in das Browser-Bundle eingebaut und nur von
-`functions/api/recipe-fetch.ts` gelesen:
+Nur serverseitig, nicht `VITE_*`, nicht im Browser-Bundle:
 
-- `SUPABASE_URL=https://<projekt-ref>.supabase.co`
-- `SUPABASE_PUBLISHABLE_KEY=sb_publishable_…` (alternativ
-  `SUPABASE_ANON_KEY`)
+- `SUPABASE_URL`
+- `SUPABASE_PUBLISHABLE_KEY` (alternativ `SUPABASE_ANON_KEY`)
 
-Für Production und Preview setzen. **Niemals** setzen:
+**Niemals** setzen: `SUPABASE_SERVICE_ROLE_KEY`, `sb_secret_…` oder andere
+service-role-equivalente Schlüssel. `functions/lib/supabase-auth.ts` lehnt
+solche Keys aktiv ab.
 
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `sb_secret_…`
-- andere service-role-equivalente Schlüssel
+## Sicherheits-Header
 
-Die Function lehnt solche Schlüssel aktiv ab.
+`public/_headers` enthält CSP, HSTS, `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` und
+`Cross-Origin-Opener-Policy`. Die CSP erlaubt Supabase über
+`https://*.supabase.co` und `wss://*.supabase.co`; bei einer eigenen
+Supabase-Domain müssen `img-src`/`connect-src` ergänzt werden.
+`script-src` bleibt auf `'self'` beschränkt (kein `unsafe-eval`); die optionale
+PDF-Bibliothek wird als eigener same-origin Chunk geladen.
 
-### Vorhandene Konfiguration
+> Hinweis: `Permissions-Policy: camera=()` betrifft nur die eingebettete Seite.
+> Für „Foto aufnehmen“ nutzt Küchenrunde das native
+> `<input type="file" capture="environment">`; dafür ist keine
+> Kamera-Berechtigung per `getUserMedia` nötig.
 
-- `wrangler.toml` – `pages_build_output_dir = "dist"`,
-  `compatibility_date = "2026-11-01"`,
-  `compatibility_flags = ["global_fetch_strictly_public"]`
-- `public/_routes.json` – nur `/api/recipe-fetch` löst Pages Functions aus;
-  statische Assets bleiben Function-frei.
-- `public/_headers` – CSP, HSTS, `X-Content-Type-Options`,
-  `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`,
-  `Cross-Origin-Opener-Policy`.
-- `functions/api/recipe-fetch.ts` – Same-Origin-API mit Supabase-Token- und
-  Haushaltsprüfung.
-- PWA: `vite-plugin-pwa` mit `start_url`/`scope` `/` und
-  `navigateFallback: /index.html`; `sw.js` wird nicht lange gecacht.
+## Deployment prüfen
 
-**Wichtig zur Source of Truth:** Sobald `wrangler.toml` ein
-`pages_build_output_dir` enthält, gilt die Datei bei Cloudflare Pages als
-Source of Truth; dieselben Felder sind im Dashboard dann nicht mehr editierbar.
-Die Runtime-Werte der Function (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`)
-müssen deshalb als Pages-Variablen/`[vars]` hinterlegt werden. Beide Werte sind
-öffentlich und dürfen im Browser-Bundle stehen; service_role-/Secret-Keys
-niemals. `VITE_*` bleiben Build-Umgebungsvariablen. Falls die
-Dashboard-Konfiguration bevorzugt wird, `pages_build_output_dir` entfernen und
-die Pages-Einstellungen im Dashboard pflegen; dann die Compatibility-Flags dort
-setzen.
+Nach einem Push auf `main`:
 
-### CSP und Supabase-Domain
+```bash
+# Build-Status im Dashboard bzw. über die Deployments-Liste prüfen
+# https://dash.cloudflare.com → Workers & Pages → kuechenrunde
 
-Die CSP in `public/_headers` erlaubt Supabase über
-`https://*.supabase.co` und `wss://*.supabase.co`. Bei einer eigenen
-Supabase-Domain müssen `img-src` und `connect-src` entsprechend ergänzt
-werden. `style-src 'unsafe-inline'` ist für React-Inline-Styles nötig;
-`script-src` bleibt auf `'self'` beschränkt.
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  -H 'Content-Type: application/json' -d '{}' \
+  https://kuechenrunde.pages.dev/api/recipe-ocr
+# erwartet: 401 (Route vorhanden, Anmeldung fehlt) – nicht 404/405
+```
 
-### Erster kontrollierter Deploy
+Weitere Smoke-Tests:
 
-1. Repository privat anlegen und `feat/cloud` pushen (siehe oben).
-2. Pages-Projekt verbinden, Produktionsbranch `feat/cloud`, Build wie oben.
-3. Build- und Runtime-Variablen setzen; keine Secrets.
-4. Deploy starten und Build-Log prüfen (Typecheck, Worker-Typecheck, Vite).
-5. `https://<projekt>.pages.dev` öffnen:
-   - Login mit einem Familienkonto
-   - Rezeptbibliothek und ein Bild laden
-   - URL-Import und Mela-Import testen
-   - Backup herunterladen
-   - Restore nur in einem leeren Testbestand testen
-6. In den Cloudflare-Logs prüfen, dass statische Assets keine Function
-   auslösen und `/api/recipe-fetch` nur bei Bedarf aufgerufen wird.
-7. Erst nach erfolgreicher Abnahme `feat/cloud` nach `main` mergen und den
-   Produktionsbranch in Cloudflare auf `main` umstellen.
+1. Ohne Anmeldung `POST /api/recipe-ocr` → 401; mit gültigem Token, aber ohne
+   Haushaltsmitgliedschaft → 403.
+2. Im Cloud-Modus unter **Import → Foto / Scan** ein gedrucktes und ein
+   handschriftliches Rezept erkennen; Vorschau im Editor prüfen.
+3. Unleserliche Stelle → erscheint als Hinweis; gespeichert wird erst nach
+   Bestätigung.
+4. Drei bis vier Seiten in einer Erkennung testen; bei Fehler `timeout`/`busy`
+   mit weniger Seiten wiederholen.
+5. Kontingent-Test ist nur kontrolliert sinnvoll (verbraucht das Tagesbudget);
+   die Fehlerabbildung ist durch Tests abgedeckt.
+6. Statische Assets in den Logs prüfen: keine Function-Aufrufe; keine Tokens,
+   Fotos oder Rezeptinhalte in Logs.
 
-### Nach dem Deploy manuell prüfen
+## Quellen und Grenzen
 
-- Supabase-Auth: Login/Logout, Session-Refresh, Nicht-Mitglied wird abgewiesen.
-- URL-Import: öffentliche Rezeptseite, Redirect, private URL wird abgelehnt.
-- Mela-Import: Rezept ohne/mit JPEG/PNG-Bild; HEIC wird bewusst übersprungen.
-- Cloud-Backup: ZIP herunterladen, außerhalb der App öffnen.
-- Cloud-Restore: nur leerer Bestand; bei vorhandenen Daten verweigert.
-- Lokaler Modus (`VITE_DATA_MODE=local`) bleibt separat funktionsfähig.
-- PWA: Installation/Offline-Shell im lokalen Modus; Cloud-Daten brauchen Netz.
+- Pages-Functions-Routing und Bindings:
+  <https://developers.cloudflare.com/pages/functions/bindings/>
+- Workers AI Preise/Free-Tier:
+  <https://developers.cloudflare.com/workers-ai/platform/pricing/>
+- Workers AI Fehlercodes:
+  <https://developers.cloudflare.com/workers-ai/platform/errors/>
+- Fotoimport-Architektur, Kosten und iPhone-Anleitung:
+  [`docs/photo-import.md`](photo-import.md)
+- Live-Erkennungstestergebnisse:
+  [`docs/photo-ocr-test-results.md`](photo-ocr-test-results.md)
 
-## 3. GitHub-CLI-Status
-
-`gh` ist auf diesem Rechner nicht installiert. Die Repository-Erstellung und
-der Push benötigen daher eine der folgenden Benutzeraktionen:
-
-- GitHub CLI installieren und `gh auth login` ausführen, oder
-- ein privates Repository über die GitHub-Weboberfläche anlegen und das Remote
-  manuell eintragen.
-
-Ohne diese Anmeldung kann kein GitHub-Remote angelegt oder gepusht werden. Es
-wurde kein öffentlicher Push durchgeführt.
-
-## 4. Kurzfassung des kürzesten Wegs
-
-1. Privates GitHub-Repository `kuechenrunde` anlegen und `feat/cloud` pushen.
-2. In Cloudflare Pages verbinden, Produktionsbranch `feat/cloud`,
-   `pnpm build` → `dist`, Node 22.
-3. Öffentliche `VITE_*`-Build-Variablen und die beiden `SUPABASE_*`-Runtime-
-   Variablen setzen; keine service_role-/Secret-Keys.
-4. Deployen, die Smoke-Tests oben ausführen.
-5. Danach `feat/cloud` nach `main` mergen und den Produktionsbranch umstellen.
+Die Rate-Limits der Functions (pro IP und pro Mitglied) leben isolate-lokal und
+sind eine Missbrauchsbremse, keine globale Garantie. Workers AI hat zusätzlich
+eigene Kontingente und Rate-Limits.

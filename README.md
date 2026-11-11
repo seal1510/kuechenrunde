@@ -24,6 +24,14 @@ Bilddateien liegen im privaten Supabase-Storage-Bucket `recipe-images`;
 angezeigt werden sie über kurzlebige Signed URLs. Koch-Timer, Wake Lock und der
 temporäre Kochfortschritt bleiben bewusst gerätelokal.
 
+Im Cloud-Modus können gedruckte und handschriftliche Papierrezepte zusätzlich
+per **Foto / Scan** übernommen werden: bis zu vier Seiten pro Rezept, wahlweise
+Kamera, Fotomediathek oder PDF (Desktop). Die Erkennung läuft serverseitig über
+Cloudflare Workers AI und bleibt im kostenlosen Tageskontingent; das Ergebnis
+wird im vorhandenen Rezepteditor geprüft und erst nach ausdrücklicher
+Bestätigung gespeichert. Details, Kosten und Grenzen stehen in
+[`docs/photo-import.md`](docs/photo-import.md).
+
 Im lokalen Modus bleiben alle Daten in IndexedDB. Es gibt keine automatische
 Migration lokaler Bestände in die Cloud und keinen Cloud-Reset.
 
@@ -39,6 +47,8 @@ Details:
 - Cloud-Grundlage und RLS: [`supabase/README.md`](supabase/README.md)
 - Familienzugang und Einladungen: [`docs/family-access.md`](docs/family-access.md)
 - URL-Rezeptimport und Pages Function: [`docs/url-import-cloud.md`](docs/url-import-cloud.md)
+- Foto-/Scan-Import: [`docs/photo-import.md`](docs/photo-import.md)
+- Live-Erkennungstestergebnisse: [`docs/photo-ocr-test-results.md`](docs/photo-ocr-test-results.md)
 - Mela-Import und Cloud-Backup: [`docs/cloud-import-backup.md`](docs/cloud-import-backup.md)
 - Cloudflare-Pages-Deployment: [`docs/cloudflare-pages.md`](docs/cloudflare-pages.md)
 
@@ -47,7 +57,7 @@ Cloudflare Pages ist eingerichtet; die Produktion läuft unter
 
 ## Funktionen
 
-- Rezeptbibliothek mit Mela-Import und URL-Import (JSON-LD)
+- Rezeptbibliothek mit Mela-Import, URL-Import (JSON-LD) und Foto-/Scan-Import
 - Wochenplanung und Kochmodus mit Timern
 - Einkaufslisten mit mehreren Listen, Zuteilungen und Einkäufen
 - Backup und Wiederherstellung als ZIP, lokal und im Cloud-Modus
@@ -122,16 +132,17 @@ ausgeliefert. Nach Änderungen an `LICENSE` oder `NOTICE` müssen die Kopien in
 
 ## Cloudflare Pages
 
-Die vorbereitete Konfiguration verwendet:
+Die veröffentlichte Konfiguration verwendet:
 
 - Build-Befehl `pnpm build`
 - Ausgabeverzeichnis `dist`
-- Produktionsbranch `feat/cloud` (für den ersten kontrollierten Deploy; danach
-  kann auf `main` gewechselt werden)
-- Pages Function `functions/api/recipe-fetch.ts`
-- `public/_routes.json` für ausschließlich `/api/recipe-fetch`
+- Produktionsbranch `main` (Push löst den Deploy aus)
+- Pages Functions `functions/api/recipe-fetch.ts` und
+  `functions/api/recipe-ocr.ts`
+- `public/_routes.json` für `/api/recipe-fetch` und `/api/recipe-ocr`
 - `public/_headers` für sichere HTTP-Header
-- `wrangler.toml` mit `pages_build_output_dir = "dist"`
+- `wrangler.toml` mit `pages_build_output_dir = "dist"` und
+  `[ai] binding = "AI"` für Workers AI
 
 Die vollständige Checkliste, Umgebungsvariablen und der kürzeste
 Deployment-Weg stehen in [`docs/cloudflare-pages.md`](docs/cloudflare-pages.md).
@@ -156,8 +167,10 @@ Die Build-Variablen `VITE_*` sind öffentlich; service_role- und
   JavaScript-SDK und seine Laufzeitabhängigkeiten stehen unter MIT bzw. 0BSD;
   die vollständigen Texte stehen in `public/legal/THIRD-PARTY-LICENSES.txt`.
 - **Laufzeitbibliotheken** – React, React DOM, scheduler, Dexie,
-  dexie-react-hooks, DOMPurify, fflate, marked und workbox-window. Die
-  vollständigen Texte stehen in `public/legal/THIRD-PARTY-LICENSES.txt`.
+  dexie-react-hooks, DOMPurify, fflate, marked, workbox-window und PDF.js
+  (`pdfjs-dist`, Apache-2.0; wird nur für den optionalen PDF-Import dynamisch
+  geladen). Die vollständigen Texte stehen in
+  `public/legal/THIRD-PARTY-LICENSES.txt`.
 
 ## Keine Gewährleistung
 

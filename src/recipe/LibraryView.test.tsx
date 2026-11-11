@@ -45,8 +45,10 @@ describe('mobile recipe library actions', () => {
     expect(html).toContain('class="library-import-menu"')
     expect(html).toContain('<summary class="button quiet">Import</summary>')
     expect(html).toContain('URL-Rezeptimport')
+    expect(html).toContain('Foto / Scan')
     expect(html).toContain('Mela-Import')
     expect(html).toContain('href="#/import/url"')
+    expect(html).toContain('href="#/import/foto"')
     expect(html).toContain('href="#/import"')
   })
 
@@ -55,6 +57,9 @@ describe('mobile recipe library actions', () => {
 
     expect(html).toContain(
       'class="button quiet library-action-secondary" href="#/import/url"',
+    )
+    expect(html).toContain(
+      'class="button quiet library-action-secondary" href="#/import/foto"',
     )
     expect(html).toContain(
       'class="button quiet library-action-secondary" href="#/import"',
@@ -70,6 +75,8 @@ describe('mobile recipe library actions', () => {
     expect(html).toContain('class="library-import-menu"')
     expect(html).toContain('URL-Rezeptimport')
     expect(html).toContain('Mela-Import')
+    expect(html).not.toContain('Foto / Scan')
+    expect(html).not.toContain('href="#/import/foto"')
     expect(html).toContain('href="#/backup"')
     expect(html).toContain('Backup')
   })

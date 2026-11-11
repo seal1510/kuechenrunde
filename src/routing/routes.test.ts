@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { cookHash, normalizeHash, parseRoute, URL_IMPORT_HASH } from './routes'
+import {
+  PHOTO_IMPORT_HASH,
+  URL_IMPORT_HASH,
+  cookHash,
+  normalizeHash,
+  parseRoute,
+} from './routes'
 
 describe('hash normalisation', () => {
   it('accepts embedded and leading hash variants', () => {
@@ -21,6 +27,7 @@ describe('route resolution', () => {
     expect(parseRoute('#/shopping')).toEqual({ name: 'shopping' })
     expect(parseRoute('#/import')).toEqual({ name: 'import' })
     expect(parseRoute('#/import/url')).toEqual({ name: 'import-url' })
+    expect(parseRoute('#/import/foto')).toEqual({ name: 'import-photo' })
     expect(parseRoute('#/backup')).toEqual({ name: 'backup' })
     expect(parseRoute('#/family')).toEqual({ name: 'family' })
     expect(parseRoute('#/about')).toEqual({ name: 'about' })
@@ -42,11 +49,14 @@ describe('route resolution', () => {
   it('does not let import swallow import/url or vice versa', () => {
     expect(parseRoute('#/import')).toEqual({ name: 'import' })
     expect(parseRoute('#/import/url')).toEqual({ name: 'import-url' })
+    expect(parseRoute('#/import/foto')).toEqual({ name: 'import-photo' })
     expect(parseRoute(URL_IMPORT_HASH)).toEqual({ name: 'import-url' })
+    expect(parseRoute(PHOTO_IMPORT_HASH)).toEqual({ name: 'import-photo' })
   })
 
   it('normalises trailing slashes and leading hashes', () => {
     expect(parseRoute('#/import/url/')).toEqual({ name: 'import-url' })
+    expect(parseRoute('#/import/foto/')).toEqual({ name: 'import-photo' })
     expect(parseRoute('import/url')).toEqual({ name: 'import-url' })
     expect(parseRoute('#/import/')).toEqual({ name: 'import' })
     expect(parseRoute('#/plan/')).toEqual({ name: 'plan' })

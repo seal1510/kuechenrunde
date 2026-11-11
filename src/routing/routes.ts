@@ -21,12 +21,16 @@ export type Route =
   | { name: 'shopping' }
   | { name: 'import' }
   | { name: 'import-url' }
+  | { name: 'import-photo' }
   | { name: 'backup' }
   | { name: 'family' }
   | { name: 'about' }
 
 /** Single source of truth for the URL-import link target. */
 export const URL_IMPORT_HASH = '#/import/url'
+
+/** Single source of truth for the photo/scan import link target. */
+export const PHOTO_IMPORT_HASH = '#/import/foto'
 
 /**
  * Single source of truth for cook-mode links. Recipe and session ids are
@@ -79,6 +83,7 @@ export function parseRoute(hash: string): Route {
   if (path === 'shopping') return { name: 'shopping' }
   if (path === 'import') return { name: 'import' }
   if (path === 'import/url') return { name: 'import-url' }
+  if (path === 'import/foto') return { name: 'import-photo' }
   if (path === 'backup') return { name: 'backup' }
   if (path === 'family') return { name: 'family' }
   if (path === 'about') return { name: 'about' }

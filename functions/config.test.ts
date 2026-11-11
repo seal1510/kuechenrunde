@@ -15,7 +15,7 @@ describe('Cloudflare Pages configuration', () => {
       exclude: string[]
     }
     expect(routes.version).toBe(1)
-    expect(routes.include).toEqual(['/api/recipe-fetch'])
+    expect(routes.include).toEqual(['/api/recipe-fetch', '/api/recipe-ocr'])
     expect(routes.exclude).toEqual([])
   })
 
@@ -26,6 +26,15 @@ describe('Cloudflare Pages configuration', () => {
     expect(wrangler).not.toMatch(/service_role\s*=/)
     expect(wrangler).not.toMatch(/SUPABASE_(SERVICE|SECRET)/)
     expect(wrangler).not.toMatch(/sb_secret_/)
+  })
+
+  it('binds Workers AI for the photo OCR Function', () => {
+    const wrangler = read('wrangler.toml')
+    expect(wrangler).toMatch(/^\[ai\]$/m)
+    expect(wrangler).toMatch(/^\s*binding\s*=\s*"AI"\s*$/m)
+    // Das Binding ist kein Secret und darf keine Zugangsdaten enthalten.
+    expect(wrangler).not.toMatch(/api[_-]?token/i)
+    expect(wrangler).not.toMatch(/api[_-]?key/i)
   })
 
   it('ships secure HTTP headers for the static site', () => {
@@ -80,6 +89,9 @@ describe('Cloudflare Pages configuration', () => {
   it('keeps the Function source free of Node-only imports and APIs', () => {
     const files = [
       'functions/api/recipe-fetch.ts',
+      'functions/api/recipe-ocr.ts',
+      'functions/lib/photo-ai.ts',
+      'functions/lib/photo-request.ts',
       'functions/lib/http.ts',
       'functions/lib/remote-fetch.ts',
       'functions/lib/supabase-auth.ts',

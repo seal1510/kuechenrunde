@@ -1,5 +1,5 @@
 {
   "version": 1,
-  "include": ["/api/recipe-fetch"],
+  "include": ["/api/recipe-fetch", "/api/recipe-ocr"],
   "exclude": []
 }

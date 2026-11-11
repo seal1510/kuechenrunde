@@ -1,0 +1,1639 @@
+{
+  "status": "live-run",
+  "generatedAt": "2026-11-11T17:26:36.949Z",
+  "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
+  "contractVersion": 1,
+  "endpoint": {
+    "host": "api.cloudflare.com",
+    "route": "/client/v4/accounts/{account_id}/ai/run/@cf/meta/llama-4-scout-17b-16e-instruct"
+  },
+  "input": {
+    "fixtureDirectory": "tests/fixtures/photo-ocr",
+    "groundTruth": "tests/fixtures/photo-ocr/ground-truth.json",
+    "groundTruthSha256": "a05ddf632b449e09f9f2c89de72dd31fc793d43954dfe4b957a4c15eb558fa13",
+    "pagesPerCase": {
+      "printed-basic": 1,
+      "printed-photo": 1,
+      "handwritten-basic": 1,
+      "handwritten-hard": 1,
+      "multi-page-kombiniert": 2,
+      "unclear-quantities": 1,
+      "printed-abbreviations": 1
+    }
+  },
+  "budget": {
+    "modelCalls": 7,
+    "maxModelCalls": 8,
+    "neuronsPerMillionInput": 24545,
+    "neuronsPerMillionOutput": 77273,
+    "freeDailyNeurons": 10000,
+    "estimatedNeuronsTotal": 1068.16,
+    "estimatedFreeDailyBudgetPercent": 10.68
+  },
+  "cases": [
+    {
+      "name": "printed-basic",
+      "files": [
+        "printed-basic.jpg"
+      ],
+      "groundTruthSource": "fixtures:printed-basic.jpg",
+      "status": "ok",
+      "latencyMs": 32402,
+      "rawResponse": "{\"cookTime\":\"25 Min.\",\"description\":\"\",\"ingredients\":[{\"group\":\"\",\"name\":\"Hokkaido-Kürbis\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"800 g\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"\"},{\"group\":\"\",\"name\":\"Zwiebel\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Stk.\"},{\"group\":\"\",\"name\":\"Olivenöl\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"2\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"EL\"},{\"group\":\"\",\"name\":\"Currypulver\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"TL\"},{\"group\":\"\",\"name\":\"Gemüsebrühe\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"700 ml\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"\"},{\"group\":\"\",\"name\":\"Kokosmilch\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"400 ml\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"\"},{\"group\":\"\",\"name\":\"Muskatnuss\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1/2\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"TL\"},{\"group\":\"\",\"name\":\"Chiliflocken\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Prise\"}],\"notes\":\"Hinweis: Mit gerösteten Kürbiskernen servieren.\",\"pages\":[{\"index\":0,\"kind\":\"recipe\",\"note\":\"\"}],\"prepTime\":\"15 Min.\",\"recognized\":true,\"servingsText\":\"Für 4 Portionen\",\"steps\":[{\"text\":\"Den Kürbis waschen, entkernen und in 2 cm große Würfel schneiden. Die Zwiebel fein würfeln.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Das Öl in einem großen Topf erhitzen und die Zwiebel glasig dünsten. Den Kürbis kurz mitbraten.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Currypulver einrühren, mit Gemüsebrühe und Kokosmilch ablöschen und aufkochen lassen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Zugedeckt 25 Min. bei mittlerer Hitze köcheln lassen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Die Suppe fein pürieren und mit Muskatnuss und Chiliflocken abschmecken.\",\"uncertain\":false,\"uncertainty\":\"\"}],\"title\":\"Cremige Kürbis-Kokos-Suppe\",\"totalTime\":\"40 Min.\",\"uncertainties\":[],\"warnings\":[]}",
+      "recipe": {
+        "recognized": true,
+        "title": "Cremige Kürbis-Kokos-Suppe",
+        "description": "",
+        "servingsText": "Für 4 Portionen",
+        "prepTime": "15 Min.",
+        "cookTime": "25 Min.",
+        "totalTime": "40 Min.",
+        "notes": "Hinweis: Mit gerösteten Kürbiskernen servieren.",
+        "ingredients": [
+          {
+            "group": "",
+            "quantity": "800",
+            "unit": "g",
+            "name": "Hokkaido-Kürbis",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1",
+            "unit": "Stk.",
+            "name": "Zwiebel",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "2",
+            "unit": "EL",
+            "name": "Olivenöl",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1",
+            "unit": "TL",
+            "name": "Currypulver",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "700",
+            "unit": "ml",
+            "name": "Gemüsebrühe",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "400",
+            "unit": "ml",
+            "name": "Kokosmilch",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1/2",
+            "unit": "TL",
+            "name": "Muskatnuss",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1",
+            "unit": "Prise",
+            "name": "Chiliflocken",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          }
+        ],
+        "steps": [
+          {
+            "text": "Den Kürbis waschen, entkernen und in 2 cm große Würfel schneiden. Die Zwiebel fein würfeln.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Das Öl in einem großen Topf erhitzen und die Zwiebel glasig dünsten. Den Kürbis kurz mitbraten.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Currypulver einrühren, mit Gemüsebrühe und Kokosmilch ablöschen und aufkochen lassen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Zugedeckt 25 Min. bei mittlerer Hitze köcheln lassen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Die Suppe fein pürieren und mit Muskatnuss und Chiliflocken abschmecken.",
+            "uncertain": false,
+            "uncertainty": ""
+          }
+        ],
+        "uncertainties": [],
+        "warnings": []
+      },
+      "pages": [
+        {
+          "index": 0,
+          "kind": "recipe",
+          "note": ""
+        }
+      ],
+      "metrics": {
+        "title": {
+          "expected": "Cremige Kürbis-Kokos-Suppe",
+          "detected": "Cremige Kürbis-Kokos-Suppe",
+          "exact": true,
+          "contains": true
+        },
+        "ingredients": {
+          "expected": 8,
+          "detected": 8,
+          "matched": 8,
+          "precision": 1,
+          "recall": 1,
+          "quantityAccuracy": 1,
+          "unitAccuracy": 1
+        },
+        "steps": {
+          "expected": 5,
+          "detected": 5,
+          "countDelta": 0,
+          "textJaccard": 1
+        },
+        "servings": {
+          "expected": "4 Portionen",
+          "detected": "Für 4 Portionen",
+          "correct": true
+        },
+        "times": {
+          "expected": {
+            "prepTime": "15 Min.",
+            "cookTime": "25 Min.",
+            "totalTime": "40 Min."
+          },
+          "detected": {
+            "prepTime": "15 Min.",
+            "cookTime": "25 Min.",
+            "totalTime": "40 Min."
+          },
+          "matched": 3,
+          "total": 3
+        },
+        "uncertainties": {
+          "expectedRequired": 0,
+          "covered": 0,
+          "missing": [],
+          "detectedCount": 0,
+          "detectedReferences": [],
+          "expectedFlags": []
+        },
+        "hallucinations": {
+          "ingredients": [],
+          "steps": [],
+          "inventedQuantities": [],
+          "inventedUnits": [],
+          "inventedTemperatures": [],
+          "correctedUnits": []
+        },
+        "usage": {
+          "promptTokens": 3317,
+          "completionTokens": 741,
+          "totalTokens": 4058
+        },
+        "estimatedNeurons": 138.68
+      }
+    },
+    {
+      "name": "printed-photo",
+      "files": [
+        "printed-photo.jpg"
+      ],
+      "groundTruthSource": "fixtures:printed-photo.jpg",
+      "status": "ok",
+      "latencyMs": 35102,
+      "rawResponse": "{\"cookTime\":\"25 Min.\",\"description\":\"\",\"ingredients\":[{\"group\":\"\",\"name\":\"Hokkaido-Kürbis\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"800\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"\",\"name\":\"Zwiebel\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Stk.\"},{\"group\":\"\",\"name\":\"Olivenöl\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"2\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"EL\"},{\"group\":\"\",\"name\":\"Currypulver\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"TL\"},{\"group\":\"\",\"name\":\"Gemüsebrühe\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"700\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"ml\"},{\"group\":\"\",\"name\":\"Kokosmilch\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"400\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"ml\"},{\"group\":\"\",\"name\":\"Muskatnuss\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1/2\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"TL\"},{\"group\":\"\",\"name\":\"Chiliflocken\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Prise\"}],\"notes\":\"Mit gerösteten Kürbiskernen servieren.\",\"pages\":[{\"index\":0,\"kind\":\"recipe\",\"note\":\"\"}],\"prepTime\":\"15 Min.\",\"recognized\":true,\"servingsText\":\"Für 4 Portionen\",\"steps\":[{\"text\":\"Den Kürbis waschen, entkernen und in 2 cm grobe Würfel schneiden. Die Zwiebel fein würfeln.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Das Öl in einem großen Topf erhitzen und die Zwiebel glasig dünsten. Den Kürbis kurz mitbraten.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Currypulver einrühren, mit Gemüsebrühe und Kokosmilch ablöschen und aufkochen lassen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Zugedeckt 25 Min. bei mittlerer Hitze köcheln lassen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Die Suppe fein pürieren und mit Muskatnuss und Chiliflocken abschmecken.\",\"uncertain\":false,\"uncertainty\":\"\"}],\"title\":\"Cremige Kürbis-Kokos-Suppe\",\"totalTime\":\"40 Min.\",\"uncertainties\":[],\"warnings\":[]}",
+      "recipe": {
+        "recognized": true,
+        "title": "Cremige Kürbis-Kokos-Suppe",
+        "description": "",
+        "servingsText": "Für 4 Portionen",
+        "prepTime": "15 Min.",
+        "cookTime": "25 Min.",
+        "totalTime": "40 Min.",
+        "notes": "Mit gerösteten Kürbiskernen servieren.",
+        "ingredients": [
+          {
+            "group": "",
+            "quantity": "800",
+            "unit": "g",
+            "name": "Hokkaido-Kürbis",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1",
+            "unit": "Stk.",
+            "name": "Zwiebel",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "2",
+            "unit": "EL",
+            "name": "Olivenöl",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1",
+            "unit": "TL",
+            "name": "Currypulver",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "700",
+            "unit": "ml",
+            "name": "Gemüsebrühe",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "400",
+            "unit": "ml",
+            "name": "Kokosmilch",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1/2",
+            "unit": "TL",
+            "name": "Muskatnuss",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1",
+            "unit": "Prise",
+            "name": "Chiliflocken",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          }
+        ],
+        "steps": [
+          {
+            "text": "Den Kürbis waschen, entkernen und in 2 cm grobe Würfel schneiden. Die Zwiebel fein würfeln.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Das Öl in einem großen Topf erhitzen und die Zwiebel glasig dünsten. Den Kürbis kurz mitbraten.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Currypulver einrühren, mit Gemüsebrühe und Kokosmilch ablöschen und aufkochen lassen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Zugedeckt 25 Min. bei mittlerer Hitze köcheln lassen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Die Suppe fein pürieren und mit Muskatnuss und Chiliflocken abschmecken.",
+            "uncertain": false,
+            "uncertainty": ""
+          }
+        ],
+        "uncertainties": [],
+        "warnings": []
+      },
+      "pages": [
+        {
+          "index": 0,
+          "kind": "recipe",
+          "note": ""
+        }
+      ],
+      "metrics": {
+        "title": {
+          "expected": "Cremige Kürbis-Kokos-Suppe",
+          "detected": "Cremige Kürbis-Kokos-Suppe",
+          "exact": true,
+          "contains": true
+        },
+        "ingredients": {
+          "expected": 8,
+          "detected": 8,
+          "matched": 8,
+          "precision": 1,
+          "recall": 1,
+          "quantityAccuracy": 1,
+          "unitAccuracy": 1
+        },
+        "steps": {
+          "expected": 5,
+          "detected": 5,
+          "countDelta": 0,
+          "textJaccard": 0.9565217391304348
+        },
+        "servings": {
+          "expected": "4 Portionen",
+          "detected": "Für 4 Portionen",
+          "correct": true
+        },
+        "times": {
+          "expected": {
+            "prepTime": "15 Min.",
+            "cookTime": "25 Min.",
+            "totalTime": "40 Min."
+          },
+          "detected": {
+            "prepTime": "15 Min.",
+            "cookTime": "25 Min.",
+            "totalTime": "40 Min."
+          },
+          "matched": 3,
+          "total": 3
+        },
+        "uncertainties": {
+          "expectedRequired": 0,
+          "covered": 0,
+          "missing": [],
+          "detectedCount": 0,
+          "detectedReferences": [],
+          "expectedFlags": []
+        },
+        "hallucinations": {
+          "ingredients": [],
+          "steps": [],
+          "inventedQuantities": [],
+          "inventedUnits": [],
+          "inventedTemperatures": [],
+          "correctedUnits": []
+        },
+        "usage": {
+          "promptTokens": 3462,
+          "completionTokens": 742,
+          "totalTokens": 4204
+        },
+        "estimatedNeurons": 142.31
+      }
+    },
+    {
+      "name": "handwritten-basic",
+      "files": [
+        "handwritten-basic.jpg"
+      ],
+      "groundTruthSource": "fixtures:handwritten-basic.jpg",
+      "status": "ok",
+      "latencyMs": 25621,
+      "rawResponse": "{\"cookTime\":\"45 Min.\",\"description\":\"\",\"ingredients\":[{\"group\":\"\",\"name\":\"Mehl\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"250\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"\",\"name\":\"Butter\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"125\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"\",\"name\":\"Zucker\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"100\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"\",\"name\":\"Eier\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"2\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"\"},{\"group\":\"\",\"name\":\"Backpulver\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Pck.\"},{\"group\":\"\",\"name\":\"Äpfel\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"750\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"\",\"name\":\"Zimt\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"TL\"},{\"group\":\"\",\"name\":\"Semmelbrösel\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"2\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"EL\"}],\"notes\":\"Mit Puderzucker bestäuben.\",\"pages\":[{\"index\":0,\"kind\":\"recipe\",\"note\":\"\"}],\"prepTime\":\"30 Min.\",\"recognized\":true,\"servingsText\":\"Für 8 Stück\",\"steps\":[{\"text\":\"Mehl, Butter, Zucker, Eier und Backpulver zu einem glatten Teig verkneten.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Eine Springform (26 cm) fetten und den Teig darin auslegen, dabei einen Rand formen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Die Äpfel schälen, entkernen und in Spalten schneiden. Mit Zimt mischen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Semmelbrösel auf dem Teig verteilen und die Apfelspalten darauf anordnen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Bei 180 °C ca. 45 Min. backen. Vor dem Anschneiden vollständig abkühlen lassen.\",\"uncertain\":false,\"uncertainty\":\"\"}],\"title\":\"Gedeckter Apfelkuchen\",\"totalTime\":\"1 Std. 15 Min.\",\"uncertainties\":[],\"warnings\":[]}",
+      "recipe": {
+        "recognized": true,
+        "title": "Gedeckter Apfelkuchen",
+        "description": "",
+        "servingsText": "Für 8 Stück",
+        "prepTime": "30 Min.",
+        "cookTime": "45 Min.",
+        "totalTime": "1 Std. 15 Min.",
+        "notes": "Mit Puderzucker bestäuben.",
+        "ingredients": [
+          {
+            "group": "",
+            "quantity": "250",
+            "unit": "g",
+            "name": "Mehl",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "125",
+            "unit": "g",
+            "name": "Butter",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "100",
+            "unit": "g",
+            "name": "Zucker",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "2",
+            "unit": "",
+            "name": "Eier",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1",
+            "unit": "Pck.",
+            "name": "Backpulver",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "750",
+            "unit": "g",
+            "name": "Äpfel",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1",
+            "unit": "TL",
+            "name": "Zimt",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "2",
+            "unit": "EL",
+            "name": "Semmelbrösel",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          }
+        ],
+        "steps": [
+          {
+            "text": "Mehl, Butter, Zucker, Eier und Backpulver zu einem glatten Teig verkneten.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Eine Springform (26 cm) fetten und den Teig darin auslegen, dabei einen Rand formen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Die Äpfel schälen, entkernen und in Spalten schneiden. Mit Zimt mischen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Semmelbrösel auf dem Teig verteilen und die Apfelspalten darauf anordnen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Bei 180 °C ca. 45 Min. backen. Vor dem Anschneiden vollständig abkühlen lassen.",
+            "uncertain": false,
+            "uncertainty": ""
+          }
+        ],
+        "uncertainties": [],
+        "warnings": []
+      },
+      "pages": [
+        {
+          "index": 0,
+          "kind": "recipe",
+          "note": ""
+        }
+      ],
+      "metrics": {
+        "title": {
+          "expected": "Gedeckter Apfelkuchen",
+          "detected": "Gedeckter Apfelkuchen",
+          "exact": true,
+          "contains": true
+        },
+        "ingredients": {
+          "expected": 8,
+          "detected": 8,
+          "matched": 8,
+          "precision": 1,
+          "recall": 1,
+          "quantityAccuracy": 1,
+          "unitAccuracy": 1
+        },
+        "steps": {
+          "expected": 5,
+          "detected": 5,
+          "countDelta": 0,
+          "textJaccard": 1
+        },
+        "servings": {
+          "expected": "8 Stück",
+          "detected": "Für 8 Stück",
+          "correct": true
+        },
+        "times": {
+          "expected": {
+            "prepTime": "30 Min.",
+            "cookTime": "45 Min.",
+            "totalTime": "1 Std. 15 Min."
+          },
+          "detected": {
+            "prepTime": "30 Min.",
+            "cookTime": "45 Min.",
+            "totalTime": "1 Std. 15 Min."
+          },
+          "matched": 3,
+          "total": 3
+        },
+        "uncertainties": {
+          "expectedRequired": 0,
+          "covered": 0,
+          "missing": [],
+          "detectedCount": 0,
+          "detectedReferences": [],
+          "expectedFlags": []
+        },
+        "hallucinations": {
+          "ingredients": [],
+          "steps": [],
+          "inventedQuantities": [],
+          "inventedUnits": [],
+          "inventedTemperatures": [],
+          "correctedUnits": []
+        },
+        "usage": {
+          "promptTokens": 3317,
+          "completionTokens": 712,
+          "totalTokens": 4029
+        },
+        "estimatedNeurons": 136.43
+      }
+    },
+    {
+      "name": "handwritten-hard",
+      "files": [
+        "handwritten-hard.jpg"
+      ],
+      "groundTruthSource": "fixtures:handwritten-hard.jpg",
+      "status": "ok",
+      "latencyMs": 23294,
+      "rawResponse": "{\"cookTime\":\"50 Min.\",\"description\":\"\",\"ingredients\":[{\"group\":\"\",\"name\":\"Mehl\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"300\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"\",\"name\":\"gemahlener Mohn\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"200\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"\",\"name\":\"Zucker\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"200\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"\",\"name\":\"Zucker\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"180\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"\",\"name\":\"Eier\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"4\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"\"},{\"group\":\"\",\"name\":\"Backpulver\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Pck.\"},{\"group\":\"\",\"name\":\"Milch\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"200\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"ml\"},{\"group\":\"\",\"name\":\"Zitrone\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"\"}],\"notes\":\"Notiz: Mit Zitronenglasur bestreichen.\",\"pages\":[{\"index\":0,\"kind\":\"recipe\",\"note\":\"\"}],\"prepTime\":\"20 Min.\",\"recognized\":true,\"servingsText\":\"Für 12 Stück\",\"steps\":[{\"text\":\"Mehl, Mohn und Backpulver in einer Schüssel mischen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Eier mit Zucker schaumig schlagen und die Milch langsam einrühren.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Die trockenen Zutaten unterheben und den Zitronenabrieb sowie den Saft zugeben.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"In eine gefettete Form füllen und bei 170 °C ca. 50 Min. backen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Nach dem Backen 10 Min. in der Form abkühlen lassen.\",\"uncertain\":false,\"uncertainty\":\"\"}],\"title\":\"Mohn-Zitronen-Kuchen\",\"totalTime\":\"1 Std. 10 Min.\",\"uncertainties\":[],\"warnings\":[]}",
+      "recipe": {
+        "recognized": true,
+        "title": "Mohn-Zitronen-Kuchen",
+        "description": "",
+        "servingsText": "Für 12 Stück",
+        "prepTime": "20 Min.",
+        "cookTime": "50 Min.",
+        "totalTime": "1 Std. 10 Min.",
+        "notes": "Notiz: Mit Zitronenglasur bestreichen.",
+        "ingredients": [
+          {
+            "group": "",
+            "quantity": "300",
+            "unit": "g",
+            "name": "Mehl",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "200",
+            "unit": "g",
+            "name": "gemahlener Mohn",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "200",
+            "unit": "g",
+            "name": "Zucker",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": true,
+            "uncertainty": "Diese Zutat erscheint mehrfach mit unterschiedlichen Mengen; bitte die gültige Angabe prüfen."
+          },
+          {
+            "group": "",
+            "quantity": "180",
+            "unit": "g",
+            "name": "Zucker",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": true,
+            "uncertainty": "Diese Zutat erscheint mehrfach mit unterschiedlichen Mengen; bitte die gültige Angabe prüfen."
+          },
+          {
+            "group": "",
+            "quantity": "4",
+            "unit": "",
+            "name": "Eier",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1",
+            "unit": "Pck.",
+            "name": "Backpulver",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "200",
+            "unit": "ml",
+            "name": "Milch",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1",
+            "unit": "",
+            "name": "Zitrone",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          }
+        ],
+        "steps": [
+          {
+            "text": "Mehl, Mohn und Backpulver in einer Schüssel mischen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Eier mit Zucker schaumig schlagen und die Milch langsam einrühren.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Die trockenen Zutaten unterheben und den Zitronenabrieb sowie den Saft zugeben.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "In eine gefettete Form füllen und bei 170 °C ca. 50 Min. backen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Nach dem Backen 10 Min. in der Form abkühlen lassen.",
+            "uncertain": false,
+            "uncertainty": ""
+          }
+        ],
+        "uncertainties": [
+          {
+            "reference": "Zutat 4 (Zucker)",
+            "note": "„Zucker“ erscheint mehrfach mit unterschiedlichen Mengen (Zutat 3: 200 g; Zutat 4: 180 g). Bitte mit dem Foto abgleichen – eine der Angaben ist vermutlich durchgestrichen."
+          }
+        ],
+        "warnings": []
+      },
+      "pages": [
+        {
+          "index": 0,
+          "kind": "recipe",
+          "note": ""
+        }
+      ],
+      "metrics": {
+        "title": {
+          "expected": "Mohn-Zitronen-Kuchen",
+          "detected": "Mohn-Zitronen-Kuchen",
+          "exact": true,
+          "contains": true
+        },
+        "ingredients": {
+          "expected": 7,
+          "detected": 8,
+          "matched": 7,
+          "precision": 0.875,
+          "recall": 1,
+          "quantityAccuracy": 0.8571428571428571,
+          "unitAccuracy": 1
+        },
+        "steps": {
+          "expected": 5,
+          "detected": 5,
+          "countDelta": 0,
+          "textJaccard": 1
+        },
+        "servings": {
+          "expected": "12 Stück",
+          "detected": "Für 12 Stück",
+          "correct": true
+        },
+        "times": {
+          "expected": {
+            "prepTime": "20 Min.",
+            "cookTime": "50 Min.",
+            "totalTime": "1 Std. 10 Min."
+          },
+          "detected": {
+            "prepTime": "20 Min.",
+            "cookTime": "50 Min.",
+            "totalTime": "1 Std. 10 Min."
+          },
+          "matched": 3,
+          "total": 3
+        },
+        "uncertainties": {
+          "expectedRequired": 1,
+          "covered": 1,
+          "missing": [],
+          "detectedCount": 1,
+          "detectedReferences": [
+            "Zutat 4 (Zucker)"
+          ],
+          "expectedFlags": [
+            {
+              "reference": "Zutat 3, Menge",
+              "kind": "korrigiert",
+              "required": true,
+              "expectUncertain": true,
+              "covered": true
+            }
+          ]
+        },
+        "hallucinations": {
+          "ingredients": [
+            "Zucker"
+          ],
+          "steps": [],
+          "inventedQuantities": [],
+          "inventedUnits": [],
+          "inventedTemperatures": [],
+          "correctedUnits": []
+        },
+        "usage": {
+          "promptTokens": 3317,
+          "completionTokens": 692,
+          "totalTokens": 4009
+        },
+        "estimatedNeurons": 134.89
+      }
+    },
+    {
+      "name": "multi-page-kombiniert",
+      "files": [
+        "multi-page-1.jpg",
+        "multi-page-2.jpg"
+      ],
+      "groundTruthSource": "combined:multi-page",
+      "status": "ok",
+      "latencyMs": 32744,
+      "rawResponse": "{\"cookTime\":\"40 Min.\",\"description\":\"\",\"ingredients\":[{\"group\":\"Füllung\",\"name\":\"Zucchini\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"2\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Stk.\"},{\"group\":\"Füllung\",\"name\":\"Aubergine\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Stk.\"},{\"group\":\"Füllung\",\"name\":\"rote Paprika\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"2\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Stk.\"},{\"group\":\"Füllung\",\"name\":\"Olivenöl\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"2\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"EL\"},{\"group\":\"Füllung\",\"name\":\"Oregano\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"TL\"},{\"group\":\"Füllung\",\"name\":\"gehackte Tomaten\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"400\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"Béchamelsauce\",\"name\":\"Butter\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"40\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"Béchamelsauce\",\"name\":\"Mehl\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"40\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"Béchamelsauce\",\"name\":\"Milch\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"500\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"ml\"},{\"group\":\"Außerdem\",\"name\":\"Lasagneplatten\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"250\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"Außerdem\",\"name\":\"Parmesan\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"80\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"}],\"notes\":\"\",\"pages\":[{\"index\":0,\"kind\":\"recipe\",\"note\":\"\"},{\"index\":1,\"kind\":\"recipe\",\"note\":\"\"}],\"prepTime\":\"30 Min.\",\"recognized\":true,\"servingsText\":\"Für 6 Portionen\",\"steps\":[{\"text\":\"Den Backofen auf 180 °C vorheizen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Zucchini, Aubergine und Paprika waschen und in kleine Würfel schneiden.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Das Öl in einer Pfanne erhitzen, das Gemüse 8 Min. anbraten, Oregano und Tomaten zugeben und 10 Min. köcheln lassen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Für die Béchamelsauce die Butter schmelzen, das Mehl einrühren und die Milch unter Rühren zugießen. Mit Muskatnuss würzen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Gemüse, Sauce und Lasagneplatten abwechselnd in eine Auflaufform schichten. Mit Parmesan bestreuen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Bei 180 °C ca. 40 Min. backen und vor dem Servieren 10 Min. ruhen lassen.\",\"uncertain\":false,\"uncertainty\":\"\"}],\"title\":\"Gemüse-Lasagne mit Béchamelsauce\",\"totalTime\":\"1 Std. 10 Min.\",\"uncertainties\":[],\"warnings\":[]}",
+      "recipe": {
+        "recognized": true,
+        "title": "Gemüse-Lasagne mit Béchamelsauce",
+        "description": "",
+        "servingsText": "Für 6 Portionen",
+        "prepTime": "30 Min.",
+        "cookTime": "40 Min.",
+        "totalTime": "1 Std. 10 Min.",
+        "notes": "",
+        "ingredients": [
+          {
+            "group": "Füllung",
+            "quantity": "2",
+            "unit": "Stk.",
+            "name": "Zucchini",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Füllung",
+            "quantity": "1",
+            "unit": "Stk.",
+            "name": "Aubergine",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Füllung",
+            "quantity": "2",
+            "unit": "Stk.",
+            "name": "rote Paprika",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Füllung",
+            "quantity": "2",
+            "unit": "EL",
+            "name": "Olivenöl",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Füllung",
+            "quantity": "1",
+            "unit": "TL",
+            "name": "Oregano",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Füllung",
+            "quantity": "400",
+            "unit": "g",
+            "name": "gehackte Tomaten",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Béchamelsauce",
+            "quantity": "40",
+            "unit": "g",
+            "name": "Butter",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Béchamelsauce",
+            "quantity": "40",
+            "unit": "g",
+            "name": "Mehl",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Béchamelsauce",
+            "quantity": "500",
+            "unit": "ml",
+            "name": "Milch",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Außerdem",
+            "quantity": "250",
+            "unit": "g",
+            "name": "Lasagneplatten",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Außerdem",
+            "quantity": "80",
+            "unit": "g",
+            "name": "Parmesan",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          }
+        ],
+        "steps": [
+          {
+            "text": "Den Backofen auf 180 °C vorheizen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Zucchini, Aubergine und Paprika waschen und in kleine Würfel schneiden.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Das Öl in einer Pfanne erhitzen, das Gemüse 8 Min. anbraten, Oregano und Tomaten zugeben und 10 Min. köcheln lassen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Für die Béchamelsauce die Butter schmelzen, das Mehl einrühren und die Milch unter Rühren zugießen. Mit Muskatnuss würzen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Gemüse, Sauce und Lasagneplatten abwechselnd in eine Auflaufform schichten. Mit Parmesan bestreuen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Bei 180 °C ca. 40 Min. backen und vor dem Servieren 10 Min. ruhen lassen.",
+            "uncertain": false,
+            "uncertainty": ""
+          }
+        ],
+        "uncertainties": [],
+        "warnings": []
+      },
+      "pages": [
+        {
+          "index": 0,
+          "kind": "recipe",
+          "note": ""
+        },
+        {
+          "index": 1,
+          "kind": "recipe",
+          "note": ""
+        }
+      ],
+      "metrics": {
+        "title": {
+          "expected": "Gemüse-Lasagne mit Béchamelsauce",
+          "detected": "Gemüse-Lasagne mit Béchamelsauce",
+          "exact": true,
+          "contains": true
+        },
+        "ingredients": {
+          "expected": 11,
+          "detected": 11,
+          "matched": 11,
+          "precision": 1,
+          "recall": 1,
+          "quantityAccuracy": 1,
+          "unitAccuracy": 1
+        },
+        "steps": {
+          "expected": 6,
+          "detected": 6,
+          "countDelta": 0,
+          "textJaccard": 1
+        },
+        "servings": {
+          "expected": "6 Portionen",
+          "detected": "Für 6 Portionen",
+          "correct": true
+        },
+        "times": {
+          "expected": {
+            "prepTime": "30 Min.",
+            "cookTime": "40 Min.",
+            "totalTime": "1 Std. 10 Min."
+          },
+          "detected": {
+            "prepTime": "30 Min.",
+            "cookTime": "40 Min.",
+            "totalTime": "1 Std. 10 Min."
+          },
+          "matched": 3,
+          "total": 3
+        },
+        "uncertainties": {
+          "expectedRequired": 0,
+          "covered": 0,
+          "missing": [],
+          "detectedCount": 0,
+          "detectedReferences": [],
+          "expectedFlags": []
+        },
+        "hallucinations": {
+          "ingredients": [],
+          "steps": [],
+          "inventedQuantities": [],
+          "inventedUnits": [],
+          "inventedTemperatures": [],
+          "correctedUnits": []
+        },
+        "usage": {
+          "promptTokens": 5643,
+          "completionTokens": 993,
+          "totalTokens": 6636
+        },
+        "estimatedNeurons": 215.24
+      }
+    },
+    {
+      "name": "unclear-quantities",
+      "files": [
+        "unclear-quantities.jpg"
+      ],
+      "groundTruthSource": "fixtures:unclear-quantities.jpg",
+      "status": "ok",
+      "latencyMs": 26116,
+      "rawResponse": "{\"cookTime\":\"25 Min.\",\"description\":\"\",\"ingredients\":[{\"group\":\"\",\"name\":\"Butter\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"3\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"\"},{\"group\":\"\",\"name\":\"Mehl\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"250\",\"uncertain\":true,\"uncertainty\":\"Menge unleserlich\",\"unit\":\"\"},{\"group\":\"\",\"name\":\"Zucker\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"250\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"\"},{\"group\":\"\",\"name\":\"Salz\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"2 EL\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"\"},{\"group\":\"\",\"name\":\"Eier\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"3\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"\"},{\"group\":\"\",\"name\":\"Backpulver\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1 Pck.\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"\"},{\"group\":\"\",\"name\":\"Kirchen\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"200 g\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"\"}],\"notes\":\"\",\"pages\":[{\"index\":0,\"kind\":\"recipe\",\"note\":\"\"}],\"prepTime\":\"20 Min.\",\"recognized\":true,\"servingsText\":\"Für 12 Stück\",\"steps\":[{\"text\":\"Den Backofen auf 180 °C vorheizen und ein Muffinblech mit Papierförmchen auslegen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Die weiche Butter mit dem Zucker cremig rühren, dann die Eier einzeln unterrühren.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Mehl und Backpulver mischen und unter den Teig heben. Zuletzt die Kirschen vorsichtig unterheben.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Im vorgeheizten Ofen bei ~ °C ca. 25 Min. backen. Die Muffins in der Form abkühlen lassen.\",\"uncertain\":true,\"uncertainty\":\"Temperatur unleserlich\"}],\"title\":\"Schoko-Kirsch-Muffins\",\"totalTime\":\"45 Min.\",\"uncertainties\":[{\"note\":\"Menge unleserlich\",\"reference\":\"Zutat 2, Menge\"},{\"note\":\"Temperatur unleserlich\",\"reference\":\"Schritt 4, Temperatur\"}],\"warnings\":[]}",
+      "recipe": {
+        "recognized": true,
+        "title": "Schoko-Kirsch-Muffins",
+        "description": "",
+        "servingsText": "Für 12 Stück",
+        "prepTime": "20 Min.",
+        "cookTime": "25 Min.",
+        "totalTime": "45 Min.",
+        "notes": "",
+        "ingredients": [
+          {
+            "group": "",
+            "quantity": "3",
+            "unit": "",
+            "name": "Butter",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "250",
+            "unit": "",
+            "name": "Mehl",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": true,
+            "uncertainty": "Menge unleserlich"
+          },
+          {
+            "group": "",
+            "quantity": "250",
+            "unit": "",
+            "name": "Zucker",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "2",
+            "unit": "EL",
+            "name": "Salz",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "3",
+            "unit": "",
+            "name": "Eier",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "1",
+            "unit": "Pck.",
+            "name": "Backpulver",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "",
+            "quantity": "200",
+            "unit": "g",
+            "name": "Kirchen",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          }
+        ],
+        "steps": [
+          {
+            "text": "Den Backofen auf 180 °C vorheizen und ein Muffinblech mit Papierförmchen auslegen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Die weiche Butter mit dem Zucker cremig rühren, dann die Eier einzeln unterrühren.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Mehl und Backpulver mischen und unter den Teig heben. Zuletzt die Kirschen vorsichtig unterheben.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Im vorgeheizten Ofen bei ~ °C ca. 25 Min. backen. Die Muffins in der Form abkühlen lassen.",
+            "uncertain": true,
+            "uncertainty": "Temperatur unleserlich"
+          }
+        ],
+        "uncertainties": [
+          {
+            "reference": "Zutat 2, Menge",
+            "note": "Menge unleserlich"
+          },
+          {
+            "reference": "Schritt 4, Temperatur",
+            "note": "Temperatur unleserlich"
+          }
+        ],
+        "warnings": []
+      },
+      "pages": [
+        {
+          "index": 0,
+          "kind": "recipe",
+          "note": ""
+        }
+      ],
+      "metrics": {
+        "title": {
+          "expected": "Schoko-Kirsch-Muffins",
+          "detected": "Schoko-Kirsch-Muffins",
+          "exact": true,
+          "contains": true
+        },
+        "ingredients": {
+          "expected": 7,
+          "detected": 7,
+          "matched": 6,
+          "precision": 0.8571428571428571,
+          "recall": 0.8571428571428571,
+          "quantityAccuracy": 0.8333333333333334,
+          "unitAccuracy": 0.8333333333333334
+        },
+        "steps": {
+          "expected": 4,
+          "detected": 4,
+          "countDelta": 0,
+          "textJaccard": 0.9791666666666666
+        },
+        "servings": {
+          "expected": "12 Stück",
+          "detected": "Für 12 Stück",
+          "correct": true
+        },
+        "times": {
+          "expected": {
+            "prepTime": "20 Min.",
+            "cookTime": "25 Min.",
+            "totalTime": "45 Min."
+          },
+          "detected": {
+            "prepTime": "20 Min.",
+            "cookTime": "25 Min.",
+            "totalTime": "45 Min."
+          },
+          "matched": 3,
+          "total": 3
+        },
+        "uncertainties": {
+          "expectedRequired": 4,
+          "covered": 2,
+          "missing": [
+            "Zutat 1, Menge",
+            "Zutat 3, Einheit"
+          ],
+          "detectedCount": 2,
+          "detectedReferences": [
+            "Zutat 2, Menge",
+            "Schritt 4, Temperatur"
+          ],
+          "expectedFlags": [
+            {
+              "reference": "Zutat 1, Menge",
+              "kind": "unkenntlich",
+              "required": true,
+              "expectUncertain": true,
+              "covered": false
+            },
+            {
+              "reference": "Zutat 2, Einheit",
+              "kind": "mehrdeutig",
+              "required": true,
+              "expectUncertain": true,
+              "covered": true
+            },
+            {
+              "reference": "Zutat 3, Einheit",
+              "kind": "fehlend",
+              "required": true,
+              "expectUncertain": true,
+              "covered": false
+            },
+            {
+              "reference": "Zutat 4, Einheit",
+              "kind": "unplausibel",
+              "required": false,
+              "expectUncertain": false,
+              "covered": false
+            },
+            {
+              "reference": "Schritt 4, Temperatur",
+              "kind": "unleserlich",
+              "required": true,
+              "expectUncertain": true,
+              "covered": true
+            }
+          ]
+        },
+        "hallucinations": {
+          "ingredients": [
+            "Kirchen"
+          ],
+          "steps": [],
+          "inventedQuantities": [
+            "Butter: 3"
+          ],
+          "inventedUnits": [],
+          "inventedTemperatures": [],
+          "correctedUnits": []
+        },
+        "usage": {
+          "promptTokens": 3317,
+          "completionTokens": 673,
+          "totalTokens": 3990
+        },
+        "estimatedNeurons": 133.42
+      }
+    },
+    {
+      "name": "printed-abbreviations",
+      "files": [
+        "printed-abbreviations.jpg"
+      ],
+      "groundTruthSource": "fixtures:printed-abbreviations.jpg",
+      "status": "ok",
+      "latencyMs": 51709,
+      "rawResponse": "{\"cookTime\":\"45 Min.\",\"description\":\"\",\"ingredients\":[{\"group\":\"Teig\",\"name\":\"Mehl\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"500\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"Teig\",\"name\":\"Trockenhefe\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Pck.\"},{\"group\":\"Teig\",\"name\":\"Milch\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1/4\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"l\"},{\"group\":\"Teig\",\"name\":\"Zucker\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"80\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"Teig\",\"name\":\"Eier\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"2\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Stk.\"},{\"group\":\"Teig\",\"name\":\"Salz\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Prise\"},{\"group\":\"Füllung\",\"name\":\"Äpfel\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"kg\"},{\"group\":\"Füllung\",\"name\":\"Zitronensaft\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"2\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"EL\"},{\"group\":\"Füllung\",\"name\":\"Zimt\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"Msp.\"},{\"group\":\"Füllung\",\"name\":\"Sahne\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"100\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"ml\"},{\"group\":\"Streusel\",\"name\":\"Mehl\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"200\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"Streusel\",\"name\":\"Butter\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"150\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"Streusel\",\"name\":\"Zucker\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"100\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"g\"},{\"group\":\"Streusel\",\"name\":\"Zimt\",\"preparationNote\":\"\",\"purchaseNote\":\"\",\"quantity\":\"1 1/2\",\"uncertain\":false,\"uncertainty\":\"\",\"unit\":\"TL\"}],\"notes\":\"\",\"pages\":[{\"index\":0,\"kind\":\"recipe\",\"note\":\"\"}],\"prepTime\":\"25 Min.\",\"recognized\":true,\"servingsText\":\"Für 12 Stück\",\"steps\":[{\"text\":\"Für den Teig das Mehl in eine Schüssel geben und mit der Trockenhefe mischen. Die Milch lauwarm erwärmen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Milch, Zucker, Eier und Salz zum Mehl geben und alles zu einem glatten Teig verkneten. 60 Min. zugedeckt gehen lassen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Für die Füllung die Äpfel schälen, entkernen und in Spalten schneiden. Mit Zitronensaft, Zimt und Sahne mischen.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Für die Streusel Mehl, Butter, Zucker und Zimt mit den Fingern verreiben.\",\"uncertain\":false,\"uncertainty\":\"\"},{\"text\":\"Den Teig in eine Springform (26 cm) drücken, die Äpfel darauf verteilen und die Streusel darüber streuen. Bei 180 °C ca. 45 Min. backen. Vor dem Servieren 1 Std. abkühlen lassen.\",\"uncertain\":false,\"uncertainty\":\"\"}],\"title\":\"Apfel-Streuselkuchen\",\"totalTime\":\"1 Std. 10 Min.\",\"uncertainties\":[],\"warnings\":[]}",
+      "recipe": {
+        "recognized": true,
+        "title": "Apfel-Streuselkuchen",
+        "description": "",
+        "servingsText": "Für 12 Stück",
+        "prepTime": "25 Min.",
+        "cookTime": "45 Min.",
+        "totalTime": "1 Std. 10 Min.",
+        "notes": "",
+        "ingredients": [
+          {
+            "group": "Teig",
+            "quantity": "500",
+            "unit": "g",
+            "name": "Mehl",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": true,
+            "uncertainty": "Diese Zutat erscheint mehrfach mit unterschiedlichen Mengen; bitte die gültige Angabe prüfen."
+          },
+          {
+            "group": "Teig",
+            "quantity": "1",
+            "unit": "Pck.",
+            "name": "Trockenhefe",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Teig",
+            "quantity": "1/4",
+            "unit": "l",
+            "name": "Milch",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Teig",
+            "quantity": "80",
+            "unit": "g",
+            "name": "Zucker",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": true,
+            "uncertainty": "Diese Zutat erscheint mehrfach mit unterschiedlichen Mengen; bitte die gültige Angabe prüfen."
+          },
+          {
+            "group": "Teig",
+            "quantity": "2",
+            "unit": "Stk.",
+            "name": "Eier",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Teig",
+            "quantity": "1",
+            "unit": "Prise",
+            "name": "Salz",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Füllung",
+            "quantity": "1",
+            "unit": "kg",
+            "name": "Äpfel",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Füllung",
+            "quantity": "2",
+            "unit": "EL",
+            "name": "Zitronensaft",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Füllung",
+            "quantity": "1",
+            "unit": "Msp.",
+            "name": "Zimt",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": true,
+            "uncertainty": "Diese Zutat erscheint mehrfach mit unterschiedlichen Mengen; bitte die gültige Angabe prüfen."
+          },
+          {
+            "group": "Füllung",
+            "quantity": "100",
+            "unit": "ml",
+            "name": "Sahne",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Streusel",
+            "quantity": "200",
+            "unit": "g",
+            "name": "Mehl",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": true,
+            "uncertainty": "Diese Zutat erscheint mehrfach mit unterschiedlichen Mengen; bitte die gültige Angabe prüfen."
+          },
+          {
+            "group": "Streusel",
+            "quantity": "150",
+            "unit": "g",
+            "name": "Butter",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "group": "Streusel",
+            "quantity": "100",
+            "unit": "g",
+            "name": "Zucker",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": true,
+            "uncertainty": "Diese Zutat erscheint mehrfach mit unterschiedlichen Mengen; bitte die gültige Angabe prüfen."
+          },
+          {
+            "group": "Streusel",
+            "quantity": "1 1/2",
+            "unit": "TL",
+            "name": "Zimt",
+            "purchaseNote": "",
+            "preparationNote": "",
+            "uncertain": true,
+            "uncertainty": "Diese Zutat erscheint mehrfach mit unterschiedlichen Mengen; bitte die gültige Angabe prüfen."
+          }
+        ],
+        "steps": [
+          {
+            "text": "Für den Teig das Mehl in eine Schüssel geben und mit der Trockenhefe mischen. Die Milch lauwarm erwärmen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Milch, Zucker, Eier und Salz zum Mehl geben und alles zu einem glatten Teig verkneten. 60 Min. zugedeckt gehen lassen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Für die Füllung die Äpfel schälen, entkernen und in Spalten schneiden. Mit Zitronensaft, Zimt und Sahne mischen.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Für die Streusel Mehl, Butter, Zucker und Zimt mit den Fingern verreiben.",
+            "uncertain": false,
+            "uncertainty": ""
+          },
+          {
+            "text": "Den Teig in eine Springform (26 cm) drücken, die Äpfel darauf verteilen und die Streusel darüber streuen. Bei 180 °C ca. 45 Min. backen. Vor dem Servieren 1 Std. abkühlen lassen.",
+            "uncertain": false,
+            "uncertainty": ""
+          }
+        ],
+        "uncertainties": [
+          {
+            "reference": "Zutat 11 (Mehl)",
+            "note": "„Mehl“ erscheint mehrfach mit unterschiedlichen Mengen (Zutat 1: 500 g; Zutat 11: 200 g). Bitte mit dem Foto abgleichen – eine der Angaben ist vermutlich durchgestrichen."
+          },
+          {
+            "reference": "Zutat 13 (Zucker)",
+            "note": "„Zucker“ erscheint mehrfach mit unterschiedlichen Mengen (Zutat 4: 80 g; Zutat 13: 100 g). Bitte mit dem Foto abgleichen – eine der Angaben ist vermutlich durchgestrichen."
+          },
+          {
+            "reference": "Zutat 14 (Zimt)",
+            "note": "„Zimt“ erscheint mehrfach mit unterschiedlichen Mengen (Zutat 9: 1 Msp.; Zutat 14: 1 1/2 TL). Bitte mit dem Foto abgleichen – eine der Angaben ist vermutlich durchgestrichen."
+          }
+        ],
+        "warnings": []
+      },
+      "pages": [
+        {
+          "index": 0,
+          "kind": "recipe",
+          "note": ""
+        }
+      ],
+      "metrics": {
+        "title": {
+          "expected": "Apfel-Streuselkuchen",
+          "detected": "Apfel-Streuselkuchen",
+          "exact": true,
+          "contains": true
+        },
+        "ingredients": {
+          "expected": 14,
+          "detected": 14,
+          "matched": 14,
+          "precision": 1,
+          "recall": 1,
+          "quantityAccuracy": 1,
+          "unitAccuracy": 1
+        },
+        "steps": {
+          "expected": 5,
+          "detected": 5,
+          "countDelta": 0,
+          "textJaccard": 1
+        },
+        "servings": {
+          "expected": "12 Stück",
+          "detected": "Für 12 Stück",
+          "correct": true
+        },
+        "times": {
+          "expected": {
+            "prepTime": "25 Min.",
+            "cookTime": "45 Min.",
+            "totalTime": "1 Std. 10 Min."
+          },
+          "detected": {
+            "prepTime": "25 Min.",
+            "cookTime": "45 Min.",
+            "totalTime": "1 Std. 10 Min."
+          },
+          "matched": 3,
+          "total": 3
+        },
+        "uncertainties": {
+          "expectedRequired": 0,
+          "covered": 0,
+          "missing": [],
+          "detectedCount": 3,
+          "detectedReferences": [
+            "Zutat 11 (Mehl)",
+            "Zutat 13 (Zucker)",
+            "Zutat 14 (Zimt)"
+          ],
+          "expectedFlags": []
+        },
+        "hallucinations": {
+          "ingredients": [],
+          "steps": [],
+          "inventedQuantities": [],
+          "inventedUnits": [],
+          "inventedTemperatures": [],
+          "correctedUnits": []
+        },
+        "usage": {
+          "promptTokens": 3317,
+          "completionTokens": 1110,
+          "totalTokens": 4427
+        },
+        "estimatedNeurons": 167.19
+      }
+    }
+  ],
+  "summary": {
+    "cases": 7,
+    "ok": 7,
+    "failed": 0,
+    "averageLatencyMs": 32427,
+    "averageTitleContains": 1,
+    "averageIngredientPrecision": 0.962,
+    "averageIngredientRecall": 0.98,
+    "averageStepJaccard": 0.991,
+    "uncertaintyCovered": 3,
+    "uncertaintyRequired": 5,
+    "hallucinatedItems": 3,
+    "inventedFields": 1
+  },
+  "note": "Nur synthetische Fixtures und Metriken, keine Zugangsdaten. Die Neuronenwerte sind aus den usage-Tokens geschätzt (24.545/M Input, 77.273/M Output); die tatsächliche Abrechnung kann abweichen. Das Tagesbudget von 10.000 Neuronen gilt für das Free-Tier."
+}

@@ -118,6 +118,8 @@ describe('mobile header menu', () => {
     }
     expect(html).toContain('href="#/import/url"')
     expect(html).toContain('href="#/import"')
+    expect(html).toContain('href="#/import/foto"')
+    expect(html).toContain('Foto / Scan')
     expect(html).toContain('href="#/backup"')
     expect(html).toContain('href="#/family"')
     expect(html).toContain('href="#/about"')
@@ -133,6 +135,7 @@ describe('mobile header menu', () => {
     expect(html).not.toContain('Abmelden')
     expect(html).toContain('URL-Rezeptimport')
     expect(html).toContain('Mela-Import')
+    expect(html).not.toContain('Foto / Scan')
   })
 })
 

@@ -9,7 +9,7 @@
  * free of React makes the active-state rules directly testable.
  */
 
-import { URL_IMPORT_HASH, type Route } from '../routing/routes'
+import { PHOTO_IMPORT_HASH, URL_IMPORT_HASH, type Route } from '../routing/routes'
 
 export type MobileArea = 'recipes' | 'plan' | 'shopping'
 
@@ -54,7 +54,7 @@ export function mobileAreaForRoute(route: Route): MobileArea | null {
 export interface MoreMenuLink {
   href: string
   label: string
-  icon: 'url' | 'mela' | 'backup' | 'family' | 'about'
+  icon: 'url' | 'photo' | 'mela' | 'backup' | 'family' | 'about'
 }
 
 const BASE_MORE_LINKS: readonly MoreMenuLink[] = [
@@ -62,6 +62,16 @@ const BASE_MORE_LINKS: readonly MoreMenuLink[] = [
   { href: '#/import', label: 'Mela-Import', icon: 'mela' },
   { href: '#/backup', label: 'Backup', icon: 'backup' },
 ]
+
+/**
+ * Foto-/Scan-Import ist ein Cloud-Dienst. Der Eintrag erscheint deshalb nur,
+ * wenn auch die Cloud-Familienverwaltung sichtbar ist.
+ */
+const PHOTO_LINK: MoreMenuLink = {
+  href: PHOTO_IMPORT_HASH,
+  label: 'Foto / Scan',
+  icon: 'photo',
+}
 
 const FAMILY_LINK: MoreMenuLink = {
   href: '#/family',
@@ -81,6 +91,7 @@ const ABOUT_LINK: MoreMenuLink = {
  */
 export function moreMenuLinks(includeFamily: boolean): MoreMenuLink[] {
   const links = [...BASE_MORE_LINKS]
+  if (includeFamily) links.push(PHOTO_LINK)
   if (includeFamily) links.push(FAMILY_LINK)
   links.push(ABOUT_LINK)
   return links

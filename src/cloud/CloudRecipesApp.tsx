@@ -48,6 +48,7 @@ import {
 import { CloudRecipeDetailPage } from './CloudRecipeDetailPage'
 import { CloudRecipeEditorPage } from './CloudRecipeEditorPage'
 import { CloudUrlImportPage } from './CloudUrlImportPage'
+import { CloudPhotoImportPage } from './CloudPhotoImportPage'
 import { CloudImportPage } from './CloudImportPage'
 import { CloudBackupPage } from './CloudBackupPage'
 import { FamilyPage } from './FamilyPage'
@@ -118,6 +119,9 @@ export function CloudRecipesApp({
   // StrictMode-Doppelmontage im Entwicklungsmodus wiederverwendbar.
   useEffect(() => () => imageUrls.clear(), [imageUrls])
 
+  const importAreaActive =
+    route.name === 'import' || route.name === 'import-url' || route.name === 'import-photo'
+
   let content: ReactNode
   if (route.name === 'library') {
     content = <CloudLibraryPage store={store} />
@@ -139,6 +143,8 @@ export function CloudRecipesApp({
     content = <CloudImportPage store={store} images={imageService} />
   } else if (route.name === 'import-url') {
     content = <CloudUrlImportPage store={store} images={imageService} />
+  } else if (route.name === 'import-photo') {
+    content = <CloudPhotoImportPage images={imageService} />
   } else if (route.name === 'backup') {
     content = <CloudBackupPage store={store} storage={storage} />
   } else if (route.name === 'family') {
@@ -190,10 +196,8 @@ export function CloudRecipesApp({
                 </a>
                 <a
                   href="#/import"
-                  className={route.name === 'import' || route.name === 'import-url' ? 'active' : ''}
-                  aria-current={
-                    route.name === 'import' || route.name === 'import-url' ? 'page' : undefined
-                  }
+                  className={importAreaActive ? 'active' : ''}
+                  aria-current={importAreaActive ? 'page' : undefined}
                 >
                   Import
                 </a>
