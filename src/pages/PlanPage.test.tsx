@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as service from '../mealplan/service'
 import { PlanPage } from './PlanPage'
 
@@ -21,5 +21,30 @@ describe('plan page base version', () => {
     expect(html).toContain('Wochenbeginn')
     expect(html).toContain('Tage davor')
     expect(html).toContain('Tage danach')
+  })
+
+  describe('fixed mobile week header', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date(2026, 10, 11, 12, 0, 0))
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('renders the relative week label, reference range and labeled navigation', () => {
+      const html = renderToStaticMarkup(<PlanPage />)
+
+      expect(html).toContain('class="plan-week-relation"')
+      expect(html).toContain('Diese Woche')
+      expect(html).toContain('class="plan-range plan-range--mobile"')
+      expect(html).toContain('class="plan-range plan-range--desktop"')
+      expect(html).toContain('05.11. – 11.11.2026')
+      expect(html).toContain('← Vorige Woche')
+      expect(html).toContain('Nächste Woche →')
+      expect(html).toContain('Heute')
+      expect(html).toContain('Wochen beginnen donnerstags und enden mittwochs.')
+    })
   })
 })

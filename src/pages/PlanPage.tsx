@@ -11,11 +11,14 @@ import {
   addDays,
   formatWeekRange,
   todayKey,
+  weekOffset,
   WEEKDAY_NAMES,
 } from '../domain/dates'
 import {
+  PLANNING_WEEK_START_DAY,
   buildCalendarLayout,
   buildCalendarWindow,
+  buildPlanningWeek,
   type CalendarSettings,
 } from '../domain/calendar'
 import { groupThemeFor } from '../domain/groupColor'
@@ -29,6 +32,7 @@ import {
 } from '../mealplan/dayNoteService'
 import { usePlanBackend } from '../mealplan/planBackend'
 import { calendarSettingsFromRows } from '../settings/calendar'
+import { usePhoneLayout } from '../lib/phoneLayout'
 import { DEFAULT_HOUSEHOLD_SIZE, type DayNote, type MealPlanEntry } from '../types'
 import { AddEntryDialog } from './plan/AddEntryDialog'
 import {
@@ -44,6 +48,7 @@ import { DayNoteDialog } from './plan/DayNoteDialog'
 import { DishDialog } from './plan/DishDialog'
 import { FreeDishDialog } from './plan/FreeDishDialog'
 import { MoveDialog } from './plan/MoveDialog'
+import { weekRelationLabel } from './plan/weekLabel'
 import {
   NO_PLANNING_OVERLAY,
   planningBackDate,
@@ -87,6 +92,7 @@ function normalizePointerType(value: string): DragPointerType {
 export function PlanPage() {
   const backend = usePlanBackend()
   const today = useMemo(() => todayKey(), [])
+  const phoneLayout = usePhoneLayout()
   const [anchorDate, setAnchorDate] = useState(today)
   const data = backend.usePlanData()
   const entries = data?.entries
@@ -186,6 +192,26 @@ export function PlanPage() {
     () => buildCalendarLayout(calendarWindow, entries ?? []),
     [calendarWindow, entries],
   )
+  const mobileCalendarWindow = useMemo(
+    () => buildPlanningWeek(anchorDate),
+    [anchorDate],
+  )
+  const mobileCalendarLayout = useMemo(
+    () => buildCalendarLayout(mobileCalendarWindow, entries ?? []),
+    [mobileCalendarWindow, entries],
+  )
+  const mobileWeekOffset = useMemo(
+    () =>
+      weekOffset(
+        mobileCalendarWindow.coreStart,
+        today,
+        PLANNING_WEEK_START_DAY,
+      ),
+    [mobileCalendarWindow.coreStart, today],
+  )
+  const planningWeekStartDay = phoneLayout
+    ? PLANNING_WEEK_START_DAY
+    : calendarSettings.weekStartDay
   const noRecipes = recipes !== undefined && recipes.length === 0
   const hasDayNotes = (dayNotes?.length ?? 0) > 0
   const showEmptyState =
@@ -800,7 +826,13 @@ export function PlanPage() {
       <header className="page-head plan-head">
         <div className="plan-head-copy">
           <h1>Essensplan</h1>
-          <p className="plan-range" aria-live="polite">
+          <p className="plan-week-relation">
+            {weekRelationLabel(mobileWeekOffset)}
+          </p>
+          <p className="plan-range plan-range--mobile" aria-live="polite">
+            {formatWeekRange(mobileCalendarWindow.coreStart)}
+          </p>
+          <p className="plan-range plan-range--desktop" aria-live="polite">
             {formatWeekRange(calendarWindow.coreStart)}
           </p>
         </div>
@@ -813,7 +845,10 @@ export function PlanPage() {
               aria-label="Vorherige Woche"
               onClick={() => setAnchorDate(addDays(anchorDate, -7))}
             >
-              ‹
+              <span className="plan-nav-symbol" aria-hidden="true">
+                ‹
+              </span>
+              <span className="plan-nav-label">← Vorige Woche</span>
             </button>
             <button
               type="button"
@@ -828,7 +863,10 @@ export function PlanPage() {
               aria-label="Nächste Woche"
               onClick={() => setAnchorDate(addDays(anchorDate, 7))}
             >
-              ›
+              <span className="plan-nav-symbol" aria-hidden="true">
+                ›
+              </span>
+              <span className="plan-nav-label">Nächste Woche →</span>
             </button>
           </div>
 
@@ -841,7 +879,10 @@ export function PlanPage() {
               ⚙
             </summary>
             <div className="plan-menu-body plan-settings-body">
-              <label className="field">
+              <p className="plan-settings-note">
+                Wochen beginnen donnerstags und enden mittwochs.
+              </p>
+              <label className="field plan-setting-weekstart">
                 <span className="field-label">Wochenbeginn</span>
                 <select
                   value={calendarSettings.weekStartDay}
@@ -873,7 +914,7 @@ export function PlanPage() {
                   }}
                 />
               </label>
-              <label className="field">
+              <label className="field plan-setting-overlap-before">
                 <span className="field-label">Tage davor</span>
                 <select
                   value={calendarSettings.overlapBefore}
@@ -890,7 +931,7 @@ export function PlanPage() {
                   ))}
                 </select>
               </label>
-              <label className="field">
+              <label className="field plan-setting-overlap-after">
                 <span className="field-label">Tage danach</span>
                 <select
                   value={calendarSettings.overlapAfter}
@@ -937,6 +978,8 @@ export function PlanPage() {
       ) : (
         <PlanCalendar
           layout={calendarLayout}
+          mobileLayout={mobileCalendarLayout}
+          mobile={phoneLayout}
           today={today}
           noteByDate={noteByDate}
           dropDate={dropDate}
@@ -959,7 +1002,7 @@ export function PlanPage() {
           mode="create"
           initialDate={dialog.date}
           initialEntries={[]}
-          weekStartDay={calendarSettings.weekStartDay}
+          weekStartDay={planningWeekStartDay}
           onBackToChooser={backToAddDate ? returnToAddMenu : undefined}
           onDone={handleDone}
           onClose={closeDialog}
@@ -973,7 +1016,7 @@ export function PlanPage() {
             initialEntries={dialogEntries}
             session={dialogSession}
             freeDish={freeDishById.get(dialogEntry.freeDishId)}
-            weekStartDay={calendarSettings.weekStartDay}
+            weekStartDay={planningWeekStartDay}
             onMoveRequest={
               dialogEntry
                 ? () => {
@@ -1000,7 +1043,7 @@ export function PlanPage() {
             initialEntries={dialogEntries}
             session={dialogSession}
             recipes={recipes ?? []}
-            weekStartDay={calendarSettings.weekStartDay}
+            weekStartDay={planningWeekStartDay}
             cookModeEnabled={backend.cookModeEnabled}
             renderCover={backend.renderRecipeCover}
             onBackToChooser={
@@ -1063,7 +1106,7 @@ export function PlanPage() {
           initialDate={moveRequestDate}
           heading={moveRequestHeading}
           subtitle={moveRequestSubtitle}
-          weekStartDay={calendarSettings.weekStartDay}
+          weekStartDay={planningWeekStartDay}
           busy={moving}
           error={error}
           onMove={handleMoveRequest}

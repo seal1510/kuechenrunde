@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildCalendarLayout,
   buildCalendarWindow,
+  buildPlanningWeek,
   type CalendarDay,
 } from '../../domain/calendar'
 import type {
@@ -222,11 +223,13 @@ function renderCalendar(selectedLayout = layout) {
 function renderMobileCalendar(
   selectedLayout = layout,
   today = '2026-05-29',
+  mobileLayout?: typeof layout,
 ) {
   return renderToStaticMarkup(
     <PlanCalendar
       mobile
       layout={selectedLayout}
+      mobileLayout={mobileLayout}
       today={today}
       noteByDate={noteByDate}
       dropDate={null}
@@ -399,45 +402,32 @@ describe('responsive plan calendar', () => {
   })
 })
 
-describe('mobile plan hierarchy', () => {
-  it('puts today directly behind a collapsed past-day group', () => {
+describe('mobile fixed week view', () => {
+  it('renders exactly the seven days of the selected week without extra sections', () => {
     const html = renderMobileCalendar()
 
     expect(html).toContain('calendar-shell is-mobile')
-    expect(html).toContain('<details class="calendar-past-group">')
-    expect(html).toContain('Vergangene Tage')
-    expect(html).toContain('26.05. – 28.05.')
-    expect(html).toContain('calendar-past-count')
-    expect(html).toContain('Heute und danach')
-
-    const pastGroupEnd = html.indexOf('</details>')
-    const todayIndex = html.indexOf('calendar-day is-today')
-    expect(pastGroupEnd).toBeGreaterThan(0)
-    expect(todayIndex).toBeGreaterThan(pastGroupEnd)
-    expect(calendarDates(html)[3]).toBe('2026-05-29')
+    expect(html).not.toContain('calendar-past-group')
+    expect(html).not.toContain('Vergangene Tage')
+    expect(html).not.toContain('Heute und danach')
+    expect(html).not.toContain('calendar-preview-tile')
+    expect(html).not.toContain('Davor')
+    expect(html).not.toContain('Danach')
+    expect(calendarDates(html)).toEqual(layout.main.map((day) => day.date))
+    expect(calendarDates(html)).toHaveLength(7)
+    expect(calendarDates(html)[0]).toBe('2026-05-28')
+    expect(calendarDates(html)[6]).toBe('2026-06-03')
   })
 
-  it('keeps every past dish, comment and add action inside the group', () => {
+  it('gives every one of the seven days its own add action', () => {
     const html = renderMobileCalendar()
 
-    expect(html).toContain('Apfelkuchen')
-    expect(html).toContain('Frühstücksporridge')
-    expect(html).toContain('Einkaufen und vorbereiten')
-    expect(html).toContain('Eintrag am Di, 26.05. hinzufügen')
-    expect(html.match(/class="calendar-add-day /g)).toHaveLength(11)
-    expect(calendarDates(html)).toEqual(window.visibleDays)
+    expect(html.match(/class="calendar-add-day /g)).toHaveLength(7)
+    expect(html.match(/calendar-day is-today/g)).toHaveLength(1)
+    expect(html).toContain('calendar-today">Heute</span>')
   })
 
-  it('renders empty days as compact rows without a reserved empty block', () => {
-    const html = renderMobileCalendar()
-
-    expect(html.match(/is-compact-empty/g)).toHaveLength(5)
-    expect(html).not.toContain('calendar-empty-hint')
-    expect(html).toContain('class="calendar-add-day is-empty"')
-    expect(html).toContain('Hinzufügen')
-  })
-
-  it('keeps planned dishes, portions and shared cook sessions reachable', () => {
+  it('keeps dishes of the selected week and omits neighbouring weeks', () => {
     const html = renderMobileCalendar()
 
     expect(html).toContain(LONG_TITLE)
@@ -446,19 +436,61 @@ describe('mobile plan hierarchy', () => {
     expect(html).toContain('Nudeln mit Pesto')
     expect(html).toContain('calendar-entry-session')
     expect(html).toContain('calendar-entry--group group-color-')
+    // 26.05. and 04.06. are overlap days of the desktop view, not this week.
+    expect(html).not.toContain('Apfelkuchen')
+    expect(html).not.toContain('Frühstücksporridge')
+    expect(html).not.toContain('Einkaufen und vorbereiten')
   })
 
-  it('shows other periods in their normal chronological order', () => {
-    const otherWindow = buildCalendarWindow('2026-06-05', 3, 2, 2)
-    const otherLayout = buildCalendarLayout(otherWindow, entries)
-    const html = renderMobileCalendar(otherLayout)
+  it('renders empty days as compact rows without a reserved empty block', () => {
+    const html = renderMobileCalendar()
 
-    expect(html).not.toContain('calendar-past-group')
-    expect(html).toContain('Davor')
-    expect(html).toContain('Diese Woche')
-    expect(html).toContain('Danach')
-    expect(html).toContain('data-calendar-date="2026-06-05"')
-    expect(calendarDates(html)).toEqual(otherWindow.visibleDays)
-    expect(calendarDates(html)).toHaveLength(11)
+    expect(html.match(/is-compact-empty/g)).toHaveLength(4)
+    expect(html).not.toContain('calendar-empty-hint')
+    expect(html).toContain('class="calendar-add-day is-empty"')
+    expect(html).toContain('Hinzufügen')
+  })
+
+  it('uses the passed fixed Thursday–Wednesday layout instead of overlap days', () => {
+    const fixedWindow = buildPlanningWeek('2026-11-12')
+    const fixedLayout = buildCalendarLayout(fixedWindow, entries)
+    const html = renderMobileCalendar(layout, '2026-11-12', fixedLayout)
+
+    expect(calendarDates(html)).toEqual([
+      '2026-11-12',
+      '2026-11-13',
+      '2026-11-14',
+      '2026-11-15',
+      '2026-11-16',
+      '2026-11-17',
+      '2026-11-18',
+    ])
+    expect(html).not.toContain('data-calendar-date="2026-11-11"')
+  })
+
+  it('does not highlight today when another week is shown', () => {
+    const fixedWindow = buildPlanningWeek('2026-11-12')
+    const fixedLayout = buildCalendarLayout(fixedWindow, entries)
+    const html = renderMobileCalendar(layout, '2026-11-11', fixedLayout)
+
+    expect(html).not.toContain('calendar-day is-today')
+    expect(html).not.toContain('calendar-today">Heute</span>')
+  })
+
+  it('does not change planning data when the visible week changes', () => {
+    const firstWindow = buildPlanningWeek('2026-11-11')
+    const secondWindow = buildPlanningWeek('2026-11-12')
+    const firstLayout = buildCalendarLayout(firstWindow, entries)
+    const secondLayout = buildCalendarLayout(secondWindow, entries)
+    const before = JSON.stringify(firstLayout)
+
+    const first = renderMobileCalendar(layout, '2026-11-11', firstLayout)
+    const second = renderMobileCalendar(layout, '2026-11-11', secondLayout)
+
+    expect(JSON.stringify(firstLayout)).toBe(before)
+    expect(calendarDates(first)[0]).toBe('2026-11-05')
+    expect(calendarDates(first)[6]).toBe('2026-11-11')
+    expect(calendarDates(second)[0]).toBe('2026-11-12')
+    expect(calendarDates(second)[6]).toBe('2026-11-18')
   })
 })

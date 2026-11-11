@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { db } from '../db'
 import { buildCalendarWindow } from '../domain/calendar'
 import { scalePlan } from '../domain/dishplan'
+import { buildShoppingList } from '../domain/shopping'
 import type { Recipe } from '../types'
 import {
   CookedMoveConflictError,
@@ -232,6 +233,80 @@ describe('moving planned dishes', () => {
     ])
     expect(moved.session?.date).toBe('2027-01-02')
     expect(moved.session?.servings).toBe(3)
+  })
+
+  it('moves a dish two weeks ahead without losing its portions', async () => {
+    const created = await saveDishPlan({
+      recipeId: 'r1',
+      days: [{ date: '2026-11-11', servings: 2 }],
+    })
+    const entry = created.entries[0]!
+
+    const moved = await moveDishPlanEntry(entry.id, '2026-11-25')
+
+    expect(moved.deltaDays).toBe(14)
+    expect(moved.entries[0]?.date).toBe('2026-11-25')
+    expect(moved.entries[0]?.servings).toBe(2)
+    expect(moved.session?.date).toBe('2026-11-25')
+    expect(moved.session?.servings).toBe(2)
+  })
+
+  it('moves Wednesday 11.11. to Friday 13.11. and shifts shopping demand to the next week', async () => {
+    const created = await saveDishPlan({
+      recipeId: 'r1',
+      days: [{ date: '2026-11-11', servings: 2 }],
+    })
+    const entry = created.entries[0]!
+    const recipes = await db.recipes.toArray()
+    const sessionsBefore = await db.cookSessions.toArray()
+    const beforeWeek = buildShoppingList({
+      anchor: '2026-11-11',
+      weekStartDay: 3,
+      recipes,
+      freeDishes: [],
+      cookSessions: sessionsBefore,
+      manualItems: [],
+      rules: [],
+    })
+    expect(beforeWeek.week.start).toBe('2026-11-05')
+    expect(beforeWeek.week.end).toBe('2026-11-11')
+    expect(beforeWeek.items.some((item) => item.name.includes('Spaghetti'))).toBe(true)
+
+    const moved = await moveDishPlanEntry(entry.id, '2026-11-13')
+
+    expect(moved.deltaDays).toBe(2)
+    expect(moved.entries[0]?.date).toBe('2026-11-13')
+    expect(moved.entries[0]?.servings).toBe(2)
+    expect(moved.session?.date).toBe('2026-11-13')
+    expect(moved.session?.servings).toBe(2)
+    expect((await db.recipes.get('r1'))?.ingredients[0]?.quantityText).toBe('400')
+
+    const sessionsAfter = await db.cookSessions.toArray()
+    const afterOldWeek = buildShoppingList({
+      anchor: '2026-11-11',
+      weekStartDay: 3,
+      recipes,
+      freeDishes: [],
+      cookSessions: sessionsAfter,
+      manualItems: [],
+      rules: [],
+    })
+    const afterNextWeek = buildShoppingList({
+      anchor: '2026-11-12',
+      weekStartDay: 3,
+      recipes,
+      freeDishes: [],
+      cookSessions: sessionsAfter,
+      manualItems: [],
+      rules: [],
+    })
+
+    expect(afterOldWeek.items.some((item) => item.name.includes('Spaghetti'))).toBe(false)
+    expect(afterNextWeek.week.start).toBe('2026-11-12')
+    expect(afterNextWeek.week.end).toBe('2026-11-18')
+    expect(
+      afterNextWeek.items.some((item) => item.name.includes('Spaghetti')),
+    ).toBe(true)
   })
 
   it('leaves all other dishes and their cooking events untouched', async () => {

@@ -14,6 +14,11 @@ import { addDays, startOfWeekOn } from './dates'
 
 /** Thursday (0 = Monday … 6 = Sunday) is the private app default. */
 export const DEFAULT_WEEK_START_DAY = 3
+/**
+ * The mobile family planning view always uses this fixed week start. It
+ * mirrors the existing Thursday–Wednesday period used by the shopping list.
+ */
+export const PLANNING_WEEK_START_DAY = 3
 export const DEFAULT_OVERLAP_BEFORE = 2
 export const DEFAULT_OVERLAP_AFTER = 2
 export const MIN_OVERLAP_DAYS = 0
@@ -88,6 +93,15 @@ export function buildCalendarWindow(
     afterDays,
     visibleDays: [...beforeDays, ...coreDays, ...afterDays],
   }
+}
+
+/**
+ * The fixed seven-day mobile planning week. It deliberately reuses the shared
+ * calendar window builder with Thursday as start and no overlap days, so there
+ * is no second date or week calculation.
+ */
+export function buildPlanningWeek(anchor: string): CalendarWindow {
+  return buildCalendarWindow(anchor, PLANNING_WEEK_START_DAY, 0, 0)
 }
 
 export interface CalendarDay {

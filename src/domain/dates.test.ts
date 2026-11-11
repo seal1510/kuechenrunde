@@ -6,6 +6,7 @@ import {
   planningDays,
   startOfWeek,
   todayKey,
+  weekOffset,
   weekdayIndex,
 } from './dates'
 
@@ -53,5 +54,13 @@ describe('local date handling', () => {
   it('uses the local calendar date, not UTC', () => {
     const lateNewYear = new Date(2026, 11, 31, 23, 30)
     expect(todayKey(lateNewYear)).toBe('2026-12-31')
+  })
+
+  it('measures whole-week offsets from the same week start rule', () => {
+    expect(weekOffset('2026-11-05', '2026-11-11', 3)).toBe(0)
+    expect(weekOffset('2026-11-12', '2026-11-11', 3)).toBe(1)
+    expect(weekOffset('2026-10-29', '2026-11-11', 3)).toBe(-1)
+    expect(weekOffset('2026-11-12', '2026-11-12', 3)).toBe(0)
+    expect(weekOffset('2027-01-07', '2026-12-31', 3)).toBe(1)
   })
 })

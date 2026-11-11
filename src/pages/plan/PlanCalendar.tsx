@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Presentation-only calendar surface for the meal plan. It renders the shared
- * seven-day grid, the compact overlap previews and, on smartphones, the same
- * eleven days as one continuous vertical list. All edits, moves and drag
- * gestures keep running through the callbacks that PlanPage already owns.
+ * seven-day grid with compact overlap previews on desktop and, on smartphones,
+ * exactly the seven days of the fixed Thursday–Wednesday planning week. All
+ * edits, moves and drag gestures keep running through the callbacks that
+ * PlanPage already owns.
  */
 
 import type { PointerEvent as ReactPointerEvent } from 'react'
@@ -201,7 +202,7 @@ export interface CalendarDayCardProps extends CalendarCardSharedProps {
   onAdd: (date: string) => void
 }
 
-/** Day card shared by the desktop week grid and the mobile 11-day list. */
+/** Day card shared by the desktop week grid and the fixed mobile week list. */
 export function CalendarDayCard({
   day,
   today,
@@ -463,6 +464,11 @@ function CalendarPreviewRow({
 
 export interface PlanCalendarProps extends CalendarCardSharedProps {
   layout: CalendarLayout
+  /**
+   * The fixed Thursday–Wednesday week for the phone view. Desktop keeps using
+   * `layout` with its configured week start and overlap days.
+   */
+  mobileLayout?: CalendarLayout
   today: string
   noteByDate: Map<string, DayNote>
   dropDate: string | null
@@ -522,47 +528,16 @@ function CalendarDayList({
   )
 }
 
-function shortDateRange(days: CalendarDay[]): string {
-  const first = days[0]
-  const last = days[days.length - 1]
-  if (!first || !last) return ''
-  const from = parseDateKey(first.date)
-  const to = parseDateKey(last.date)
-  const left = `${String(from.day).padStart(2, '0')}.${String(from.month).padStart(2, '0')}.`
-  const right = `${String(to.day).padStart(2, '0')}.${String(to.month).padStart(2, '0')}.`
-  return first.date === last.date ? left : `${left} – ${right}`
-}
-
-function ChevronIcon() {
-  return (
-    <svg
-      className="calendar-past-chevron"
-      viewBox="0 0 16 16"
-      width="16"
-      height="16"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path
-        d="m6 3.5 4.5 4.5L6 12.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
 /**
- * One calendar surface for all viewports. Desktop and tablet show the seven-day
- * grid with compact overlap previews. On smartphones the same eleven day
- * elements become one continuous vertical list, grouped into before, core and
- * after. No day is hidden behind a selection.
+ * One calendar surface for all viewports. Desktop keeps the seven-day grid with
+ * its configured week start and compact overlap previews. Phones always render
+ * exactly the seven days of the fixed Thursday–Wednesday planning week passed
+ * as `mobileLayout`; no past-day group, no "today and after" section and no
+ * days from a neighbouring week are added.
  */
 export function PlanCalendar({
   layout,
+  mobileLayout,
   today,
   noteByDate,
   dropDate,
@@ -589,61 +564,25 @@ export function PlanCalendar({
     onHighlightSession,
   }
 
-  const allDays = [...layout.before, ...layout.main, ...layout.after]
-  const todayInWindow = allDays.some((day) => day.date === today)
-
-  if (mobile && todayInWindow) {
-    const pastDays = allDays.filter((day) => day.date < today)
-    const currentDays = allDays.filter((day) => day.date >= today)
-    const pastKey =
-      pastDays.length > 0
-        ? `${pastDays[0]!.date}:${pastDays[pastDays.length - 1]!.date}`
-        : ''
-
+  if (mobile) {
+    const week = mobileLayout ?? layout
     return (
       <div className="calendar-shell is-mobile">
-        {pastDays.length > 0 ? (
-          <details className="calendar-past-group" key={pastKey}>
-            <summary className="calendar-past-summary">
-              <span className="calendar-past-summary-text">
-                <span className="calendar-past-label">Vergangene Tage</span>
-                <span className="calendar-past-range">{shortDateRange(pastDays)}</span>
-              </span>
-              <span className="calendar-past-count" aria-hidden="true">
-                {pastDays.length}
-              </span>
-              <ChevronIcon />
-            </summary>
-            <CalendarDayList
-              days={pastDays}
-              today={today}
-              noteByDate={noteByDate}
-              dropDate={dropDate}
-              onAdd={onAdd}
-              compactEmpty
-              {...shared}
-            />
-          </details>
-        ) : null}
-
-        <section className="calendar-core calendar-core--current" aria-label="Heute und danach">
-          <h2 className="calendar-group-title">Heute und danach</h2>
-          <CalendarDayList
-            days={currentDays}
-            today={today}
-            noteByDate={noteByDate}
-            dropDate={dropDate}
-            onAdd={onAdd}
-            compactEmpty
-            {...shared}
-          />
-        </section>
+        <CalendarDayList
+          days={week.main}
+          today={today}
+          noteByDate={noteByDate}
+          dropDate={dropDate}
+          onAdd={onAdd}
+          compactEmpty
+          {...shared}
+        />
       </div>
     )
   }
 
   return (
-    <div className={`calendar-shell${mobile ? ' is-mobile' : ''}`}>
+    <div className="calendar-shell">
       <CalendarPreviewRow
         days={layout.before}
         position="before"

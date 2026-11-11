@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { MealPlanEntry } from '../types'
 import {
+  PLANNING_WEEK_START_DAY,
   buildCalendarDays,
   buildCalendarLayout,
   buildCalendarWindow,
+  buildPlanningWeek,
   planEntriesForDay,
   totalAddActions,
 } from './calendar'
 import { addDays, weekdayIndex } from './dates'
+import { shoppingWeek } from './shopping'
 
 function entry(
   id: string,
@@ -197,5 +200,96 @@ describe('calendar layout render model', () => {
     expect(layout.main).toHaveLength(7)
     expect(layout.before).toHaveLength(7)
     expect(layout.after).toHaveLength(7)
+  })
+})
+
+describe('fixed Thursday–Wednesday planning week', () => {
+  it('starts every planning week on Thursday and contains exactly seven days', () => {
+    expect(PLANNING_WEEK_START_DAY).toBe(3)
+
+    const window = buildPlanningWeek('2026-11-11')
+
+    expect(window.coreStart).toBe('2026-11-05')
+    expect(window.coreEnd).toBe('2026-11-11')
+    expect(window.coreDays).toHaveLength(7)
+    expect(window.coreDays[0]).toBe('2026-11-05')
+    expect(window.coreDays[6]).toBe('2026-11-11')
+    expect(window.beforeDays).toEqual([])
+    expect(window.afterDays).toEqual([])
+    expect(window.visibleDays).toEqual(window.coreDays)
+    expect(weekdayIndex(window.coreStart)).toBe(3)
+  })
+
+  it('moves exactly one week for previous and next and never overlaps', () => {
+    const previous = buildPlanningWeek('2026-11-04')
+    const current = buildPlanningWeek('2026-11-11')
+    const next = buildPlanningWeek('2026-11-18')
+
+    expect(previous.coreStart).toBe('2026-10-29')
+    expect(previous.coreEnd).toBe('2026-11-04')
+    expect(next.coreStart).toBe('2026-11-12')
+    expect(next.coreEnd).toBe('2026-11-18')
+    expect(new Set([...previous.coreDays, ...current.coreDays, ...next.coreDays]).size).toBe(21)
+    expect(previous.coreDays.some((day) => current.coreDays.includes(day))).toBe(false)
+    expect(current.coreDays.some((day) => next.coreDays.includes(day))).toBe(false)
+  })
+
+  it('uses the Thursday week when the anchor itself is Thursday', () => {
+    const window = buildPlanningWeek('2026-11-12')
+
+    expect(window.coreStart).toBe('2026-11-12')
+    expect(window.coreEnd).toBe('2026-11-18')
+    expect(window.coreDays).toHaveLength(7)
+  })
+
+  it('crosses month and year boundaries without shifting days', () => {
+    const window = buildPlanningWeek('2026-12-31')
+
+    expect(window.coreStart).toBe('2026-12-31')
+    expect(window.coreEnd).toBe('2027-01-06')
+    expect(window.coreDays).toEqual([
+      '2026-12-31',
+      '2027-01-01',
+      '2027-01-02',
+      '2027-01-03',
+      '2027-01-04',
+      '2027-01-05',
+      '2027-01-06',
+    ])
+  })
+
+  it('keeps seven consecutive local dates across the DST change', () => {
+    const window = buildPlanningWeek('2026-03-29')
+
+    expect(window.coreStart).toBe('2026-03-26')
+    expect(window.coreEnd).toBe('2026-04-01')
+    expect(window.coreDays).toHaveLength(7)
+    expect(window.coreDays).toEqual([
+      '2026-03-26',
+      '2026-03-27',
+      '2026-03-28',
+      '2026-03-29',
+      '2026-03-30',
+      '2026-03-31',
+      '2026-04-01',
+    ])
+  })
+
+  it('renders only the seven main days in the fixed week layout', () => {
+    const window = buildPlanningWeek('2026-11-11')
+    const layout = buildCalendarLayout(window, [])
+
+    expect(layout.main.map((day) => day.date)).toEqual(window.coreDays)
+    expect(layout.main).toHaveLength(7)
+    expect(layout.before).toEqual([])
+    expect(layout.after).toEqual([])
+  })
+
+  it('uses the same Thursday period boundary as the shopping list', () => {
+    for (const date of ['2026-11-11', '2026-11-12', '2026-12-31', '2027-01-01']) {
+      expect(buildPlanningWeek(date).coreStart).toBe(
+        shoppingWeek(date, PLANNING_WEEK_START_DAY).start,
+      )
+    }
   })
 })

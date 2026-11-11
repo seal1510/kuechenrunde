@@ -13,10 +13,13 @@ import {
   formatDayLabel,
   formatWeekRange,
   parseDateKey,
+  todayKey,
+  weekOffset,
   weekdayShort,
 } from '../../domain/dates'
 import { shiftWeekStart, weekStartFor } from '../../domain/daySelection'
 import { PlanningPanel } from './PlanningPanel'
+import { weekRelationLabel } from './weekLabel'
 
 export interface MoveDialogProps {
   initialDate: string
@@ -41,6 +44,10 @@ export function MoveDialog({
 }: MoveDialogProps) {
   const [weekStart, setWeekStart] = useState(() =>
     weekStartFor(initialDate, weekStartDay),
+  )
+  const today = todayKey()
+  const weekRelation = weekRelationLabel(
+    weekOffset(weekStart, today, weekStartDay),
   )
   const days = Array.from({ length: 7 }, (_, index) => {
     const date = addDays(weekStart, index)
@@ -78,6 +85,10 @@ export function MoveDialog({
         </div>
       }
     >
+      <p className="move-dialog-hint">
+        Zielwoche wählen, dann den Zieltag antippen.
+      </p>
+
       <div className="dish-weeknav" role="group" aria-label="Zielwoche">
         <button
           type="button"
@@ -86,10 +97,22 @@ export function MoveDialog({
           onClick={() => setWeekStart((current) => shiftWeekStart(current, -1))}
           disabled={busy}
         >
-          ‹
+          <span className="dish-week-symbol" aria-hidden="true">
+            ‹
+          </span>
+          <span className="dish-week-label">← Vorige Woche</span>
+        </button>
+        <button
+          type="button"
+          className="button quiet dish-week-today"
+          onClick={() => setWeekStart(weekStartFor(today, weekStartDay))}
+          disabled={busy}
+        >
+          Aktuelle Woche
         </button>
         <span className="dish-week-range" aria-live="polite">
-          {formatWeekRange(weekStart)}
+          <span className="dish-week-relation">{weekRelation}</span>
+          <span className="dish-week-range-text">{formatWeekRange(weekStart)}</span>
         </span>
         <button
           type="button"
@@ -98,7 +121,10 @@ export function MoveDialog({
           onClick={() => setWeekStart((current) => shiftWeekStart(current, 1))}
           disabled={busy}
         >
-          ›
+          <span className="dish-week-symbol" aria-hidden="true">
+            ›
+          </span>
+          <span className="dish-week-label">Nächste Woche →</span>
         </button>
       </div>
 
@@ -108,7 +134,11 @@ export function MoveDialog({
             key={day.date}
             type="button"
             className={`dish-day-choice${day.current ? ' is-current' : ''}`}
-            aria-label={`${formatDayLabel(day.date)} als Ziel wählen`}
+            aria-label={
+              day.current
+                ? `${formatDayLabel(day.date)} ist bereits geplant`
+                : `${formatDayLabel(day.date)} als Ziel wählen`
+            }
             disabled={busy || day.current}
             onClick={() => onMove(day.date)}
           >
@@ -117,9 +147,14 @@ export function MoveDialog({
               {String(day.day).padStart(2, '0')}.{String(day.month).padStart(2, '0')}.
             </span>
             {day.current ? (
-              <span className="dish-day-check" aria-hidden="true">
-                •
-              </span>
+              <>
+                <span className="dish-day-check" aria-hidden="true">
+                  •
+                </span>
+                <span className="dish-day-current-label" aria-hidden="true">
+                  Aktuell
+                </span>
+              </>
             ) : null}
           </button>
         ))}

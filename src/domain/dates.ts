@@ -98,6 +98,20 @@ export function startOfWeek(key: string, weekStartDay: number): string {
   return startOfWeekOn(key, weekStartDay)
 }
 
+/**
+ * Whole-week distance between the week containing [referenceDate] and the week
+ * that starts at [weekStart]. 0 is the reference week, -1 the week before and
+ * +1 the week after. Both dates are compared via the same week start rule.
+ */
+export function weekOffset(
+  weekStart: string,
+  referenceDate: string,
+  weekStartDay: number,
+): number {
+  const referenceStart = startOfWeekOn(referenceDate, weekStartDay)
+  return Math.round(daysBetween(referenceStart, weekStart) / 7)
+}
+
 /** Seven days starting at [weekStartDay] for the week containing [today]. */
 export function currentWeek(today: string = todayKey(), weekStartDay: number): string[] {
   const start = startOfWeekOn(today, weekStartDay)
