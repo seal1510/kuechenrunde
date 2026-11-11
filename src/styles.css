@@ -266,18 +266,11 @@ code {
 .brand-mark {
   width: 2.15rem;
   height: 2.15rem;
-  display: grid;
-  place-items: center;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border: 0;
-  border-radius: 11px;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-contrast) 14%, transparent);
-  font-family: var(--font-display);
-  font-size: 0.98rem;
-  font-style: normal;
-  font-weight: 600;
-  letter-spacing: -0.04em;
+  flex: 0 0 auto;
+  display: block;
+  object-fit: cover;
+  border-radius: 20%;
+  background: transparent;
 }
 
 .brand strong {
@@ -10727,6 +10720,7 @@ body.plan-panel-open {
 }
 
 .mobile-nav,
+.mobile-menu-button,
 .library-import-menu {
   display: none;
 }
@@ -10968,18 +10962,26 @@ body.mobile-sheet-open {
   }
 
   /*
-   * The header scrolls away with the content. It keeps only the small app
+   * The header scrolls away with the content and keeps only the small app
    * mark and the product name; the cloud badge and the long subtitle are
    * intentionally not rendered on the phone.
+   *
+   * Keeping a backdrop-filter here only creates a composited layer that iOS
+   * Safari rasterises at the wrong scale: the logo and wordmark look soft
+   * while the rest of the page stays crisp. An opaque background keeps the
+   * palette and removes that layer without adding header height.
    */
   .app-header {
     position: static;
     padding-top: env(safe-area-inset-top);
+    background: var(--bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 
   .app-header-inner {
     min-height: 3.25rem;
-    padding-block: 0.35rem;
+    padding-block: 0.25rem;
     flex-wrap: nowrap;
     gap: 0.75rem;
   }
@@ -10992,8 +10994,43 @@ body.mobile-sheet-open {
   .brand-mark {
     width: 1.95rem;
     height: 1.95rem;
-    border-radius: 9px;
-    font-size: 0.9rem;
+    border-radius: 20%;
+  }
+
+  .mobile-menu-button {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-menu-button svg {
+    width: 1.35rem;
+    height: 1.35rem;
+  }
+
+  .mobile-menu-button:hover,
+  .mobile-menu-button:focus-visible {
+    background: var(--surface-2);
+    color: var(--text);
+    outline: none;
+  }
+
+  .mobile-menu-button.is-open {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+  }
+
+  .mobile-menu-button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
 
   .brand strong {
@@ -11018,7 +11055,7 @@ body.mobile-sheet-open {
     gap: 1rem;
   }
 
-  /* Permanent four-destination bar. */
+  /* Permanent three-destination bar. */
   .mobile-nav {
     position: fixed;
     right: 0;
@@ -11026,7 +11063,7 @@ body.mobile-sheet-open {
     left: 0;
     z-index: 40;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.1rem;
     padding: 0.3rem max(0.4rem, env(safe-area-inset-left))
       calc(0.3rem + env(safe-area-inset-bottom))

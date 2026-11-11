@@ -41,9 +41,14 @@ export default defineConfig({
         start_url: '/',
         scope: '/',
         icons: [
-          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
-          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          {
+            src: '/icons/icon-maskable-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
         ],
       },
       workbox: {
@@ -51,6 +56,9 @@ export default defineConfig({
         // sonst auch direkte Aufrufe von /legal/ingredient-catalog.json mit
         // index.html. txt/webmanifest decken die übrigen verlinkten Dateien ab.
         globPatterns: ['**/*.{js,css,html,json,svg,png,ico,webmanifest,txt}'],
+        // The high-resolution supplier artwork stays in the repository as the
+        // single source, but it is not needed in the offline install cache.
+        globIgnores: ['icons/icon-kuechenrunde.png'],
         navigateFallback: '/index.html',
         cleanupOutdatedCaches: true,
       },

@@ -7,7 +7,7 @@ import {
   moreMenuLinks,
 } from './mobileNavModel'
 
-const areas: Array<[Route, string]> = [
+const areas: Array<[Route, string | null]> = [
   [{ name: 'library' }, 'recipes'],
   [{ name: 'recipe', id: 'r1' }, 'recipes'],
   [{ name: 'recipe-new' }, 'recipes'],
@@ -15,15 +15,15 @@ const areas: Array<[Route, string]> = [
   [{ name: 'cook', recipeId: 'r1', cookSessionId: null }, 'recipes'],
   [{ name: 'plan' }, 'plan'],
   [{ name: 'shopping' }, 'shopping'],
-  [{ name: 'import' }, 'more'],
-  [{ name: 'import-url' }, 'more'],
-  [{ name: 'backup' }, 'more'],
-  [{ name: 'family' }, 'more'],
-  [{ name: 'about' }, 'more'],
+  [{ name: 'import' }, null],
+  [{ name: 'import-url' }, null],
+  [{ name: 'backup' }, null],
+  [{ name: 'family' }, null],
+  [{ name: 'about' }, null],
 ]
 
 describe('mobile navigation areas', () => {
-  it('maps every existing route to exactly one bottom-nav area', () => {
+  it('maps every existing route to exactly one bottom-nav area or no area', () => {
     for (const [route, area] of areas) {
       expect(mobileAreaForRoute(route)).toBe(area)
     }
@@ -38,18 +38,16 @@ describe('mobile navigation areas', () => {
     ).toBe('recipes')
   })
 
-  it('offers the four requested destinations', () => {
+  it('offers the three requested destinations without the old Mehr item', () => {
     expect(MOBILE_NAV_ITEMS.map((item) => item.label)).toEqual([
       'Rezepte',
       'Wochenplan',
       'Einkauf',
-      'Mehr',
     ])
     expect(MOBILE_NAV_ITEMS.map((item) => item.href)).toEqual([
       '#/',
       '#/plan',
       '#/shopping',
-      null,
     ])
   })
 

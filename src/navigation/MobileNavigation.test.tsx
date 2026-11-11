@@ -1,11 +1,13 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import { AppHeader } from '../components/AppHeader'
 import { mobileRouteKey, moreMenuLinks } from './mobileNavModel'
+import { MobileMoreMenuProvider } from './MobileMoreMenu'
 import { MobileNavigation } from './MobileNavigation'
 import { MoreSheet } from './MoreSheet'
 
 describe('MobileNavigation', () => {
-  it('renders the four permanent destinations and marks the active area', () => {
+  it('renders exactly the three permanent destinations', () => {
     const html = renderToStaticMarkup(
       <MobileNavigation route={{ name: 'plan' }} />,
     )
@@ -14,12 +16,13 @@ describe('MobileNavigation', () => {
     expect(html).toContain('Rezepte')
     expect(html).toContain('Wochenplan')
     expect(html).toContain('Einkauf')
-    expect(html).toContain('Mehr')
+    expect(html).not.toContain('>Mehr<')
+    expect(html).not.toContain('aria-expanded')
     expect(html).toContain('href="#/"')
     expect(html).toContain('href="#/plan"')
     expect(html).toContain('href="#/shopping"')
+    expect(html.match(/class="mobile-nav-item/g)).toHaveLength(3)
     expect(html.match(/aria-current="page"/g)).toHaveLength(1)
-    expect(html).toContain('aria-expanded="false"')
   })
 
   it('highlights recipes for every recipe sub-page', () => {
@@ -32,38 +35,61 @@ describe('MobileNavigation', () => {
     ]) {
       const html = renderToStaticMarkup(<MobileNavigation route={route} />)
       expect(html.match(/aria-current="page"/g)).toHaveLength(1)
-      expect(html).toContain('aria-current="page"')
+      expect(html).toMatch(/mobile-nav-item is-active[^>]*aria-current="page"/)
     }
   })
 
-  it('marks Mehr as the current area on secondary pages', () => {
+  it('keeps all three destinations visible but none active on secondary pages', () => {
     const html = renderToStaticMarkup(
       <MobileNavigation route={{ name: 'import-url' }} />,
     )
-    expect(html.match(/aria-current="page"/g)).toHaveLength(1)
-    expect(html).toContain('aria-expanded="false"')
-  })
-
-  it('does not render the sheet until the Mehr trigger is used', () => {
-    const html = renderToStaticMarkup(
-      <MobileNavigation route={{ name: 'library' }} />,
-    )
-    expect(html).not.toContain('role="dialog"')
-    expect(html).not.toContain('URL-Rezeptimport')
+    expect(html.match(/class="mobile-nav-item/g)).toHaveLength(3)
+    expect(html).not.toContain('aria-current="page"')
   })
 })
 
-describe('MoreSheet', () => {
-  const noop = () => {}
+describe('mobile header menu', () => {
+  it('places a three-dot menu trigger in the app header', () => {
+    const html = renderToStaticMarkup(
+      <MobileMoreMenuProvider>
+        <AppHeader subtitle="Familie">
+          <nav className="main-nav">Desktop-Navigation</nav>
+        </AppHeader>
+      </MobileMoreMenuProvider>,
+    )
 
-  it('lists the secondary actions, the account and logout', () => {
+    expect(html).toContain('class="app-header"')
+    expect(html).toContain('src="/icons/icon-192.png"')
+    expect(html).toContain('class="main-nav"')
+    expect(html).toContain('class="mobile-menu-button"')
+    expect(html).toContain('aria-label="Mehr-Menü öffnen"')
+    expect(html).toContain('aria-haspopup="dialog"')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('aria-controls="mobile-more-sheet"')
+    expect(html.match(/<circle/g)).toHaveLength(3)
+    expect(html).not.toContain('role="dialog"')
+    expect(html).not.toContain('URL-Rezeptimport')
+  })
+
+  it('hides the trigger while the cloud account is not ready', () => {
+    const html = renderToStaticMarkup(
+      <MobileMoreMenuProvider enabled={false}>
+        <AppHeader subtitle="Familien-Cloud" />
+      </MobileMoreMenuProvider>,
+    )
+
+    expect(html).toContain('class="app-header"')
+    expect(html).not.toContain('class="mobile-menu-button"')
+  })
+
+  it('reuses the complete existing More sheet', () => {
     const html = renderToStaticMarkup(
       <MoreSheet
         open
         includeFamily
         email="familie@example.org"
-        onLogout={noop}
-        onClose={noop}
+        onLogout={() => undefined}
+        onClose={() => undefined}
       />,
     )
 
@@ -86,7 +112,7 @@ describe('MoreSheet', () => {
 
   it('keeps local mode free of cloud account actions', () => {
     const html = renderToStaticMarkup(
-      <MoreSheet open onClose={noop} />,
+      <MoreSheet open onClose={() => undefined} />,
     )
 
     expect(html).not.toContain('Familie verwalten')
@@ -94,13 +120,6 @@ describe('MoreSheet', () => {
     expect(html).not.toContain('Abmelden')
     expect(html).toContain('URL-Rezeptimport')
     expect(html).toContain('Mela-Import')
-  })
-
-  it('renders nothing while closed', () => {
-    const html = renderToStaticMarkup(
-      <MoreSheet open={false} onClose={noop} />,
-    )
-    expect(html).toBe('')
   })
 })
 

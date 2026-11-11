@@ -241,14 +241,7 @@ export function CloudRecipesApp({
               </div>
             ) : null}
             <CloudImageUrlProvider cache={imageUrls}>{content}</CloudImageUrlProvider>
-            {route.name === 'cook' ? null : (
-              <MobileNavigation
-                route={route}
-                email={email}
-                includeFamily
-                onLogout={handleLogout}
-              />
-            )}
+            {route.name === 'cook' ? null : <MobileNavigation route={route} />}
           </NavigationGuardProvider>
         </CookBackendProvider>
       </ShoppingBackendProvider>

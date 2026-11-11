@@ -9,50 +9,35 @@
  * Cloud-Bestand gerendert.
  */
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { AuthProvider, useAuth } from '../auth/AuthProvider'
 import { InviteSetupPage } from '../auth/InviteSetupPage'
 import { parseAuthRedirect } from '../auth/authRedirect'
 import { readJoinToken } from '../family/joinLink'
 import { JoinPage } from './JoinPage'
 import { cloudConfig, cloudConfigError } from '../supabase/client'
+import { AppHeader } from '../components/AppHeader'
+import { MobileMoreMenuProvider } from '../navigation/MobileMoreMenu'
 import { CloudRecipesApp } from './CloudRecipesApp'
 import { CloudStatus } from './CloudStatus'
 
-function CloudGate() {
-  const { state, store, signIn, logout, retry } = useAuth()
-
-  if (state.status === 'ready') {
-    if (!store) {
-      return (
-        <CloudStatus
-          state={{
-            status: 'error',
-            email: state.email,
-            message: 'Der Cloud-Speicher ist nicht verfügbar.',
-          }}
-          onSignIn={signIn}
-          onRetry={retry}
-          onLogout={logout}
-        />
-      )
-    }
-    return (
-      <CloudRecipesApp
-        store={store}
-        email={state.email}
-        onLogout={logout}
-      />
-    )
-  }
-
+function CloudFrame({ children }: { children: ReactNode }) {
   return (
-    <CloudStatus
-      state={state}
-      onSignIn={signIn}
-      onRetry={retry}
-      onLogout={logout}
-    />
+    <div className="app-shell cloud-shell">
+      <AppHeader
+        subtitle="Familien-Cloud"
+        badge={<span className="cloud-mode-badge">Cloud-Modus</span>}
+        brandHref={null}
+      />
+      <main className="app-main">{children}</main>
+      <footer className="app-footer">
+        <span>Familien-Cloud · Supabase</span>
+        <span>
+          <a href="/legal/OFF-DATA-NOTICE.txt">Lizenzen</a> ·{' '}
+          <a href="/legal/ingredient-catalog.json">Zutatenkatalog</a>
+        </span>
+      </footer>
+    </div>
   )
 }
 
@@ -74,6 +59,53 @@ function CloudConfigurationProblem({ message }: { message: string }) {
         </p>
       </section>
     </div>
+  )
+}
+
+/**
+ * Authenticated cloud shell. The header can carry the same three-dot secondary
+ * menu as the local app because the account data is available here.
+ */
+function CloudAuthenticatedApp() {
+  const { state, store, signIn, logout, retry } = useAuth()
+  const ready = state.status === 'ready'
+
+  let content: ReactNode
+  if (ready) {
+    content = store ? (
+      <CloudRecipesApp store={store} email={state.email} onLogout={logout} />
+    ) : (
+      <CloudStatus
+        state={{
+          status: 'error',
+          email: state.email,
+          message: 'Der Cloud-Speicher ist nicht verfügbar.',
+        }}
+        onSignIn={signIn}
+        onRetry={retry}
+        onLogout={logout}
+      />
+    )
+  } else {
+    content = (
+      <CloudStatus
+        state={state}
+        onSignIn={signIn}
+        onRetry={retry}
+        onLogout={logout}
+      />
+    )
+  }
+
+  return (
+    <MobileMoreMenuProvider
+      enabled={ready}
+      includeFamily
+      email={ready ? state.email : undefined}
+      onLogout={ready ? logout : undefined}
+    >
+      <CloudFrame>{content}</CloudFrame>
+    </MobileMoreMenuProvider>
   )
 }
 
@@ -101,42 +133,25 @@ export function CloudApp() {
     return <InviteSetupPage redirect={authRedirect} />
   }
 
+  if (cloudConfigError) {
+    return (
+      <CloudFrame>
+        <CloudConfigurationProblem message={cloudConfigError.message} />
+      </CloudFrame>
+    )
+  }
+
+  if (!cloudConfig) {
+    return (
+      <CloudFrame>
+        <CloudConfigurationProblem message="VITE_SUPABASE_URL und VITE_SUPABASE_PUBLISHABLE_KEY fehlen." />
+      </CloudFrame>
+    )
+  }
+
   return (
-    <div className="app-shell cloud-shell">
-      <header className="app-header">
-        <div className="app-header-inner">
-          <div className="brand">
-            <span className="brand-mark" aria-hidden="true">
-              kr
-            </span>
-            <span>
-              <strong>Küchenrunde</strong>
-              <small className="brand-subtitle">Familien-Cloud</small>
-            </span>
-          </div>
-          <span className="cloud-mode-badge">Cloud-Modus</span>
-        </div>
-      </header>
-
-      <main className="app-main">
-        {cloudConfigError ? (
-          <CloudConfigurationProblem message={cloudConfigError.message} />
-        ) : !cloudConfig ? (
-          <CloudConfigurationProblem message="VITE_SUPABASE_URL und VITE_SUPABASE_PUBLISHABLE_KEY fehlen." />
-        ) : (
-          <AuthProvider>
-            <CloudGate />
-          </AuthProvider>
-        )}
-      </main>
-
-      <footer className="app-footer">
-        <span>Familien-Cloud · Supabase</span>
-        <span>
-          <a href="/legal/OFF-DATA-NOTICE.txt">Lizenzen</a> ·{' '}
-          <a href="/legal/ingredient-catalog.json">Zutatenkatalog</a>
-        </span>
-      </footer>
-    </div>
+    <AuthProvider>
+      <CloudAuthenticatedApp />
+    </AuthProvider>
   )
 }

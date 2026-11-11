@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * The mobile shell deliberately reuses the existing hash routes. This module
- * only maps a parsed route to one of the four bottom-navigation areas and
+ * only maps a parsed route to one of the three bottom-navigation areas and
  * describes the secondary entries of the "Mehr" sheet. Keeping the mapping
  * free of React makes the active-state rules directly testable.
  */
 
 import { URL_IMPORT_HASH, type Route } from '../routing/routes'
 
-export type MobileArea = 'recipes' | 'plan' | 'shopping' | 'more'
+export type MobileArea = 'recipes' | 'plan' | 'shopping'
 
 export interface MobileNavItem {
   area: MobileArea
@@ -19,12 +19,11 @@ export interface MobileNavItem {
   href: string | null
 }
 
-/** The four permanent destinations of the phone navigation. */
+/** The three permanent destinations of the phone navigation. */
 export const MOBILE_NAV_ITEMS: readonly MobileNavItem[] = [
   { area: 'recipes', label: 'Rezepte', href: '#/' },
   { area: 'plan', label: 'Wochenplan', href: '#/plan' },
   { area: 'shopping', label: 'Einkauf', href: '#/shopping' },
-  { area: 'more', label: 'Mehr', href: null },
 ] as const
 
 /**
@@ -41,21 +40,15 @@ export function isLibraryArea(route: Route): boolean {
   )
 }
 
-export function isMoreArea(route: Route): boolean {
-  return (
-    route.name === 'import' ||
-    route.name === 'import-url' ||
-    route.name === 'backup' ||
-    route.name === 'family' ||
-    route.name === 'about'
-  )
-}
-
-export function mobileAreaForRoute(route: Route): MobileArea {
+/**
+ * Secondary pages keep the three main destinations visible but none of them
+ * is the current page, so no bottom item receives the active highlight.
+ */
+export function mobileAreaForRoute(route: Route): MobileArea | null {
   if (isLibraryArea(route)) return 'recipes'
   if (route.name === 'plan') return 'plan'
   if (route.name === 'shopping') return 'shopping'
-  return 'more'
+  return null
 }
 
 export interface MoreMenuLink {

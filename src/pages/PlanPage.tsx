@@ -51,9 +51,15 @@ import { MoveDialog } from './plan/MoveDialog'
 import { DragWeekSwitchZones } from './plan/DragWeekSwitchZones'
 import {
   DRAG_WEEK_HOLD_MS,
+  DRAG_WEEK_RELEASE_MARGIN_PX,
+  consumeDragWeekSwitch,
+  createDragWeekSwitchGate,
   dragWeekDirectionAtPoint,
+  isClearlyOutsideDragWeekZones,
   resolveDragDropTarget,
+  updateDragWeekSwitchGate,
   type DragWeekDirection,
+  type DragWeekSwitchGate,
 } from './plan/dragWeekSwitch'
 import { weekRelationLabel } from './plan/weekLabel'
 import {
@@ -150,7 +156,7 @@ export function PlanPage() {
   const dragCaptureElementRef = useRef<HTMLButtonElement | null>(null)
   const dragPointerIdRef = useRef<number | null>(null)
   const dragOriginDetachedRef = useRef(false)
-  const dragWeekHoverRef = useRef<DragWeekDirection | null>(null)
+  const dragWeekGateRef = useRef<DragWeekSwitchGate>(createDragWeekSwitchGate())
   const dragWeekTimerRef = useRef<number | null>(null)
   const previousWeekZoneRef = useRef<HTMLDivElement>(null)
   const nextWeekZoneRef = useRef<HTMLDivElement>(null)
@@ -298,7 +304,7 @@ export function PlanPage() {
 
   function resetDragWeekSwitch() {
     clearWeekSwitchTimer()
-    dragWeekHoverRef.current = null
+    dragWeekGateRef.current = createDragWeekSwitchGate()
     setDragWeekTarget(null)
   }
 
@@ -541,35 +547,71 @@ export function PlanPage() {
     setDragWeekHoldKey((key) => key + 1)
     dragWeekTimerRef.current = window.setTimeout(() => {
       dragWeekTimerRef.current = null
-      if (dragWeekHoverRef.current !== direction) return
+      const gate = dragWeekGateRef.current
+      if (gate.consumed || gate.direction !== direction) return
       const { x, y } = dragPositionRef.current
       if (weekZoneDirectionAt(x, y) !== direction) {
-        dragWeekHoverRef.current = null
+        dragWeekGateRef.current = createDragWeekSwitchGate()
         setDragWeekTarget(null)
         return
       }
+      /*
+       * Exactly one week per deliberate dwell. The gate stays consumed after
+       * this call, so a finger that remains in the zone cannot advance again.
+       * A new switch is only possible after the finger has clearly left both
+       * zones and then enters one again (which starts a fresh 650 ms hold).
+       */
+      dragWeekGateRef.current = consumeDragWeekSwitch(gate, direction)
       switchDragWeek(direction)
-      // Keeping the finger in the zone advances one whole week per dwell, so
-      // even far-away target weeks are reachable without releasing the card.
-      if (weekZoneDirectionAt(x, y) === direction) {
-        startWeekSwitchTimer(direction)
-      }
+      // The zone has done its one job. Removing the armed highlight avoids
+      // suggesting that continuing to hold will advance another week.
+      setDragWeekTarget(null)
     }, DRAG_WEEK_HOLD_MS)
   }
 
-  function updateDragWeekHover(direction: DragWeekDirection | null) {
-    if (direction === dragWeekHoverRef.current) return
-    dragWeekHoverRef.current = direction
-    clearWeekSwitchTimer()
+  function updateDragWeekHover(
+    direction: DragWeekDirection | null,
+    x: number,
+    y: number,
+  ) {
+    const previousRect =
+      previousWeekZoneRef.current?.getBoundingClientRect() ?? null
+    const nextRect = nextWeekZoneRef.current?.getBoundingClientRect() ?? null
+    const clearlyOutside = isClearlyOutsideDragWeekZones(
+      x,
+      y,
+      previousRect,
+      nextRect,
+      DRAG_WEEK_RELEASE_MARGIN_PX,
+    )
+    const { gate, arm } = updateDragWeekSwitchGate(
+      dragWeekGateRef.current,
+      direction,
+      clearlyOutside,
+    )
+    dragWeekGateRef.current = gate
+
+    if (arm !== null) {
+      setDragWeekTarget(arm)
+      startWeekSwitchTimer(arm)
+      return
+    }
+
+    if (direction === null || gate.consumed) {
+      clearWeekSwitchTimer()
+      setDragWeekTarget(null)
+      return
+    }
+
+    // The same zone is still being held; the existing timer keeps running.
     setDragWeekTarget(direction)
-    if (direction !== null) startWeekSwitchTimer(direction)
   }
 
   function updateDragHover(x: number, y: number) {
     dragPositionRef.current = { x, y }
     updateOverlayPosition(x, y)
     const direction = weekZoneDirectionAt(x, y)
-    updateDragWeekHover(direction)
+    updateDragWeekHover(direction, x, y)
     // While over a switch zone no day is a target; the zone highlight and its
     // progress bar are the feedback until the new week has rendered.
     setDropDate(direction === null ? dropDateAt(x, y) : null)
@@ -769,7 +811,7 @@ export function PlanPage() {
     const item = dragItemRef.current
     const active = gesture.active
     clearWeekSwitchTimer()
-    dragWeekHoverRef.current = null
+    dragWeekGateRef.current = createDragWeekSwitchGate()
     setDragWeekTarget(null)
 
     if (!active || !item) {

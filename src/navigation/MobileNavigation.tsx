@@ -3,14 +3,15 @@
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * On narrow screens this replaces the wrapped desktop link rows. The four
- * destinations reuse the existing hash routes; "Mehr" opens the secondary
- * bottom sheet. The component is CSS-hidden from the desktop breakpoint up.
+ * On narrow screens this replaces the wrapped desktop link rows. The three
+ * destinations reuse the existing hash routes and are spread evenly. The
+ * secondary menu lives in the phone header (MobileMoreMenu) instead. The
+ * component is CSS-hidden from the desktop breakpoint up.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import type { Route } from '../routing/routes'
-import { MoreSheet } from './MoreSheet'
+import { useMobileMoreMenu } from './MobileMoreMenu'
 import {
   MOBILE_NAV_ITEMS,
   mobileAreaForRoute,
@@ -20,9 +21,6 @@ import {
 
 export interface MobileNavigationProps {
   route: Route
-  email?: string
-  includeFamily?: boolean
-  onLogout?: () => void | Promise<void>
 }
 
 function NavIcon({ area }: { area: MobileArea }) {
@@ -54,25 +52,16 @@ function NavIcon({ area }: { area: MobileArea }) {
       </svg>
     )
   }
-  if (area === 'shopping') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path
-          d="M4.5 8.5h15l-1.2 10H5.7l-1.2-10Zm3.5 0V7a4 4 0 0 1 8 0v1.5M9 12.5v3M12 12.5v3M15 12.5v3"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    )
-  }
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <circle cx="6" cy="12" r="1.55" fill="currentColor" />
-      <circle cx="12" cy="12" r="1.55" fill="currentColor" />
-      <circle cx="18" cy="12" r="1.55" fill="currentColor" />
+      <path
+        d="M4.5 8.5h15l-1.2 10H5.7l-1.2-10Zm3.5 0V7a4 4 0 0 1 8 0v1.5M9 12.5v3M12 12.5v3M15 12.5v3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
@@ -133,75 +122,37 @@ function useHideNavWhileTyping() {
   }, [])
 }
 
-export function MobileNavigation({
-  route,
-  email,
-  includeFamily = false,
-  onLogout,
-}: MobileNavigationProps) {
-  const [moreOpen, setMoreOpen] = useState(false)
+export function MobileNavigation({ route }: MobileNavigationProps) {
   const activeArea = mobileAreaForRoute(route)
   const routeKey = mobileRouteKey(route)
+  const menu = useMobileMoreMenu()
+  const closeMore = menu?.closeMore
 
   useHideNavWhileTyping()
 
-  // A deep link, the browser back button or a link inside the sheet all change
-  // the route; in every case the sheet must not stay on top of the new page.
+  // A deep link or the browser back button changes the route; the shared
+  // secondary sheet must not stay on top of the new page.
   useEffect(() => {
-    setMoreOpen(false)
-  }, [routeKey])
-
-  const closeMore = useCallback(() => {
-    setMoreOpen(false)
-  }, [])
+    closeMore?.()
+  }, [routeKey, closeMore])
 
   return (
-    <>
-      <nav className="mobile-nav" aria-label="Mobile Hauptnavigation">
-        {MOBILE_NAV_ITEMS.map((item) => {
-          if (item.area === 'more') {
-            const isActive = activeArea === 'more'
-            return (
-              <button
-                key={item.area}
-                type="button"
-                className={`mobile-nav-item${isActive ? ' is-active' : ''}${
-                  moreOpen ? ' is-open' : ''
-                }`}
-                aria-current={isActive ? 'page' : undefined}
-                aria-expanded={moreOpen}
-                aria-controls="mobile-more-sheet"
-                onClick={() => setMoreOpen((value) => !value)}
-              >
-                <NavIcon area="more" />
-                <span>{item.label}</span>
-              </button>
-            )
-          }
-
-          const isActive = activeArea === item.area
-          return (
-            <a
-              key={item.area}
-              className={`mobile-nav-item${isActive ? ' is-active' : ''}`}
-              href={item.href ?? '#/'}
-              aria-current={isActive ? 'page' : undefined}
-              onClick={closeMore}
-            >
-              <NavIcon area={item.area} />
-              <span>{item.label}</span>
-            </a>
-          )
-        })}
-      </nav>
-
-      <MoreSheet
-        open={moreOpen}
-        includeFamily={includeFamily}
-        email={email}
-        onLogout={onLogout}
-        onClose={closeMore}
-      />
-    </>
+    <nav className="mobile-nav" aria-label="Mobile Hauptnavigation">
+      {MOBILE_NAV_ITEMS.map((item) => {
+        const isActive = activeArea === item.area
+        return (
+          <a
+            key={item.area}
+            className={`mobile-nav-item${isActive ? ' is-active' : ''}`}
+            href={item.href ?? '#/'}
+            aria-current={isActive ? 'page' : undefined}
+            onClick={closeMore}
+          >
+            <NavIcon area={item.area} />
+            <span>{item.label}</span>
+          </a>
+        )
+      })}
+    </nav>
   )
 }

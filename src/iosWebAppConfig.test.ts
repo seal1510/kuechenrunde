@@ -17,7 +17,9 @@ describe('iOS-Web-App-Konfiguration', () => {
     expect(html).toContain('name="apple-mobile-web-app-capable" content="yes"')
     expect(html).toContain('name="apple-mobile-web-app-title" content="Küchenrunde"')
     expect(html).toContain('name="apple-mobile-web-app-status-bar-style"')
-    expect(html).toContain('rel="apple-touch-icon" href="/icons/apple-touch-icon.png"')
+    expect(html).toContain('rel="apple-touch-icon"')
+    expect(html).toContain('sizes="180x180"')
+    expect(html).toContain('href="/icons/apple-touch-icon.png"')
   })
 
   it('beschreibt ein installierbares Manifest mit eigenständigem Fenster', () => {
@@ -28,6 +30,7 @@ describe('iOS-Web-App-Konfiguration', () => {
     expect(viteConfig).toContain("scope: '/'")
     expect(viteConfig).toContain('192x192')
     expect(viteConfig).toContain('512x512')
+    expect(viteConfig).toContain("purpose: 'maskable'")
   })
 
   it('lädt auch die Katalog-JSON in den Precache', () => {
