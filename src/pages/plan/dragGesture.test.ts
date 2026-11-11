@@ -9,6 +9,7 @@ import {
   isDragActive,
   moveDragGesture,
   shouldActivateTouchHold,
+  takeDragSession,
 } from './dragGesture'
 
 describe('dish card drag activation', () => {
@@ -65,5 +66,13 @@ describe('dish card drag activation', () => {
 
     expect(isDragActive(cancelled)).toBe(false)
     expect(cancelled.cancelled).toBe(true)
+  })
+
+  it('claims the release only once so a second event cannot save twice', () => {
+    const ref = { current: activateDragGesture(createDragGesture('touch', 0, 0, 0)) }
+
+    expect(takeDragSession(ref)).not.toBeNull()
+    expect(ref.current).toBeNull()
+    expect(takeDragSession(ref)).toBeNull()
   })
 })

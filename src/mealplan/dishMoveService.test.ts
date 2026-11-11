@@ -251,6 +251,22 @@ describe('moving planned dishes', () => {
     expect(moved.session?.servings).toBe(2)
   })
 
+  it('moves a dish one week backwards', async () => {
+    const created = await saveDishPlan({
+      recipeId: 'r1',
+      days: [{ date: '2026-11-11', servings: 2 }],
+    })
+    const entry = created.entries[0]!
+
+    const moved = await moveDishPlanEntry(entry.id, '2026-11-04')
+
+    expect(moved.deltaDays).toBe(-7)
+    expect(moved.entries[0]?.date).toBe('2026-11-04')
+    expect(moved.entries[0]?.servings).toBe(2)
+    expect(moved.session?.date).toBe('2026-11-04')
+    expect(moved.session?.servings).toBe(2)
+  })
+
   it('moves Wednesday 11.11. to Friday 13.11. and shifts shopping demand to the next week', async () => {
     const created = await saveDishPlan({
       recipeId: 'r1',

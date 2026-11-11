@@ -48,6 +48,13 @@ import { DayNoteDialog } from './plan/DayNoteDialog'
 import { DishDialog } from './plan/DishDialog'
 import { FreeDishDialog } from './plan/FreeDishDialog'
 import { MoveDialog } from './plan/MoveDialog'
+import { DragWeekSwitchZones } from './plan/DragWeekSwitchZones'
+import {
+  DRAG_WEEK_HOLD_MS,
+  dragWeekDirectionAtPoint,
+  resolveDragDropTarget,
+  type DragWeekDirection,
+} from './plan/dragWeekSwitch'
 import { weekRelationLabel } from './plan/weekLabel'
 import {
   NO_PLANNING_OVERLAY,
@@ -70,6 +77,7 @@ import {
   createDragGesture,
   moveDragGesture,
   shouldActivateTouchHold,
+  takeDragSession,
   type DragGestureState,
   type DragPointerType,
 } from './plan/dragGesture'
@@ -130,15 +138,29 @@ export function PlanPage() {
   )
   const [dropDate, setDropDate] = useState<string | null>(null)
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null)
+  const [dragWeekTarget, setDragWeekTarget] = useState<DragWeekDirection | null>(
+    null,
+  )
+  const [dragWeekHoldKey, setDragWeekHoldKey] = useState(0)
 
   const dragGestureRef = useRef<DragGestureState | null>(null)
   const dragItemRef = useRef<DragItem | null>(null)
   const dragOriginRectRef = useRef<DOMRect | null>(null)
   const dragPositionRef = useRef({ x: 0, y: 0 })
+  const dragCaptureElementRef = useRef<HTMLButtonElement | null>(null)
+  const dragPointerIdRef = useRef<number | null>(null)
+  const dragOriginDetachedRef = useRef(false)
+  const dragWeekHoverRef = useRef<DragWeekDirection | null>(null)
+  const dragWeekTimerRef = useRef<number | null>(null)
+  const previousWeekZoneRef = useRef<HTMLDivElement>(null)
+  const nextWeekZoneRef = useRef<HTMLDivElement>(null)
+  const finishDragRef = useRef<(commit: boolean) => void>(() => undefined)
   const holdTimerRef = useRef<number | null>(null)
   const overlayTimerRef = useRef<number | null>(null)
   const undoDismissTimerRef = useRef<number | null>(null)
+  const clickSuppressionTimerRef = useRef<number | null>(null)
   const suppressClickRef = useRef(false)
+  const suppressDocumentClickRef = useRef(false)
 
   const recipeById = useMemo(
     () => new Map((recipes ?? []).map((recipe) => [recipe.id, recipe])),
@@ -260,6 +282,26 @@ export function PlanPage() {
     }
   }
 
+  function clearWeekSwitchTimer() {
+    if (dragWeekTimerRef.current !== null) {
+      window.clearTimeout(dragWeekTimerRef.current)
+      dragWeekTimerRef.current = null
+    }
+  }
+
+  function clearClickSuppressionTimer() {
+    if (clickSuppressionTimerRef.current !== null) {
+      window.clearTimeout(clickSuppressionTimerRef.current)
+      clickSuppressionTimerRef.current = null
+    }
+  }
+
+  function resetDragWeekSwitch() {
+    clearWeekSwitchTimer()
+    dragWeekHoverRef.current = null
+    setDragWeekTarget(null)
+  }
+
   useEffect(() => {
     function handleTouchMove(event: TouchEvent) {
       const gesture = dragGestureRef.current
@@ -279,16 +321,84 @@ export function PlanPage() {
       if (!next.active) return
 
       event.preventDefault()
-      dragPositionRef.current = { x: touch.clientX, y: touch.clientY }
-      updateOverlayPosition(touch.clientX, touch.clientY)
-      setDropDate(dropDateAt(touch.clientX, touch.clientY))
+      updateDragHover(touch.clientX, touch.clientY)
     }
+
+    /*
+     * A week switch can unmount the card that originally captured the pointer.
+     * Once detached, document-level pointermove keeps the floating card under
+     * the finger even if the original touch target is gone.
+     */
+    function handlePointerMove(event: PointerEvent) {
+      if (!dragOriginDetachedRef.current) return
+      if (!dragGestureRef.current?.active) return
+      updateDragHover(event.clientX, event.clientY)
+    }
+
+    /*
+     * The document-level release listeners keep the gesture alive and let the
+     * same pointer finish the drag on the newly rendered seven-day week.
+     */
+    function handlePointerUp(event: PointerEvent) {
+      if (!event.isPrimary) return
+      if (!dragGestureRef.current?.active) return
+      dragPositionRef.current = { x: event.clientX, y: event.clientY }
+      finishDragRef.current(true)
+    }
+
+    function handlePointerCancel(event: PointerEvent) {
+      if (!event.isPrimary) return
+      if (dragGestureRef.current?.active) finishDragRef.current(false)
+    }
+
+    function handleTouchEnd(event: TouchEvent) {
+      if (event.touches.length > 0) return
+      if (!dragGestureRef.current?.active) return
+      const touch = event.changedTouches[0]
+      if (touch) {
+        dragPositionRef.current = { x: touch.clientX, y: touch.clientY }
+      }
+      finishDragRef.current(true)
+    }
+
+    function handleTouchCancel() {
+      if (dragGestureRef.current?.active) finishDragRef.current(false)
+    }
+
+    /*
+     * After a week switch the pointer can be released over a newly rendered
+     * day instead of the original card. Suppress the synthetic click so only
+     * the explicit drop (or the return animation) decides what happens.
+     */
+    function handleWindowClick(event: MouseEvent) {
+      if (!suppressDocumentClickRef.current) return
+      event.preventDefault()
+      event.stopPropagation()
+      // NavigationGuard uses its own document capture listener; the synthetic
+      // click after a drop must not reach it either.
+      event.stopImmediatePropagation()
+    }
+
     document.addEventListener('touchmove', handleTouchMove, { passive: false })
+    document.addEventListener('pointermove', handlePointerMove)
+    document.addEventListener('pointerup', handlePointerUp)
+    document.addEventListener('pointercancel', handlePointerCancel)
+    document.addEventListener('touchend', handleTouchEnd)
+    document.addEventListener('touchcancel', handleTouchCancel)
+    window.addEventListener('click', handleWindowClick, true)
     return () => {
       document.removeEventListener('touchmove', handleTouchMove)
+      document.removeEventListener('pointermove', handlePointerMove)
+      document.removeEventListener('pointerup', handlePointerUp)
+      document.removeEventListener('pointercancel', handlePointerCancel)
+      document.removeEventListener('touchend', handleTouchEnd)
+      document.removeEventListener('touchcancel', handleTouchCancel)
+      window.removeEventListener('click', handleWindowClick, true)
       clearHoldTimer()
       clearOverlayTimer()
       clearUndoTimer()
+      clearWeekSwitchTimer()
+      clearClickSuppressionTimer()
       document.body.classList.remove('calendar-dragging')
     }
   }, [])
@@ -377,10 +487,100 @@ export function PlanPage() {
     )
   }
 
+  function weekZoneDirectionAt(
+    x: number,
+    y: number,
+  ): DragWeekDirection | null {
+    return dragWeekDirectionAtPoint(
+      x,
+      y,
+      previousWeekZoneRef.current?.getBoundingClientRect() ?? null,
+      nextWeekZoneRef.current?.getBoundingClientRect() ?? null,
+    )
+  }
+
+  function switchDragWeek(direction: DragWeekDirection) {
+    dragOriginDetachedRef.current = true
+    /*
+     * The source card is about to be replaced by the next week. Move the
+     * pointer capture to the stable body before React unmounts the card, so
+     * pointermove/pointerup keep flowing for the same finger. If the browser
+     * refuses the transfer, release the old capture; the document-level
+     * pointermove/touchmove and release listeners are the fallback.
+     */
+    const capture = dragCaptureElementRef.current
+    const pointerId = dragPointerIdRef.current
+    if (pointerId !== null) {
+      let transferred = false
+      try {
+        document.body.setPointerCapture(pointerId)
+        transferred = true
+      } catch {
+        // Fall through to releasing the old capture.
+      }
+      if (!transferred && capture) {
+        try {
+          if (capture.hasPointerCapture(pointerId)) {
+            capture.releasePointerCapture(pointerId)
+          }
+        } catch {
+          // The document listeners still keep the release path alive.
+        }
+      }
+    }
+    dragCaptureElementRef.current = null
+    dragPointerIdRef.current = null
+    // Clicks on the newly rendered week are never part of the drag release.
+    suppressDocumentClickRef.current = true
+    setAnchorDate((current) => addDays(current, direction * 7))
+    setDropDate(null)
+  }
+
+  function startWeekSwitchTimer(direction: DragWeekDirection) {
+    clearWeekSwitchTimer()
+    setDragWeekHoldKey((key) => key + 1)
+    dragWeekTimerRef.current = window.setTimeout(() => {
+      dragWeekTimerRef.current = null
+      if (dragWeekHoverRef.current !== direction) return
+      const { x, y } = dragPositionRef.current
+      if (weekZoneDirectionAt(x, y) !== direction) {
+        dragWeekHoverRef.current = null
+        setDragWeekTarget(null)
+        return
+      }
+      switchDragWeek(direction)
+      // Keeping the finger in the zone advances one whole week per dwell, so
+      // even far-away target weeks are reachable without releasing the card.
+      if (weekZoneDirectionAt(x, y) === direction) {
+        startWeekSwitchTimer(direction)
+      }
+    }, DRAG_WEEK_HOLD_MS)
+  }
+
+  function updateDragWeekHover(direction: DragWeekDirection | null) {
+    if (direction === dragWeekHoverRef.current) return
+    dragWeekHoverRef.current = direction
+    clearWeekSwitchTimer()
+    setDragWeekTarget(direction)
+    if (direction !== null) startWeekSwitchTimer(direction)
+  }
+
+  function updateDragHover(x: number, y: number) {
+    dragPositionRef.current = { x, y }
+    updateOverlayPosition(x, y)
+    const direction = weekZoneDirectionAt(x, y)
+    updateDragWeekHover(direction)
+    // While over a switch zone no day is a target; the zone highlight and its
+    // progress bar are the feedback until the new week has rendered.
+    setDropDate(direction === null ? dropDateAt(x, y) : null)
+  }
+
   function beginOverlay(item: DragItem, x: number, y: number) {
     const rect = dragOriginRectRef.current
     if (!rect) return
     clearOverlayTimer()
+    resetDragWeekSwitch()
+    dragOriginDetachedRef.current = false
     const groupSize =
       item.kind === 'entry' && item.entry.cookSessionId
         ? groupSizeBySession.get(item.entry.cookSessionId) ?? 1
@@ -406,7 +606,12 @@ export function PlanPage() {
       phase: 'dragging',
     })
     document.body.classList.add('calendar-dragging')
+    clearClickSuppressionTimer()
     suppressClickRef.current = true
+    // Touch drags need the global click guard after a week switch; a desktop
+    // mouse drag keeps its existing source-card guard only.
+    suppressDocumentClickRef.current =
+      dragGestureRef.current?.pointerType === 'touch'
     setHoveredSessionId(null)
     setDropDate(dropDateAt(x, y))
   }
@@ -477,6 +682,9 @@ export function PlanPage() {
     dragItemRef.current = item
     dragOriginRectRef.current = event.currentTarget.getBoundingClientRect()
     dragPositionRef.current = { x: event.clientX, y: event.clientY }
+    dragCaptureElementRef.current = event.currentTarget
+    dragPointerIdRef.current = event.pointerId
+    dragOriginDetachedRef.current = false
     suppressClickRef.current = false
 
     try {
@@ -510,8 +718,7 @@ export function PlanPage() {
 
     if (next.active) {
       event.preventDefault()
-      updateOverlayPosition(event.clientX, event.clientY)
-      setDropDate(dropDateAt(event.clientX, event.clientY))
+      updateDragHover(event.clientX, event.clientY)
     }
   }
 
@@ -534,6 +741,9 @@ export function PlanPage() {
       dragGestureRef.current = null
       dragItemRef.current = null
       dragOriginRectRef.current = null
+      dragCaptureElementRef.current = null
+      dragPointerIdRef.current = null
+      suppressDocumentClickRef.current = false
     }
   }
 
@@ -547,33 +757,54 @@ export function PlanPage() {
       dragGestureRef.current = null
       dragItemRef.current = null
       dragOriginRectRef.current = null
+      dragCaptureElementRef.current = null
+      dragPointerIdRef.current = null
+      suppressDocumentClickRef.current = false
     }
   }
 
   function finishDrag(commit: boolean) {
-    const gesture = dragGestureRef.current
+    const gesture = takeDragSession(dragGestureRef)
     if (!gesture) return
     const item = dragItemRef.current
     const active = gesture.active
-    dragGestureRef.current = null
+    clearWeekSwitchTimer()
+    dragWeekHoverRef.current = null
+    setDragWeekTarget(null)
 
     if (!active || !item) {
       dragItemRef.current = null
       dragOriginRectRef.current = null
+      dragCaptureElementRef.current = null
+      dragPointerIdRef.current = null
+      clearClickSuppressionTimer()
+      suppressDocumentClickRef.current = false
       return
     }
 
     // A click follows pointerup. Keep it suppressed long enough for touch
     // browsers that dispatch the click with a short delay.
+    clearClickSuppressionTimer()
     suppressClickRef.current = true
-    window.setTimeout(() => {
+    suppressDocumentClickRef.current =
+      gesture.pointerType === 'touch' || dragOriginDetachedRef.current
+    clickSuppressionTimerRef.current = window.setTimeout(() => {
+      clickSuppressionTimerRef.current = null
       suppressClickRef.current = false
+      suppressDocumentClickRef.current = false
     }, 500)
 
-    const target = commit
-      ? dropDateAt(dragPositionRef.current.x, dragPositionRef.current.y)
-      : null
-    if (target && target !== dragItemDate(item)) {
+    const { x, y } = dragPositionRef.current
+    const target = resolveDragDropTarget({
+      commit,
+      overWeekZone: weekZoneDirectionAt(x, y) !== null,
+      hitDate: dropDateAt(x, y),
+      originDate: dragItemDate(item),
+    })
+    dragCaptureElementRef.current = null
+    dragPointerIdRef.current = null
+
+    if (target) {
       setDropDate(target)
       setDragOverlay((current) =>
         current ? { ...current, phase: 'dropping' } : current,
@@ -583,6 +814,8 @@ export function PlanPage() {
       returnOverlay()
     }
   }
+
+  finishDragRef.current = finishDrag
 
   async function completeDrop(item: DragItem, targetDate: string) {
     if (item.kind === 'entry') {
@@ -622,24 +855,35 @@ export function PlanPage() {
       setDropDate(null)
       dragItemRef.current = null
       dragOriginRectRef.current = null
+      dragCaptureElementRef.current = null
+      dragPointerIdRef.current = null
+      dragOriginDetachedRef.current = false
       document.body.classList.remove('calendar-dragging')
     }, 180)
   }
 
   function returnOverlay() {
-    setDragOverlay((current) =>
-      current ? { ...current, phase: 'returning' } : current,
-    )
-    window.requestAnimationFrame(() => {
-      setDragOverlay((current) => {
-        if (!current || current.phase !== 'returning') return current
-        return {
-          ...current,
-          left: current.originLeft,
-          top: current.originTop,
-        }
+    if (dragOriginDetachedRef.current) {
+      // The original card lives in a week that is no longer rendered. Fade the
+      // floating card in place instead of animating it back off-screen.
+      setDragOverlay((current) =>
+        current ? { ...current, phase: 'settling' } : current,
+      )
+    } else {
+      setDragOverlay((current) =>
+        current ? { ...current, phase: 'returning' } : current,
+      )
+      window.requestAnimationFrame(() => {
+        setDragOverlay((current) => {
+          if (!current || current.phase !== 'returning') return current
+          return {
+            ...current,
+            left: current.originLeft,
+            top: current.originTop,
+          }
+        })
       })
-    })
+    }
     setDropDate(null)
     clearOverlayTimer()
     overlayTimerRef.current = window.setTimeout(() => {
@@ -647,6 +891,9 @@ export function PlanPage() {
       setDropDate(null)
       dragItemRef.current = null
       dragOriginRectRef.current = null
+      dragCaptureElementRef.current = null
+      dragPointerIdRef.current = null
+      dragOriginDetachedRef.current = false
       document.body.classList.remove('calendar-dragging')
     }, 190)
   }
@@ -1137,6 +1384,16 @@ export function PlanPage() {
             {undoBusy ? 'Rückgängig …' : 'Rückgängig'}
           </button>
         </div>
+      ) : null}
+
+      {phoneLayout && dragOverlay?.phase === 'dragging' ? (
+        <DragWeekSwitchZones
+          previousRef={previousWeekZoneRef}
+          nextRef={nextWeekZoneRef}
+          activeDirection={dragWeekTarget}
+          holdMs={DRAG_WEEK_HOLD_MS}
+          holdKey={dragWeekHoldKey}
+        />
       ) : null}
 
       {dragOverlay && typeof document !== 'undefined'

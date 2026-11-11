@@ -91,3 +91,18 @@ export function cancelDragGesture(state: DragGestureState): DragGestureState {
 export function isDragActive(state: DragGestureState | null): boolean {
   return Boolean(state?.active)
 }
+
+export interface DragSessionRef<T> {
+  current: T | null
+}
+
+/**
+ * Atomically claim a drag session. The first release (pointerup, touchend or
+ * pointercancel) receives the session; every later release receives null, so a
+ * single gesture can never trigger two move operations.
+ */
+export function takeDragSession<T>(ref: DragSessionRef<T>): T | null {
+  const session = ref.current
+  ref.current = null
+  return session
+}

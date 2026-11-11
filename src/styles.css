@@ -11734,6 +11734,92 @@ html.kr-keyboard-open .bottom-sheet {
     outline-offset: -2px;
   }
 
+  /* --- Wochenwechsel während einer laufenden Drag-Geste ---------------- */
+
+  .calendar-week-drop-zones {
+    position: fixed;
+    right: max(0.75rem, env(safe-area-inset-right));
+    bottom: calc(var(--mobile-nav-total, 4.5rem) + 0.6rem);
+    left: max(0.75rem, env(safe-area-inset-left));
+    z-index: 210;
+    display: flex;
+    gap: 0.5rem;
+    pointer-events: none;
+  }
+
+  .calendar-week-drop-zone {
+    position: relative;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.05rem;
+    min-height: 3.4rem;
+    overflow: hidden;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    color: var(--text);
+    box-shadow: var(--shadow-md);
+    backdrop-filter: saturate(1.2) blur(12px);
+    -webkit-backdrop-filter: saturate(1.2) blur(12px);
+    transition:
+      border-color var(--transition-fast),
+      background var(--transition-fast),
+      color var(--transition-fast);
+  }
+
+  .calendar-week-drop-zone.is-armed {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+    color: var(--accent-strong);
+  }
+
+  .calendar-week-drop-label {
+    font-size: var(--text-sm);
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .calendar-week-drop-hint {
+    color: var(--muted);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .calendar-week-drop-zone.is-armed .calendar-week-drop-hint {
+    color: var(--accent-strong);
+  }
+
+  .calendar-week-drop-progress {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background: var(--accent);
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+
+  .calendar-week-drop-zone.is-armed .calendar-week-drop-progress {
+    animation: calendar-week-drop-hold var(--drag-week-hold-ms, 650ms) linear forwards;
+  }
+
+  @keyframes calendar-week-drop-hold {
+    from {
+      transform: scaleX(0);
+    }
+
+    to {
+      transform: scaleX(1);
+    }
+  }
+
   /* --- Gericht verschieben --------------------------------------------- */
 
   .move-dialog-hint {
