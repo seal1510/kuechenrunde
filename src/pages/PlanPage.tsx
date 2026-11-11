@@ -796,7 +796,7 @@ export function PlanPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page plan-page">
       <header className="page-head plan-head">
         <div className="plan-head-copy">
           <h1>Essensplan</h1>

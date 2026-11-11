@@ -14,6 +14,7 @@ import type { CalendarDay, CalendarLayout } from '../../domain/calendar'
 import { formatDayLabel, parseDateKey, weekdayShort } from '../../domain/dates'
 import { groupThemeFor, isGroupHighlighted } from '../../domain/groupColor'
 import { formatPortionCount } from '../../lib/format'
+import { usePhoneLayout } from '../../lib/phoneLayout'
 import type { DayNote, FreeDish, MealPlanEntry, Recipe } from '../../types'
 import { dragItemKey, type DragItem } from './dragItem'
 
@@ -192,6 +193,11 @@ export interface CalendarDayCardProps extends CalendarCardSharedProps {
   today: string
   note?: DayNote
   dropTarget: boolean
+  /**
+   * Phones render an empty day as one compact row: date, weekday and the
+   * labelled add action. The decorative dash is omitted there.
+   */
+  compactEmpty?: boolean
   onAdd: (date: string) => void
 }
 
@@ -201,6 +207,7 @@ export function CalendarDayCard({
   today,
   note,
   dropTarget,
+  compactEmpty = false,
   recipeById,
   freeDishById,
   groupSizeBySession,
@@ -220,6 +227,7 @@ export function CalendarDayCard({
     isToday ? 'is-today' : '',
     isPast ? 'is-past' : '',
     occupied ? 'is-occupied' : 'is-empty',
+    !occupied && compactEmpty ? 'is-compact-empty' : '',
     dropTarget ? 'is-drop-target' : '',
   ]
     .filter(Boolean)
@@ -240,7 +248,7 @@ export function CalendarDayCard({
         {isToday ? <span className="calendar-today">Heute</span> : null}
       </header>
 
-      {!occupied ? (
+      {!occupied && !compactEmpty ? (
         <span className="calendar-empty-hint" aria-hidden="true">
           —
         </span>
@@ -459,6 +467,92 @@ export interface PlanCalendarProps extends CalendarCardSharedProps {
   noteByDate: Map<string, DayNote>
   dropDate: string | null
   onAdd: (date: string) => void
+  /**
+   * Test and embedding override. Production reads the same phone media query
+   * that controls the bottom navigation.
+   */
+  mobile?: boolean
+}
+
+interface CalendarDayListProps extends CalendarCardSharedProps {
+  days: CalendarDay[]
+  today: string
+  noteByDate: Map<string, DayNote>
+  dropDate: string | null
+  onAdd: (date: string) => void
+  compactEmpty?: boolean
+}
+
+function CalendarDayList({
+  days,
+  today,
+  noteByDate,
+  dropDate,
+  onAdd,
+  compactEmpty = false,
+  recipeById,
+  freeDishById,
+  groupSizeBySession,
+  originDragKey,
+  highlightedSessionId,
+  dragHandlers,
+  onHighlightSession,
+}: CalendarDayListProps) {
+  return (
+    <div className="calendar-week">
+      {days.map((day) => (
+        <CalendarDayCard
+          key={day.date}
+          day={day}
+          today={today}
+          note={noteByDate.get(day.date)}
+          dropTarget={dropDate === day.date}
+          compactEmpty={compactEmpty}
+          recipeById={recipeById}
+          freeDishById={freeDishById}
+          groupSizeBySession={groupSizeBySession}
+          originDragKey={originDragKey}
+          highlightedSessionId={highlightedSessionId}
+          dragHandlers={dragHandlers}
+          onAdd={onAdd}
+          onHighlightSession={onHighlightSession}
+        />
+      ))}
+    </div>
+  )
+}
+
+function shortDateRange(days: CalendarDay[]): string {
+  const first = days[0]
+  const last = days[days.length - 1]
+  if (!first || !last) return ''
+  const from = parseDateKey(first.date)
+  const to = parseDateKey(last.date)
+  const left = `${String(from.day).padStart(2, '0')}.${String(from.month).padStart(2, '0')}.`
+  const right = `${String(to.day).padStart(2, '0')}.${String(to.month).padStart(2, '0')}.`
+  return first.date === last.date ? left : `${left} – ${right}`
+}
+
+function ChevronIcon() {
+  return (
+    <svg
+      className="calendar-past-chevron"
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="m6 3.5 4.5 4.5L6 12.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }
 
 /**
@@ -480,7 +574,11 @@ export function PlanCalendar({
   dragHandlers,
   onAdd,
   onHighlightSession,
+  mobile: mobileProp,
 }: PlanCalendarProps) {
+  const phoneLayout = usePhoneLayout()
+  const mobile = mobileProp ?? phoneLayout
+
   const shared = {
     recipeById,
     freeDishById,
@@ -491,8 +589,61 @@ export function PlanCalendar({
     onHighlightSession,
   }
 
+  const allDays = [...layout.before, ...layout.main, ...layout.after]
+  const todayInWindow = allDays.some((day) => day.date === today)
+
+  if (mobile && todayInWindow) {
+    const pastDays = allDays.filter((day) => day.date < today)
+    const currentDays = allDays.filter((day) => day.date >= today)
+    const pastKey =
+      pastDays.length > 0
+        ? `${pastDays[0]!.date}:${pastDays[pastDays.length - 1]!.date}`
+        : ''
+
+    return (
+      <div className="calendar-shell is-mobile">
+        {pastDays.length > 0 ? (
+          <details className="calendar-past-group" key={pastKey}>
+            <summary className="calendar-past-summary">
+              <span className="calendar-past-summary-text">
+                <span className="calendar-past-label">Vergangene Tage</span>
+                <span className="calendar-past-range">{shortDateRange(pastDays)}</span>
+              </span>
+              <span className="calendar-past-count" aria-hidden="true">
+                {pastDays.length}
+              </span>
+              <ChevronIcon />
+            </summary>
+            <CalendarDayList
+              days={pastDays}
+              today={today}
+              noteByDate={noteByDate}
+              dropDate={dropDate}
+              onAdd={onAdd}
+              compactEmpty
+              {...shared}
+            />
+          </details>
+        ) : null}
+
+        <section className="calendar-core calendar-core--current" aria-label="Heute und danach">
+          <h2 className="calendar-group-title">Heute und danach</h2>
+          <CalendarDayList
+            days={currentDays}
+            today={today}
+            noteByDate={noteByDate}
+            dropDate={dropDate}
+            onAdd={onAdd}
+            compactEmpty
+            {...shared}
+          />
+        </section>
+      </div>
+    )
+  }
+
   return (
-    <div className="calendar-shell">
+    <div className={`calendar-shell${mobile ? ' is-mobile' : ''}`}>
       <CalendarPreviewRow
         days={layout.before}
         position="before"
@@ -513,6 +664,7 @@ export function PlanCalendar({
               today={today}
               note={noteByDate.get(day.date)}
               dropTarget={dropDate === day.date}
+              compactEmpty={mobile}
               onAdd={onAdd}
               {...shared}
             />

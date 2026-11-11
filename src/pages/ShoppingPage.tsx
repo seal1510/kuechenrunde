@@ -17,6 +17,8 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react'
+import { BottomSheet } from '../components/BottomSheet'
+import { usePhoneLayout } from '../lib/phoneLayout'
 import { formatDayLabel, todayKey, WEEKDAY_NAMES } from '../domain/dates'
 import {
   categoryLabel,
@@ -126,11 +128,187 @@ function CloseIcon() {
   )
 }
 
+function ChevronDownIcon() {
+  return (
+    <svg
+      className="shopping-switch-chevron"
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="m3.5 6 4.5 4.5L12.5 6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+export interface ShoppingListsPanelContentProps {
+  lists: ShoppingPageList[]
+  selectedListId: string | null
+  selectedList: ShoppingPageList | null
+  standardListDisplayName: string
+  creatingList: boolean
+  newListName: string
+  listBusy: boolean
+  sheetMode?: boolean
+  onSelectList: (id: string) => void
+  onToggleCreate: () => void
+  onNewListNameChange: (value: string) => void
+  onCreateList: (event: FormEvent) => void
+  onCancelCreate: () => void
+  onRenameList?: () => void
+  onDeleteList?: () => void
+  onCloseSheet?: () => void
+}
+
+/**
+ * The complete list management surface. The desktop renders it in the sticky
+ * sidebar; phones render the exact same controls in a bottom sheet. Keeping one
+ * component means list switching, creation, renaming and deletion cannot drift
+ * between the two presentations.
+ */
+export function ShoppingListsPanelContent({
+  lists,
+  selectedListId,
+  selectedList,
+  standardListDisplayName,
+  creatingList,
+  newListName,
+  listBusy,
+  sheetMode = false,
+  onSelectList,
+  onToggleCreate,
+  onNewListNameChange,
+  onCreateList,
+  onCancelCreate,
+  onRenameList,
+  onDeleteList,
+  onCloseSheet,
+}: ShoppingListsPanelContentProps) {
+  return (
+    <>
+      <div className={`shopping-lists-head${sheetMode ? ' shopping-lists-head--sheet' : ''}`}>
+        {sheetMode ? null : <h2>Einkaufszettel</h2>}
+        <button
+          type="button"
+          className="shopping-list-new"
+          onClick={onToggleCreate}
+          aria-expanded={creatingList}
+        >
+          {sheetMode
+            ? creatingList
+              ? 'Abbrechen'
+              : '+ Neuer Zettel'
+            : '+ Neu'}
+        </button>
+      </div>
+
+      {creatingList ? (
+        <form className="shopping-list-create" onSubmit={onCreateList}>
+          <label className="shopping-field">
+            <span>Name des neuen Zettels</span>
+            <input
+              value={newListName}
+              onChange={(event) => onNewListNameChange(event.target.value)}
+              placeholder="z. B. Drogerie"
+              maxLength={60}
+              autoFocus
+              data-autofocus
+              disabled={listBusy}
+            />
+          </label>
+          <div className="shopping-list-create-actions">
+            <button
+              type="submit"
+              className="button primary"
+              disabled={listBusy || !newListName.trim()}
+            >
+              Anlegen
+            </button>
+            <button
+              type="button"
+              className="button quiet"
+              disabled={listBusy}
+              onClick={onCancelCreate}
+            >
+              Abbrechen
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      <div className="shopping-list-options" aria-label="Zettel auswählen">
+        {lists.map((list) => {
+          const selected = list.id === selectedListId
+          return (
+            <button
+              key={list.id}
+              type="button"
+              className={`shopping-list-option${selected ? ' is-selected' : ''}`}
+              aria-pressed={selected}
+              data-list-id={list.id}
+              onClick={() => onSelectList(list.id)}
+            >
+              <span className="shopping-list-option-top">
+                <span className="shopping-list-option-name">
+                  {list.isStandard ? standardListDisplayName : list.name}
+                </span>
+                {list.isStandard ? (
+                  <span className="shopping-list-badge">Woche</span>
+                ) : null}
+              </span>
+              <span className="shopping-list-option-meta">
+                {list.openCount} offen · {list.doneCount} erledigt
+                {list.reviewCount > 0
+                  ? ` · ${list.reviewCount} prüfen`
+                  : list.requiresReview
+                    ? ' · prüfen'
+                    : ''}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {sheetMode && selectedList && !selectedList.isStandard ? (
+        <div className="shopping-sheet-manage">
+          <button type="button" className="button quiet" onClick={onRenameList}>
+            Umbenennen
+          </button>
+          <button
+            type="button"
+            className="button danger-quiet"
+            onClick={onDeleteList}
+          >
+            Löschen
+          </button>
+        </div>
+      ) : null}
+
+      {sheetMode ? (
+        <div className="bottom-sheet-actions shopping-sheet-actions">
+          <button type="button" className="button primary" onClick={onCloseSheet}>
+            Fertig
+          </button>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
 export function ShoppingPage() {
   const backend = useShoppingBackend()
   const today = useMemo(() => todayKey(), [])
+  const phoneLayout = usePhoneLayout()
   const [periodAnchor, setPeriodAnchor] = useState(today)
   const [selectedListId, setSelectedListId] = useState<string | null>(null)
+  const [listSheetOpen, setListSheetOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [creatingList, setCreatingList] = useState(false)
@@ -311,6 +489,13 @@ export function ShoppingPage() {
     return () => window.clearTimeout(timer)
   }, [flash])
 
+  // A sheet opened on the phone must not remain over the desktop sidebar after
+  // a rotation or resize.
+  useEffect(() => {
+    if (phoneLayout) return
+    setListSheetOpen(false)
+  }, [phoneLayout])
+
   async function run(action: () => Promise<unknown>): Promise<boolean> {
     try {
       setError(null)
@@ -344,15 +529,29 @@ export function ShoppingPage() {
     )
     setSelectedListId(null)
     setAddOpen(false)
+    setListSheetOpen(false)
   }
 
   function goToday() {
     setPeriodAnchor(today)
     setSelectedListId(null)
     setAddOpen(false)
+    setListSheetOpen(false)
   }
 
   function selectList(id: string) {
+    setSelectedListId(id)
+    setAddOpen(false)
+    setListSheetOpen(false)
+  }
+
+  /**
+   * Selecting inside the sheet keeps it open: the highlighted option and the
+   * manage actions update immediately, and "Fertig" or the close button reveal
+   * the chosen list. The desktop sidebar still closes nothing and behaves as
+   * before.
+   */
+  function selectListFromSheet(id: string) {
     setSelectedListId(id)
     setAddOpen(false)
   }
@@ -408,6 +607,7 @@ export function ShoppingPage() {
       setNewListName('')
       setCreatingList(false)
       setSelectedListId(list.id)
+      setListSheetOpen(false)
     } catch (caught) {
       setError(errorText(caught))
     } finally {
@@ -557,7 +757,23 @@ export function ShoppingPage() {
   return (
     <div className="page shopping-page">
       <header className="shopping-head">
-        <h1>Einkaufsliste</h1>
+        <div className="shopping-head-main">
+          <h1>Einkaufsliste</h1>
+          {view && selectedList ? (
+            <button
+              type="button"
+              className="shopping-list-switch"
+              aria-haspopup="dialog"
+              aria-expanded={listSheetOpen}
+              aria-controls={listSheetOpen ? 'shopping-lists-sheet' : undefined}
+              aria-label={`Einkaufszettel wechseln, aktuell ${selectedListName}`}
+              onClick={() => setListSheetOpen(true)}
+            >
+              <span className="shopping-list-switch-name">{selectedListName}</span>
+              <ChevronDownIcon />
+            </button>
+          ) : null}
+        </div>
         <button
           type="button"
           className="shopping-icon-button"
@@ -669,88 +885,26 @@ export function ShoppingPage() {
       {view && selectedList ? (
         <div className="shopping-layout">
           <aside className="shopping-lists-panel" aria-label="Einkaufszettel">
-            <div className="shopping-lists-head">
-              <h2>Einkaufszettel</h2>
-              <button
-                type="button"
-                className="shopping-list-new"
-                onClick={() => {
-                  setError(null)
-                  setCreatingList((open) => !open)
-                }}
-                aria-expanded={creatingList}
-              >
-                + Neu
-              </button>
-            </div>
-
-            {creatingList ? (
-              <form className="shopping-list-create" onSubmit={(event) => void createList(event)}>
-                <label className="shopping-field">
-                  <span>Name des neuen Zettels</span>
-                  <input
-                    value={newListName}
-                    onChange={(event) => setNewListName(event.target.value)}
-                    placeholder="z. B. Drogerie"
-                    maxLength={60}
-                    autoFocus
-                    disabled={listBusy}
-                  />
-                </label>
-                <div className="shopping-list-create-actions">
-                  <button
-                    type="submit"
-                    className="button primary"
-                    disabled={listBusy || !newListName.trim()}
-                  >
-                    Anlegen
-                  </button>
-                  <button
-                    type="button"
-                    className="button quiet"
-                    disabled={listBusy}
-                    onClick={() => {
-                      setCreatingList(false)
-                      setNewListName('')
-                    }}
-                  >
-                    Abbrechen
-                  </button>
-                </div>
-              </form>
-            ) : null}
-
-            <div className="shopping-list-options" aria-label="Zettel auswählen">
-              {view.lists.map((list) => {
-                const selected = list.id === selectedList.id
-                return (
-                  <button
-                    key={list.id}
-                    type="button"
-                    className={`shopping-list-option${selected ? ' is-selected' : ''}`}
-                    aria-pressed={selected}
-                    onClick={() => selectList(list.id)}
-                  >
-                    <span className="shopping-list-option-top">
-                      <span className="shopping-list-option-name">
-                        {list.isStandard ? standardListDisplayName : list.name}
-                      </span>
-                      {list.isStandard ? (
-                        <span className="shopping-list-badge">Woche</span>
-                      ) : null}
-                    </span>
-                    <span className="shopping-list-option-meta">
-                      {list.openCount} offen · {list.doneCount} erledigt
-                      {list.reviewCount > 0
-                        ? ` · ${list.reviewCount} prüfen`
-                        : list.requiresReview
-                          ? ' · prüfen'
-                          : ''}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
+            <ShoppingListsPanelContent
+              lists={view.lists}
+              selectedListId={selectedList.id}
+              selectedList={selectedList}
+              standardListDisplayName={standardListDisplayName}
+              creatingList={creatingList}
+              newListName={newListName}
+              listBusy={listBusy}
+              onSelectList={selectList}
+              onToggleCreate={() => {
+                setError(null)
+                setCreatingList((open) => !open)
+              }}
+              onNewListNameChange={setNewListName}
+              onCreateList={(event) => void createList(event)}
+              onCancelCreate={() => {
+                setCreatingList(false)
+                setNewListName('')
+              }}
+            />
           </aside>
 
           <section className="shopping-list-content" aria-labelledby="shopping-active-list">
@@ -809,7 +963,7 @@ export function ShoppingPage() {
               </div>
               <div className="shopping-active-actions">
                 {selectedList.isStandard ? null : (
-                  <>
+                  <div className="shopping-active-manage">
                     <button
                       type="button"
                       className="shopping-text-action"
@@ -824,7 +978,7 @@ export function ShoppingPage() {
                     >
                       Löschen
                     </button>
-                  </>
+                  </div>
                 )}
                 <button
                   type="button"
@@ -1044,6 +1198,49 @@ export function ShoppingPage() {
           onClose={() => setDeletingListId(null)}
         />
       ) : null}
+
+      <BottomSheet
+        open={listSheetOpen && Boolean(view && selectedList)}
+        title="Einkaufszettel"
+        description="Zettel auswählen oder verwalten."
+        closeLabel="Einkaufszettel schließen"
+        onClose={() => setListSheetOpen(false)}
+        className="shopping-lists-sheet"
+        id="shopping-lists-sheet"
+      >
+        {view && selectedList ? (
+          <ShoppingListsPanelContent
+            sheetMode
+            lists={view.lists}
+            selectedListId={selectedList.id}
+            selectedList={selectedList}
+            standardListDisplayName={standardListDisplayName}
+            creatingList={creatingList}
+            newListName={newListName}
+            listBusy={listBusy}
+            onSelectList={selectListFromSheet}
+            onToggleCreate={() => {
+              setError(null)
+              setCreatingList((open) => !open)
+            }}
+            onNewListNameChange={setNewListName}
+            onCreateList={(event) => void createList(event)}
+            onCancelCreate={() => {
+              setCreatingList(false)
+              setNewListName('')
+            }}
+            onRenameList={() => {
+              setListSheetOpen(false)
+              setRenamingListId(selectedList.id)
+            }}
+            onDeleteList={() => {
+              setListSheetOpen(false)
+              setDeletingListId(selectedList.id)
+            }}
+            onCloseSheet={() => setListSheetOpen(false)}
+          />
+        ) : null}
+      </BottomSheet>
     </div>
   )
 }

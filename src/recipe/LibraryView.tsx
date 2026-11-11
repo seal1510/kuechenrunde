@@ -7,12 +7,30 @@
  * datenquellenunabhängig: Der lokale Modus liefert Dexie-Rezepte, der
  * Cloud-Modus denselben Snapshot aus Supabase. Dadurch gibt es keine zweite
  * Rezeptbibliothek.
+ *
+ * Auf dem iPhone bleiben nur Suche, Filter- und Sortierknopf dauerhaft
+ * sichtbar. Die fünf Filter liegen in einem Bottom-Sheet, aktive Filter
+ * erscheinen als einzeln entfernbare Chips. Desktop behält die bisherige
+ * Filterleiste.
  */
 
-import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { BottomSheet } from '../components/BottomSheet'
+import { usePhoneLayout } from '../lib/phoneLayout'
 import type { Recipe } from '../types'
 import { URL_IMPORT_HASH } from '../routing/routes'
 import { filterValues, matchesRecipeFilters } from './editor'
+import {
+  EMPTY_LIBRARY_FILTERS,
+  LIBRARY_FILTER_LABELS,
+  LIBRARY_SORT_SHORT_LABELS,
+  activeLibraryFilters,
+  libraryFilterCount,
+  removeLibraryFilter,
+  resetLibraryFilters,
+  type LibraryFilterKey,
+  type LibraryFilters,
+} from './libraryFilters'
 import { LIBRARY_SORT_OPTIONS, sortRecipes, type LibrarySort } from './library'
 
 function FilterSelect({
@@ -46,6 +64,222 @@ function FilterSelect({
   )
 }
 
+function FilterIcon() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      focusable="false"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3.5 5h13M5.5 10h9M8 15h4" />
+    </svg>
+  )
+}
+
+function SortIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="15"
+      height="15"
+      aria-hidden="true"
+      focusable="false"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    >
+      <path d="M5 3v10M5 13l-2.2-2.2M5 13l2.2-2.2M11 13V3M11 3 8.8 5.2M11 3l2.2 2.2" />
+    </svg>
+  )
+}
+
+export interface LibraryFilterSheetProps {
+  open: boolean
+  onClose: () => void
+  filters: LibraryFilters
+  categories: string[]
+  cuisines: string[]
+  dishTypes: string[]
+  efforts: string[]
+  tags: string[]
+  resultCount: number
+  totalCount: number
+  onFilterChange: (key: LibraryFilterKey, value: string) => void
+  onReset: () => void
+}
+
+export function LibraryFilterSheet({
+  open,
+  onClose,
+  filters,
+  categories,
+  cuisines,
+  dishTypes,
+  efforts,
+  tags,
+  resultCount,
+  totalCount,
+  onFilterChange,
+  onReset,
+}: LibraryFilterSheetProps) {
+  return (
+    <BottomSheet
+      open={open}
+      title="Filter"
+      description="Mehrere Filter lassen sich kombinieren."
+      onClose={onClose}
+      closeLabel="Filter schließen"
+      className="library-filter-sheet"
+      id="library-filter-sheet"
+    >
+      <p className="library-sheet-result" role="status" aria-live="polite">
+        {resultCount} von {totalCount} Rezepten
+      </p>
+
+      <div className="library-sheet-filters">
+        <FilterSelect
+          label={LIBRARY_FILTER_LABELS.category}
+          value={filters.category}
+          options={categories}
+          onChange={(value) => onFilterChange('category', value)}
+        />
+        <FilterSelect
+          label={LIBRARY_FILTER_LABELS.cuisine}
+          value={filters.cuisine}
+          options={cuisines}
+          onChange={(value) => onFilterChange('cuisine', value)}
+        />
+        <FilterSelect
+          label={LIBRARY_FILTER_LABELS.dishType}
+          value={filters.dishType}
+          options={dishTypes}
+          onChange={(value) => onFilterChange('dishType', value)}
+        />
+        <FilterSelect
+          label={LIBRARY_FILTER_LABELS.effort}
+          value={filters.effort}
+          options={efforts}
+          onChange={(value) => onFilterChange('effort', value)}
+        />
+        <FilterSelect
+          label={LIBRARY_FILTER_LABELS.tag}
+          value={filters.tag}
+          options={tags}
+          onChange={(value) => onFilterChange('tag', value)}
+        />
+      </div>
+
+      <div className="bottom-sheet-actions">
+        <button type="button" className="button quiet" onClick={onReset}>
+          Alle zurücksetzen
+        </button>
+        <button type="button" className="button primary" onClick={onClose}>
+          Fertig
+        </button>
+      </div>
+    </BottomSheet>
+  )
+}
+
+export interface LibrarySortSheetProps {
+  open: boolean
+  sort: LibrarySort
+  onClose: () => void
+  onChange: (sort: LibrarySort) => void
+}
+
+export function LibrarySortSheet({
+  open,
+  sort,
+  onClose,
+  onChange,
+}: LibrarySortSheetProps) {
+  return (
+    <BottomSheet
+      open={open}
+      title="Sortierung"
+      onClose={onClose}
+      closeLabel="Sortierung schließen"
+      className="library-sort-sheet"
+      id="library-sort-sheet"
+    >
+      <div
+        className="library-sort-options"
+        role="radiogroup"
+        aria-label="Sortierung wählen"
+      >
+        {LIBRARY_SORT_OPTIONS.map((option) => {
+          const selected = option.value === sort
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              className={`library-sort-option${selected ? ' is-selected' : ''}`}
+              onClick={() => onChange(option.value)}
+            >
+              <span>{option.label}</span>
+              {selected ? (
+                <span className="library-sort-check" aria-hidden="true">
+                  ✓
+                </span>
+              ) : null}
+            </button>
+          )
+        })}
+      </div>
+    </BottomSheet>
+  )
+}
+
+export interface LibraryFilterChipsProps {
+  filters: LibraryFilters
+  onRemove: (key: LibraryFilterKey) => void
+  onReset: () => void
+}
+
+export function LibraryFilterChips({
+  filters,
+  onRemove,
+  onReset,
+}: LibraryFilterChipsProps) {
+  const activeFilters = activeLibraryFilters(filters)
+  if (activeFilters.length === 0) return null
+
+  return (
+    <div className="library-filter-chips" aria-label="Aktive Filter">
+      {activeFilters.map((filter) => (
+        <button
+          key={filter.key}
+          type="button"
+          className="library-filter-chip"
+          aria-label={`${filter.label}: ${filter.value} entfernen`}
+          onClick={() => onRemove(filter.key)}
+        >
+          <span className="library-filter-chip-text">
+            {filter.label}: {filter.value}
+          </span>
+          <span className="library-filter-chip-x" aria-hidden="true">
+            ×
+          </span>
+        </button>
+      ))}
+      <button type="button" className="library-filter-clear" onClick={onReset}>
+        Alle zurücksetzen
+      </button>
+    </div>
+  )
+}
+
 export interface RecipeLibraryViewProps {
   recipes: Recipe[] | undefined
   renderRecipeCard: (recipe: Recipe) => ReactNode
@@ -58,12 +292,19 @@ export function RecipeLibraryView({
   cloudMode = false,
 }: RecipeLibraryViewProps) {
   const [query, setQuery] = useState('')
-  const [category, setCategory] = useState('')
-  const [cuisine, setCuisine] = useState('')
-  const [dishType, setDishType] = useState('')
-  const [effort, setEffort] = useState('')
-  const [tag, setTag] = useState('')
+  const [filters, setFilters] = useState<LibraryFilters>(() => ({
+    ...EMPTY_LIBRARY_FILTERS,
+  }))
   const [sort, setSort] = useState<LibrarySort>('az')
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [sortOpen, setSortOpen] = useState(false)
+  const phoneLayout = usePhoneLayout()
+
+  useEffect(() => {
+    if (phoneLayout) return
+    setFilterOpen(false)
+    setSortOpen(false)
+  }, [phoneLayout])
 
   const categories = useMemo(() => {
     const all = new Set<string>()
@@ -81,27 +322,37 @@ export function RecipeLibraryView({
   const filtered = useMemo(
     () =>
       (recipes ?? []).filter((recipe) =>
-        matchesRecipeFilters(recipe, { search: query, category, cuisine, dishType, effort, tag }),
+        matchesRecipeFilters(recipe, { search: query, ...filters }),
       ),
-    [recipes, query, category, cuisine, dishType, effort, tag],
+    [recipes, query, filters],
   )
 
   const visible = useMemo(() => sortRecipes(filtered, sort), [filtered, sort])
 
-  const hasFilters = Boolean(query || category || cuisine || dishType || effort || tag)
-  const activeFilterCount = [category, cuisine, dishType, effort, tag].filter(Boolean).length
+  const activeFilterCount = libraryFilterCount(filters)
+  const hasFilters = Boolean(query || activeFilterCount)
+  const sortLabel =
+    LIBRARY_SORT_OPTIONS.find((option) => option.value === sort)?.label ?? 'A–Z'
 
-  function clearFilters() {
+  function changeFilter(key: LibraryFilterKey, value: string) {
+    setFilters((current) => ({ ...current, [key]: value }))
+  }
+
+  function resetFilters() {
+    setFilters(resetLibraryFilters())
+  }
+
+  function removeFilter(key: LibraryFilterKey) {
+    setFilters((current) => removeLibraryFilter(current, key))
+  }
+
+  function resetAll() {
     setQuery('')
-    setCategory('')
-    setCuisine('')
-    setDishType('')
-    setEffort('')
-    setTag('')
+    resetFilters()
   }
 
   return (
-    <div className="page">
+    <div className="page library-page">
       <header className="page-head library-head">
         <div>
           <h1>Rezeptbibliothek</h1>
@@ -194,20 +445,49 @@ export function RecipeLibraryView({
               placeholder="Rezepte durchsuchen"
             />
           </label>
+
+          <div className="library-mobile-actions" role="group" aria-label="Filter und Sortierung">
+            <button
+              type="button"
+              className={`library-control-button${activeFilterCount > 0 ? ' is-active' : ''}`}
+              aria-haspopup="dialog"
+              aria-expanded={filterOpen}
+              aria-controls={filterOpen ? 'library-filter-sheet' : undefined}
+              aria-label={
+                activeFilterCount > 0
+                  ? `Filter, ${activeFilterCount} aktiv`
+                  : 'Filter'
+              }
+              onClick={() => setFilterOpen(true)}
+            >
+              <FilterIcon />
+              <span className="library-control-label">Filter</span>
+              {activeFilterCount > 0 ? (
+                <span className="library-filter-badge" aria-hidden="true">
+                  {activeFilterCount}
+                </span>
+              ) : null}
+            </button>
+            <button
+              type="button"
+              className="library-control-button library-sort-button"
+              aria-haspopup="dialog"
+              aria-expanded={sortOpen}
+              aria-controls={sortOpen ? 'library-sort-sheet' : undefined}
+              aria-label={`Sortierung ändern, aktuell ${sortLabel}`}
+              onClick={() => setSortOpen(true)}
+            >
+              <SortIcon />
+              <span className="library-control-label">
+                {LIBRARY_SORT_SHORT_LABELS[sort]}
+              </span>
+            </button>
+          </div>
+
           <label className="sort-field">
             <span className="visually-hidden">Sortierung</span>
             <span className="sort-icon" aria-hidden="true">
-              <svg
-                viewBox="0 0 16 16"
-                width="15"
-                height="15"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              >
-                <path d="M5 3v10M5 13l-2.2-2.2M5 13l2.2-2.2M11 13V3M11 3 8.8 5.2M11 3l2.2 2.2" />
-              </svg>
+              <SortIcon />
             </span>
             <select
               value={sort}
@@ -222,18 +502,49 @@ export function RecipeLibraryView({
             </select>
           </label>
           {hasFilters ? (
-            <button type="button" className="filter-reset" onClick={clearFilters}>
+            <button type="button" className="filter-reset" onClick={resetAll}>
               Zurücksetzen
             </button>
           ) : null}
         </div>
 
+        <LibraryFilterChips
+          filters={filters}
+          onRemove={removeFilter}
+          onReset={resetFilters}
+        />
+
         <div className="filter-bar">
-          <FilterSelect label="Kategorie" value={category} options={categories} onChange={setCategory} />
-          <FilterSelect label="Küche" value={cuisine} options={cuisines} onChange={setCuisine} />
-          <FilterSelect label="Gerichtstyp" value={dishType} options={dishTypes} onChange={setDishType} />
-          <FilterSelect label="Aufwand" value={effort} options={efforts} onChange={setEffort} />
-          <FilterSelect label="Tag" value={tag} options={tags} onChange={setTag} />
+          <FilterSelect
+            label="Kategorie"
+            value={filters.category}
+            options={categories}
+            onChange={(value) => changeFilter('category', value)}
+          />
+          <FilterSelect
+            label="Küche"
+            value={filters.cuisine}
+            options={cuisines}
+            onChange={(value) => changeFilter('cuisine', value)}
+          />
+          <FilterSelect
+            label="Gerichtstyp"
+            value={filters.dishType}
+            options={dishTypes}
+            onChange={(value) => changeFilter('dishType', value)}
+          />
+          <FilterSelect
+            label="Aufwand"
+            value={filters.effort}
+            options={efforts}
+            onChange={(value) => changeFilter('effort', value)}
+          />
+          <FilterSelect
+            label="Tag"
+            value={filters.tag}
+            options={tags}
+            onChange={(value) => changeFilter('tag', value)}
+          />
         </div>
 
         <div className="filter-summary" role="status" aria-live="polite">
@@ -279,7 +590,7 @@ export function RecipeLibraryView({
       ) : filtered.length === 0 ? (
         <div className="empty-state">
           <p>Keine Treffer.</p>
-          <button type="button" className="button" onClick={clearFilters}>
+          <button type="button" className="button" onClick={resetAll}>
             Filter zurücksetzen
           </button>
         </div>
@@ -290,6 +601,31 @@ export function RecipeLibraryView({
           ))}
         </div>
       )}
+
+      <LibraryFilterSheet
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        filters={filters}
+        categories={categories}
+        cuisines={cuisines}
+        dishTypes={dishTypes}
+        efforts={efforts}
+        tags={tags}
+        resultCount={filtered.length}
+        totalCount={recipes?.length ?? 0}
+        onFilterChange={changeFilter}
+        onReset={resetFilters}
+      />
+
+      <LibrarySortSheet
+        open={sortOpen}
+        sort={sort}
+        onClose={() => setSortOpen(false)}
+        onChange={(next) => {
+          setSort(next)
+          setSortOpen(false)
+        }}
+      />
     </div>
   )
 }

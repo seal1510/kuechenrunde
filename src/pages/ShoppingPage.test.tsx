@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { ReactElement, ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ShoppingDistributionPosition } from '../domain/shoppingLists'
 import type {
@@ -17,6 +18,7 @@ import type {
 import {
   DistributionDialog,
   RowActionsMenu,
+  ShoppingListsPanelContent,
   ShoppingPage,
   ShoppingReviewRow,
 } from './ShoppingPage'
@@ -227,6 +229,57 @@ function baseValues(overrides: Partial<Record<string, unknown>> = {}): unknown[]
     overrides.shoppingLists ?? [],
     overrides.allocations ?? [],
   ]
+}
+
+interface TestButtonProps {
+  className?: string
+  onClick?: () => void
+  children?: ReactNode
+  [key: string]: unknown
+}
+
+function collectButtons(
+  node: ReactNode,
+  found: ReactElement<TestButtonProps>[] = [],
+): ReactElement<TestButtonProps>[] {
+  if (Array.isArray(node)) {
+    for (const child of node) collectButtons(child, found)
+    return found
+  }
+  if (!node || typeof node !== 'object') return found
+  const element = node as ReactElement<TestButtonProps>
+  if (element.type === 'button') found.push(element)
+  if (typeof element.type === 'function') {
+    collectButtons(
+      (element.type as (props: Record<string, unknown>) => ReactNode)(
+        element.props as Record<string, unknown>,
+      ),
+      found,
+    )
+    return found
+  }
+  if (element.props) collectButtons(element.props.children, found)
+  return found
+}
+
+function panelProps(lists: ShoppingPageList[], selected: ShoppingPageList) {
+  return {
+    lists,
+    selectedListId: selected.id,
+    selectedList: selected,
+    standardListDisplayName: 'Wocheneinkauf',
+    creatingList: false,
+    newListName: '',
+    listBusy: false,
+    onSelectList: vi.fn(),
+    onToggleCreate: vi.fn(),
+    onNewListNameChange: vi.fn(),
+    onCreateList: vi.fn(),
+    onCancelCreate: vi.fn(),
+    onRenameList: vi.fn(),
+    onDeleteList: vi.fn(),
+    onCloseSheet: vi.fn(),
+  }
 }
 
 beforeEach(() => {
@@ -660,5 +713,87 @@ describe('shopping page', () => {
     expect(html).toContain('Einkaufszuordnung unklar')
     expect(html).toContain('1 Eintrag wird nicht als gekauft gewertet')
     expect(html).toContain('Milch')
+  })
+})
+
+describe('mobile shopping list hierarchy', () => {
+  it('shows the current list as a switcher and keeps period, settings and add reachable', () => {
+    live.reset(baseValues())
+    const html = renderToStaticMarkup(<ShoppingPage />)
+
+    expect(html).toContain('class="shopping-list-switch"')
+    expect(html).toContain('aria-haspopup="dialog"')
+    expect(html).toContain('Einkaufszettel wechseln, aktuell')
+    expect(html).toContain('aria-label="Vorherige Einkaufsperiode"')
+    expect(html).toContain('aria-label="Nächste Einkaufsperiode"')
+    expect(html).toContain('Artikel hinzufügen')
+    expect(html).toContain('aria-label="Einstellungen"')
+    expect(html).not.toContain('role="dialog"')
+  })
+
+  it('renders all lists plus creation in the mobile sheet content', () => {
+    const standard = standardPageList()
+    const market = marketPageList()
+    const html = renderToStaticMarkup(
+      <ShoppingListsPanelContent
+        sheetMode
+        {...panelProps([standard, market], standard)}
+      />,
+    )
+
+    expect(html).toContain('Wocheneinkauf')
+    expect(html).toContain('Markt')
+    expect(html).toContain('Woche')
+    expect(html).toContain('Neuer Zettel')
+    expect(html).toContain(`data-list-id="${standard.id}"`)
+    expect(html).toContain(`data-list-id="${market.id}"`)
+    expect(html).toContain('Fertig')
+    // The standard list cannot be renamed or deleted, as before.
+    expect(html).not.toContain('Umbenennen')
+    expect(html).not.toContain('Löschen')
+  })
+
+  it('offers rename and delete for a selected free list and switches lists', () => {
+    const standard = standardPageList()
+    const market = marketPageList()
+    const props = panelProps([standard, market], market)
+    const html = renderToStaticMarkup(<ShoppingListsPanelContent sheetMode {...props} />)
+
+    expect(html).toContain('Umbenennen')
+    expect(html).toContain('Löschen')
+    expect(html).toContain('shopping-list-option is-selected')
+
+    const buttons = collectButtons(
+      ShoppingListsPanelContent({ sheetMode: true, ...props }),
+    )
+    const marketButton = buttons.find(
+      (button) => button.props['data-list-id'] === market.id,
+    )
+    expect(marketButton).toBeTruthy()
+    marketButton!.props.onClick?.()
+    expect(props.onSelectList).toHaveBeenCalledWith(market.id)
+
+    const rename = buttons.find((button) => button.props.children === 'Umbenennen')
+    rename!.props.onClick?.()
+    expect(props.onRenameList).toHaveBeenCalled()
+
+    const done = buttons.find((button) => button.props.children === 'Fertig')
+    done!.props.onClick?.()
+    expect(props.onCloseSheet).toHaveBeenCalled()
+  })
+
+  it('creates a new list from the sheet and returns to the selected list', () => {
+    const standard = standardPageList()
+    const props = panelProps([standard], standard)
+    const buttons = collectButtons(
+      ShoppingListsPanelContent({ sheetMode: true, ...props }),
+    )
+
+    const create = buttons.find(
+      (button) => button.props.children === '+ Neuer Zettel',
+    )
+    expect(create).toBeTruthy()
+    create!.props.onClick?.()
+    expect(props.onToggleCreate).toHaveBeenCalled()
   })
 })

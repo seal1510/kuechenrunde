@@ -219,6 +219,29 @@ function renderCalendar(selectedLayout = layout) {
   )
 }
 
+function renderMobileCalendar(
+  selectedLayout = layout,
+  today = '2026-05-29',
+) {
+  return renderToStaticMarkup(
+    <PlanCalendar
+      mobile
+      layout={selectedLayout}
+      today={today}
+      noteByDate={noteByDate}
+      dropDate={null}
+      recipeById={recipeById}
+      freeDishById={freeDishById}
+      groupSizeBySession={new Map([['session-1', 2]])}
+      originDragKey={null}
+      highlightedSessionId={null}
+      dragHandlers={dragHandlers}
+      onAdd={vi.fn()}
+      onHighlightSession={vi.fn()}
+    />,
+  )
+}
+
 describe('responsive plan calendar', () => {
   it('renders all eleven days in chronological order and groups them', () => {
     const html = renderCalendar()
@@ -373,5 +396,69 @@ describe('responsive plan calendar', () => {
     expect(first).toContain('data-calendar-date="2026-05-29"')
     expect(second).toContain('data-calendar-date="2026-06-05"')
     expect(dragHandlers.onClick).not.toHaveBeenCalled()
+  })
+})
+
+describe('mobile plan hierarchy', () => {
+  it('puts today directly behind a collapsed past-day group', () => {
+    const html = renderMobileCalendar()
+
+    expect(html).toContain('calendar-shell is-mobile')
+    expect(html).toContain('<details class="calendar-past-group">')
+    expect(html).toContain('Vergangene Tage')
+    expect(html).toContain('26.05. – 28.05.')
+    expect(html).toContain('calendar-past-count')
+    expect(html).toContain('Heute und danach')
+
+    const pastGroupEnd = html.indexOf('</details>')
+    const todayIndex = html.indexOf('calendar-day is-today')
+    expect(pastGroupEnd).toBeGreaterThan(0)
+    expect(todayIndex).toBeGreaterThan(pastGroupEnd)
+    expect(calendarDates(html)[3]).toBe('2026-05-29')
+  })
+
+  it('keeps every past dish, comment and add action inside the group', () => {
+    const html = renderMobileCalendar()
+
+    expect(html).toContain('Apfelkuchen')
+    expect(html).toContain('Frühstücksporridge')
+    expect(html).toContain('Einkaufen und vorbereiten')
+    expect(html).toContain('Eintrag am Di, 26.05. hinzufügen')
+    expect(html.match(/class="calendar-add-day /g)).toHaveLength(11)
+    expect(calendarDates(html)).toEqual(window.visibleDays)
+  })
+
+  it('renders empty days as compact rows without a reserved empty block', () => {
+    const html = renderMobileCalendar()
+
+    expect(html.match(/is-compact-empty/g)).toHaveLength(5)
+    expect(html).not.toContain('calendar-empty-hint')
+    expect(html).toContain('class="calendar-add-day is-empty"')
+    expect(html).toContain('Hinzufügen')
+  })
+
+  it('keeps planned dishes, portions and shared cook sessions reachable', () => {
+    const html = renderMobileCalendar()
+
+    expect(html).toContain(LONG_TITLE)
+    expect(html).toContain('4 Portionen')
+    expect(html).toContain('2 Portionen')
+    expect(html).toContain('Nudeln mit Pesto')
+    expect(html).toContain('calendar-entry-session')
+    expect(html).toContain('calendar-entry--group group-color-')
+  })
+
+  it('shows other periods in their normal chronological order', () => {
+    const otherWindow = buildCalendarWindow('2026-06-05', 3, 2, 2)
+    const otherLayout = buildCalendarLayout(otherWindow, entries)
+    const html = renderMobileCalendar(otherLayout)
+
+    expect(html).not.toContain('calendar-past-group')
+    expect(html).toContain('Davor')
+    expect(html).toContain('Diese Woche')
+    expect(html).toContain('Danach')
+    expect(html).toContain('data-calendar-date="2026-06-05"')
+    expect(calendarDates(html)).toEqual(otherWindow.visibleDays)
+    expect(calendarDates(html)).toHaveLength(11)
   })
 })
