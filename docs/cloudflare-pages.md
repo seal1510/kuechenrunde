@@ -37,14 +37,16 @@ binding = "AI"
 ```
 
 Die Foto-Erkennung ruft damit serverseitig
-`@cf/meta/llama-4-scout-17b-16e-instruct` auf (`env.AI.run(...)`). Der Browser
+`@cf/google/gemma-4-26b-a4b-it` auf (`env.AI.run(...)`). Der Denkmodus des
+Reasoning-Modells wird dabei über `chat_template_kwargs` abgeschaltet, damit
+direkt das JSON-Rezept zurückkommt. Der Browser
 spricht **nie** direkt mit Cloudflare Workers AI und enthält keine
 Cloudflare-Zugangsdaten.
 
 Voraussetzungen im Cloudflare-Konto:
 
 1. Workers AI ist für das Konto verfügbar (Free-Tier genügt).
-2. Die Modellbedingungen von Meta Llama 4 wurden im Dashboard einmalig
+2. Die Modellbedingungen von Google Gemma 4 wurden im Dashboard einmalig
    akzeptiert. Fehlt die Zustimmung, antwortet `/api/recipe-ocr` mit
    `503 not-configured` und einem verständlichen Hinweis; es wird **kein
    Tarifwechsel** ausgelöst.

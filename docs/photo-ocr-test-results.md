@@ -4,11 +4,16 @@ Stand: 2026-11-11 · Status: **Live-Lauf abgeschlossen** mit dem echten
 Workers-AI-Modell über die offizielle Wrangler-OAuth-Anmeldung. Es wurden keine
 Zugangsdaten im Repository oder in diesem Dokument abgelegt.
 
-Gegenstand: Erkennungsqualität des Workers-AI-Modells
-`@cf/meta/llama-4-scout-17b-16e-instruct` für den Foto-/Scan-Import
-(`src/import/photo-ocr.ts`). Es werden ausschließlich **frei erfundene,
-synthetische Rezepte** getestet. Keine echten Familienrezepte, keine privaten
-Daten, keine Zugangsdaten im Repository.
+Gegenstand: Erkennungsqualität der Workers-AI-Modelle für den Foto-/Scan-Import
+(`src/import/photo-ocr.ts`). Die Abschnitte 1–8 dokumentieren den historischen
+Llama-4-Scout-Lauf mit **frei erfundenen, synthetischen Rezepten**. Abschnitt 10
+ergänzt den Lauf mit einem **echten handschriftlichen Familienrezept**; dessen
+Foto, Ground Truth und Rohantworten bleiben ausschließlich lokal
+(`fixtures-private/` bzw. `/tmp`) und werden nie committet.
+
+> **Aktualisierung 2026-11-11:** Produktivmodell ist jetzt
+> `@cf/google/gemma-4-26b-a4b-it` (mit abgeschaltetem Denkmodus), Prompt und
+> Parser wurden gezielt nachgeschärft. Begründung und Messwerte: Abschnitt 10.
 
 ## 1. Testaufbau
 
@@ -343,3 +348,119 @@ Geänderte Dateien dieses Arbeitspakets (nur diese):
 - `server/photo-ocr-handler-live.test.ts`
 - `docs/photo-ocr-test-results.md`
 - `docs/photo-ocr-trial-results.json` (synthetische Messdaten, eingecheckt)
+
+## 10. Live-Lauf: echtes handschriftliches Familienrezept (2026-11-11)
+
+Anlass: Die Erkennung eines echten handschriftlichen Familienrezepts über den
+Foto-Import war inhaltlich nicht akzeptabel (fehlende Zutaten, falsch gelesene
+Mengen, verwechselte Wörter, Zutatenliste und Zubereitung vermischt,
+Textblöcke als Schritte). Deshalb wurde dasselbe Originalfoto mit drei
+Workers-AI-Modellen und demselben Prompt verglichen; zusätzlich wurde der
+Prompt gezielt überarbeitet. Das Foto wurde wie im Produktionspfad aufbereitet
+(EXIF-Orientierung angewendet, lange Kante 2048 px, JPEG q 0,85).
+
+Datenschutz: Foto, Ground Truth und Rohantworten liegen nur lokal unter
+`fixtures-private/` bzw. `/tmp`; in diesem Dokument stehen nur Metriken und
+Fehlerklassen, keine Rezeptinhalte.
+
+### 10.1 Aufbau
+
+- Drei Modelle, gleicher System-Prompt, gleiche Bildaufbereitung:
+  Llama 4 Scout (bisher), Gemma 4 (neu), Moondream 3.1.
+- Gemma 4 wurde mit abgeschaltetem Denkmodus
+  (`chat_template_kwargs: { enable_thinking: false, thinking: false }`) und
+  `max_completion_tokens: 4096` aufgerufen. Ohne diese Option bestand die
+  Antwort nur aus Reasoning (`finish_reason: length`, `content` leer).
+- Referenz: die vom Familienmitglied bestätigte Zutaten-/Schrittliste des
+  Originals (13 Zutaten in drei Gruppen, 8 erwartete Arbeitsschritte,
+  Portionen nicht angegeben).
+- Messgrößen: Zutaten-Treffer (normalisierte Namen), fehlende/verfremdete/
+  erfundene Einträge, Anzahl und Lesbarkeit der Schritte, Gruppenzuordnung,
+  `usage.neurons` der API.
+
+### 10.2 Ergebnis
+
+| Modell / Variante | Zutaten-Treffer | fehlend | verfremdet/erfunden | Schritte | Gruppen | Neuronen | Latenz |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Llama 4 Scout, alter Prompt | 5/13 | 8 | 6 | 2 Sammelblöcke (Soll 8) | 0/13 | 135,0 | 37,5 s |
+| Llama 4 Scout, neuer Prompt | 10/13 | 3 | 2 | 10 (1 inhaltlich falsch) | 8/10 | 168,7 | 21,8 s |
+| Gemma 4, alter Prompt | 10/13 | 3 | 4 | 7 | 12/13 | 51,8 | 36,2 s |
+| Gemma 4, Prompt v2 | 12/13 | 1 (Abkürzung) | 1 (Abkürzung) | 10 | 13/13 | 56,6 | 42,6 s |
+| Gemma 4, Prompt v3 | 12/13 | 1 (Abkürzung) | 1 (Abkürzung) | 9 | 13/13 | 59,8 | 37,2 s |
+| **Gemma 4, Prompt v5 (produktiv), Lauf 1** | **11/13** | **0 echte Auslassungen** | **0 Zutaten** | **8 (1 Zeile unsicher)** | **13/13** | **64,7** | **48,1 s** |
+| **Gemma 4, Prompt v5 (produktiv), Lauf 2** | **11/13** | **0 echte Auslassungen** | **0 Zutaten** | **8 (1 Zeile unsicher)** | **13/13** | **64,9** | **37,9 s** |
+| Moondream 3.1 | nicht auswertbar | – | – | – | – | – | 0,4 s |
+
+Hinweise zur Tabelle:
+
+- „11/13“ ist die strenge Namensmetrik. Semantisch sind **13/13 Zutaten
+  vorhanden**: eine Zutat steht im Original einmal ausgeschrieben und einmal
+  abgekürzt, eine weitere wird mit einem Klammerzusatz getrennt geschrieben und
+  eine ist geringfügig falsch geschrieben, wird aber als dieselbe Zutat
+  erkannt. Es fehlt keine Zutatenzeile; erfundene Zutaten gibt es keine.
+- Prompt v5 verlangt vor der Strukturierung eine originalgetreue zeilenweise
+  Transkription in ein Zwischenfeld (`transcription`). Das erhöht Ausgabelänge
+  und Latenz leicht, verbessert aber die Zeilentreue (u. a. wurde ein zuvor
+  falsch gelesenes Küchengerät danach korrekt gelesen und ein zuvor
+  erfundener Beilagen-Schritt verschwand).
+- Beim alten Prompt lieferte Gemma 4 wegen des Denkmodus nur Reasoning
+  (`content` leer, `finish_reason: length`); die Werte beziehen sich auf den
+  Lauf mit abgeschaltetem Denkmodus, aber noch altem Prompt.
+- Moondream 3.1 lieferte über die dokumentierte REST-Schnittstelle
+  ausschließlich `{ "result": {}, "success": true }` – unabhängig davon, ob das
+  Bild als Data-URI, rohes Base64 oder öffentliche URL übergeben wurde, und
+  auch über den OpenAI-kompatiblen Endpunkt. Es kam weder Text noch Fehler.
+  Das Modell ist über diesen Weg in diesem Konto nicht nutzbar.
+
+### 10.3 Konkrete Fehlerklassen (ohne Rezeptinhalte)
+
+- **Fehlende Zutaten:** Llama ließ mit altem Prompt die Hälfte der
+  Zutatenzeilen aus, darunter kurze Zeilen und eine Zutat, die nur in einer
+  Handlungszeile auftauchte. Gemma übernahm mit Prompt v4 jede Zutatenzeile.
+- **Mengen/Brüche:** Llama kürzte im alten Lauf eine gemischte Bruchangabe und
+  verschmolz zwei Zutatenzeilen (die Menge der zweiten Zutat ging verloren).
+  Gemma übernahm die gemischte Angabe vollständig („1½“) und trennte beide
+  Zeilen.
+- **Verwechselte Wörter:** Llama verfremdete mehrere Wörter (u. a. ein
+  ähnlich klingendes, aber falsches Wort anstelle der Originalzutat; ein
+  Markenname wurde zu einem anderen Lebensmittel umgedeutet). Gemma las diese
+  Wörter korrekt; im Prompt v4 wird zusätzlich ausdrücklich verboten, ähnliche
+  Wörter „zu verbessern“.
+- **Erfundener Inhalt:** Llama erzeugte mit altem Prompt eine nicht existierende
+  Zutat (aus einem Handlungszeichen wurde eine Mengenzeile). Gemma erzeugte mit
+  Prompt v4 keine erfundenen Zutaten.
+- **Zutaten/Zubereitung vermischt:** Llama gab die komplette Zutatenliste als
+  zwei riesige Schrittblöcke aus. Gemma trennte Zutaten und Schritte; mit
+  Prompt v4 sind die Schritte einzelne, verständliche Sätze, und führende
+  „+“-Zeichen verschwinden.
+- **Gruppen:** Llama ließ die sichtbaren Gruppen (Fleisch/Soße/Beilage)
+  vollständig fallen; Gemma ordnete alle 13 Zutaten korrekt zu.
+- **Restfehler bei Gemma (Prompt v5):** Die letzte, sehr schwer lesbare
+  Handlungszeile am unteren Blattrand wurde mit der folgenden Zutatenzeile
+  verschmolzen und als unsicherer Schritt ausgegeben. Die eigentliche Handlung
+  fehlt dadurch im Entwurf; die Zutatenliste und alle Mengen bleiben davon
+  unberührt. Eine Zutat wurde leicht falsch geschrieben, aber korrekt als
+  Zutat erkannt; eine Abkürzung aus dem Original wurde unverändert übernommen.
+
+### 10.4 Integrationstest durch den echten Handler
+
+Nach dem Umbau wurde `functions/api/recipe-ocr.ts` mit dem neuen Modell und
+einem REST-gestützten AI-Binding-Ersatz live ausgeführt (nur die
+Haushaltsprüfung ist gemockt): gedrucktes und handschriftliches synthetisches
+Fixture, beide mit korrektem Titel und 8 Zutaten erkannt (5 bzw. 6 Schritte),
+**55,9 bzw. 55,2 Neuronen**, 11,9 s bzw. 29,3 s. Damit sind Prompt, neue
+Modellparameter, JSON-Extraktion und Vertragsvalidierung im echten Serverpfad
+live bestätigt.
+
+### 10.5 Kosten und Grenzen
+
+- Gemma 4 kostet laut Cloudflare 9.091 Neuronen pro Mio. Input-Tokens und
+  27.273 pro Mio. Output-Tokens; mit dem produktiven Prompt wurden **64–65
+  Neuronen pro Seite** gemessen (0,65 % des Free-Tier-Tagesbudgets, grob
+  150 Ein-Seiten-Erkennungen/Tag) gegenüber 135–169 Neuronen bei Llama 4
+  Scout.
+- Der Vergleich stützt sich auf **eine** echte Handschriftseite. Für die
+  Freigabe bleibt eine manuelle Abnahme mit weiteren echten Handschriften und
+  einem echten gedruckten Familienrezept nötig; ein zweites echtes
+  Handschriftfoto lag nicht vor.
+- Rohantworten und Ground Truth werden nicht ins Repository aufgenommen.

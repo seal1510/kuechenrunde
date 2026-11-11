@@ -20,6 +20,7 @@
 import {
   OCR_SYSTEM_PROMPT,
   PHOTO_OCR_ALLOWED_MIME_TYPES,
+  PHOTO_OCR_CHAT_TEMPLATE_KWARGS,
   PHOTO_OCR_ERROR_MESSAGES,
   PHOTO_OCR_MAX_OUTPUT_TOKENS,
   PHOTO_OCR_MAX_PAGE_BYTES,
@@ -73,7 +74,13 @@ export interface PhotoOcrChatMessage {
 export interface PhotoOcrModelInput {
   messages: PhotoOcrChatMessage[]
   temperature: number
-  max_tokens: number
+  /**
+   * Gemma 4: `max_completion_tokens`. `max_tokens` ist laut Cloudflare-Doku
+   * zugunsten dieses Feldes veraltet.
+   */
+  max_completion_tokens: number
+  /** Schaltet den Denkmodus von Gemma 4 ab, damit direkt JSON kommt. */
+  chat_template_kwargs: typeof PHOTO_OCR_CHAT_TEMPLATE_KWARGS
 }
 
 
@@ -215,7 +222,8 @@ export function buildPhotoOcrInput(pages: readonly ValidatedPhotoPage[]): PhotoO
   return {
     messages: buildPhotoOcrMessages(pages),
     temperature: PHOTO_OCR_TEMPERATURE,
-    max_tokens: PHOTO_OCR_MAX_OUTPUT_TOKENS,
+    max_completion_tokens: PHOTO_OCR_MAX_OUTPUT_TOKENS,
+    chat_template_kwargs: PHOTO_OCR_CHAT_TEMPLATE_KWARGS,
   }
 }
 
@@ -297,6 +305,46 @@ function readTokenCount(value: unknown): number | null {
     return Math.trunc(value)
   }
   return null
+}
+
+/**
+ * Grund, warum die Modellgenerierung endete (z. B. `length`, `stop`), falls
+ * das Binding ihn liefert. Wird nur zur Fehlerdiagnose genutzt: Bei
+ * `length`/`max_tokens` ist die JSON-Antwort abgeschnitten und darf nicht als
+ * generischer Formatfehler erscheinen.
+ */
+export function extractModelFinishReason(value: unknown, depth = 0): string | null {
+  if (!isRecord(value) || depth > 3) return null
+
+  const choices = value.choices
+  if (Array.isArray(choices) && choices.length > 0 && isRecord(choices[0])) {
+    const reason = choices[0].finish_reason
+    if (typeof reason === 'string' && reason) return reason
+  }
+  if (isRecord(value.result)) {
+    const nested = extractModelFinishReason(value.result, depth + 1)
+    if (nested) return nested
+  }
+  const metrics = value.metrics
+  if (isRecord(metrics) && typeof metrics.finish_reason === 'string' && metrics.finish_reason) {
+    return metrics.finish_reason
+  }
+  const reason = value.finish_reason
+  if (typeof reason === 'string' && reason) return reason
+  return null
+}
+
+/** Klartext für eine abgeschnittene Modellantwort (keine Modelldaten). */
+export const PHOTO_AI_TRUNCATED_MESSAGE =
+  'Die KI-Antwort wurde abgeschnitten, bevor das Rezept vollständig war. Bitte mit einer Seite weniger erneut versuchen.'
+
+/**
+ * Erkennt, ob die Generierung wegen des Tokenlimits abgebrochen wurde. Manche
+ * Bindings liefern `finish_reason: 'length'`, andere `'max_tokens'`.
+ */
+export function isTruncatedModelResponse(raw: unknown): boolean {
+  const reason = extractModelFinishReason(raw)
+  return reason === 'length' || reason === 'max_tokens'
 }
 
 function readUsage(usage: unknown): PhotoOcrUsage {

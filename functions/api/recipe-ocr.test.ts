@@ -8,7 +8,7 @@ import {
   type RecipeOcrDependencies,
 } from './recipe-ocr'
 import { HttpError } from '../lib/http'
-import type { AiBinding } from '../lib/photo-ai'
+import { PHOTO_AI_TRUNCATED_MESSAGE, type AiBinding } from '../lib/photo-ai'
 import type { AuthorizedMember } from '../lib/supabase-auth'
 import {
   PHOTO_OCR_CONTRACT_VERSION,
@@ -299,11 +299,13 @@ describe('Pages Function /api/recipe-ocr', () => {
     expect(model).toBe(PHOTO_OCR_MODEL)
     const input = rawInput as {
       temperature: number
-      max_tokens: number
+      max_completion_tokens: number
+      chat_template_kwargs: Record<string, unknown>
       messages: Array<{ role: string; content: unknown }>
     }
     expect(input.temperature).toBe(0.1)
-    expect(input.max_tokens).toBe(3000)
+    expect(input.max_completion_tokens).toBe(6144)
+    expect(input.chat_template_kwargs).toEqual({ enable_thinking: false, thinking: false })
     expect(input.messages[0]).toEqual({ role: 'system', content: OCR_SYSTEM_PROMPT })
     const userContent = input.messages[1]!.content as Array<Record<string, unknown>>
     expect(input.messages[1]!.role).toBe('user')
@@ -331,6 +333,22 @@ describe('Pages Function /api/recipe-ocr', () => {
     const ingredients = payload.recipe.ingredients as Array<Record<string, unknown>>
     expect(ingredients[0]).toMatchObject({ quantity: '250', unit: 'g', name: 'Mehl' })
     expect(ingredients[0]).not.toHaveProperty('unknownField')
+  })
+
+  it('returns a clear 502 when the model response was cut off by the token limit', async () => {
+    const truncated = {
+      result: {
+        choices: [{ message: { role: 'assistant', content: '' }, finish_reason: 'length' }],
+      },
+    }
+    const run = vi.fn(async () => truncated)
+    const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
+
+    expect(response.status).toBe(502)
+    const payload = (await response.json()) as { ok: boolean; code: string; error: string }
+    expect(payload.ok).toBe(false)
+    expect(payload.code).toBe('invalid-ai-response')
+    expect(payload.error).toBe(PHOTO_AI_TRUNCATED_MESSAGE)
   })
 
   it('accepts recognized:false as a successful result and fills the page report', async () => {

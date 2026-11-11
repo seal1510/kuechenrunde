@@ -3,8 +3,10 @@ import {
   buildPhotoOcrInput,
   classifyPhotoAiError,
   decodeBase64Strict,
+  extractModelFinishReason,
   extractModelText,
   extractPhotoAiUsage,
+  isTruncatedModelResponse,
   runPhotoOcr,
   validatePhotoPages,
   type AiBinding,
@@ -193,7 +195,8 @@ describe('buildPhotoOcrInput', () => {
     const input = buildPhotoOcrInput(pages)
 
     expect(input.temperature).toBe(0.1)
-    expect(input.max_tokens).toBe(3000)
+    expect(input.max_completion_tokens).toBe(6144)
+    expect(input.chat_template_kwargs).toEqual({ enable_thinking: false, thinking: false })
     expect(input.messages).toHaveLength(2)
     expect(input.messages[0]).toEqual({ role: 'system', content: OCR_SYSTEM_PROMPT })
 
@@ -225,9 +228,15 @@ describe('runPhotoOcr', () => {
     expect(run).toHaveBeenCalledTimes(1)
     const [model, input] = run.mock.calls[0]!
     expect(model).toBe(PHOTO_OCR_MODEL)
-    const modelInput = input as { temperature: number; max_tokens: number; messages: unknown[] }
+    const modelInput = input as {
+      temperature: number
+      max_completion_tokens: number
+      chat_template_kwargs: Record<string, unknown>
+      messages: unknown[]
+    }
     expect(modelInput.temperature).toBe(0.1)
-    expect(modelInput.max_tokens).toBe(3000)
+    expect(modelInput.max_completion_tokens).toBe(6144)
+    expect(modelInput.chat_template_kwargs).toEqual({ enable_thinking: false, thinking: false })
     expect(modelInput.messages).toHaveLength(2)
   })
 })
@@ -266,6 +275,24 @@ describe('extractModelText', () => {
     expect(extractModelText(null)).toBe('')
     expect(extractModelText(42)).toBe('')
     expect(extractModelText({ response: null, choices: 'kaputt' })).toBe('')
+  })
+})
+
+describe('extractModelFinishReason / isTruncatedModelResponse', () => {
+  it('reads finish reasons from choices, nested results and metrics', () => {
+    expect(extractModelFinishReason({ choices: [{ finish_reason: 'length' }] })).toBe('length')
+    expect(
+      extractModelFinishReason({ result: { choices: [{ finish_reason: 'stop' }] } }),
+    ).toBe('stop')
+    expect(extractModelFinishReason({ metrics: { finish_reason: 'length' } })).toBe('length')
+    expect(extractModelFinishReason({})).toBeNull()
+  })
+
+  it('flags truncated generations but not normal stops', () => {
+    expect(isTruncatedModelResponse({ choices: [{ finish_reason: 'length' }] })).toBe(true)
+    expect(isTruncatedModelResponse({ choices: [{ finish_reason: 'max_tokens' }] })).toBe(true)
+    expect(isTruncatedModelResponse({ choices: [{ finish_reason: 'stop' }] })).toBe(false)
+    expect(isTruncatedModelResponse({ result: {} })).toBe(false)
   })
 })
 

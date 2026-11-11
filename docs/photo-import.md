@@ -20,7 +20,7 @@ Browser (Cloud-Modus, angemeldetes Haushaltsmitglied)
        └─ Cloudflare Pages Function
             ├─ Supabase-Token prüfen (Auth) + is_household_member() prüfen
             ├─ IP-/Nutzer-Rate-Limit, Größen-/Format-/Magic-Byte-Prüfung
-            ├─ Workers AI: @cf/meta/llama-4-scout-17b-16e-instruct
+            ├─ Workers AI: @cf/google/gemma-4-26b-a4b-it (Vision, Denkmodus aus)
             ├─ Modellantwort: JSON extrahieren + strikt validieren
             └─ strukturiertes Rezept + Warnungen/Unklarheiten zurück
   └─ vorhandener Rezepteditor (RecipeForm) mit allen Korrekturmöglichkeiten
@@ -35,8 +35,16 @@ gespeichert (`importSource: 'photo'`, Rohmetadaten in `raw`).
 
 ## Erkennungstechnologie
 
-- Modell: `@cf/meta/llama-4-scout-17b-16e-instruct` (Meta Llama 4 Scout,
-  nativ multimodal, Vision).
+- Modell: `@cf/google/gemma-4-26b-a4b-it` (Google Gemma 4, Vision,
+  26B-Mixture-of-Experts mit 4B aktiven Parametern).
+- Denkmodus aus: Gemma 4 ist ein Reasoning-Modell. Mit
+  `chat_template_kwargs: { enable_thinking: false, thinking: false }` liefert
+  es direkt JSON; ohne diese Option verbraucht der Denktext das Tokenbudget,
+  und die eigentliche Antwort kommt abgeschnitten oder gar nicht an.
+- Ausgabelimit: `max_completion_tokens: 6144` (Gemma-Doku; `max_tokens` ist
+  dort veraltet). Eine abgeschnittene Generierung (`finish_reason: length`)
+  wird erkannt und mit einer eigenen Meldung beantwortet, nicht als
+  generischer Formatfehler.
 - Aufruf: ausschließlich serverseitig über das Workers-AI-Binding
   (`env.AI.run`) der Pages Function; gebunden in `wrangler.toml` (`[ai]`).
 - Ein Aufruf pro Erkennung, auch bei mehreren Seiten. Die Seiten werden in der
@@ -45,29 +53,49 @@ gespeichert (`importSource: 'photo'`, Rohmetadaten in `raw`).
   Code. Schlägt die Erkennung fehl oder ist das Tageskontingent erschöpft,
   erscheint eine verständliche Meldung samt manuellem Fallback.
 - Das Modell erhält die Bilder als Base64-Data-URLs zusammen mit einem
-  deutschen System-Prompt. Der Prompt verbietet ausdrücklich das Erfinden,
-  Umrechnen oder „Verbessern“ von Angaben und verlangt Abkürzungen und
-  Einheiten im Original.
+  deutschen System-Prompt. Der Prompt verlangt zuerst eine originalgetreue
+  zeilenweise Transkription in ein Zwischenfeld (`transcription`, wird vom
+  Editor verworfen) und danach die Strukturierung: vollständige Übernahme
+  jeder Zutatenzeile, Trennung von Zutaten- und Handlungszeilen (Zeilen mit
+  „+“, „→“ oder Imperativ sind Zubereitungsschritte), exakte Wortwiedergabe
+  ohne „Verbesserung“ ähnlicher Wörter, vollständige Brüche („1½“ ist
+  eins-einhalb) und sichtbare Zutatengruppen.
 - Nach der Modellvalidierung laufen deterministische Zusatzprüfungen auf dem
   Server: doppelte Zutatennamen mit unterschiedlichen Mengen werden als
-  unklar markiert (typisch für durchgestrichene Korrekturen), und
+  unklar markiert (typisch für durchgestrichene Korrekturen),
   zusammengeschriebene bekannte Einheiten („2 EL“) werden wieder in Menge und
-  Einheit getrennt. Beides erfindet nichts und löscht nichts automatisch.
+  Einheit getrennt, verworfene Zutaten-/Schrittzeilen und leere Listen
+  erzeugen sichtbare Warnungen, und offensichtlich vermischte Zeilen (Zutat
+  klingt wie Handlung bzw. Schritt wie Zutatenzeile) werden markiert. Alles
+  erfindet nichts und löscht nichts automatisch.
 
-### Fallback-Prüfung (Gemini)
+### Modellvergleich und Entscheidung
 
-Gemini 3.1 Flash-Lite wurde **nicht** integriert. Der Grund: Die
-Workers-AI-Erkennung schnitt in den Live-Tests auch bei Handschrift gut ab –
-Titel, Zutaten, Mengen, Zeiten und Schritte waren bei der gut lesbaren
-Handschrift fehlerfrei, bei der schweren Seite bis auf eine durchgestrichene
-Zuckerzeile ebenfalls korrekt (siehe
-[`docs/photo-ocr-test-results.md`](photo-ocr-test-results.md)).
-Eine zweite Cloud-Anbindung wäre ein zusätzlicher Dienst mit eigener
-Datenverarbeitung, eigenem Kontingent und ohne erkennbaren Qualitätsgewinn in
-den vorliegenden Tests. Sollte sich bei echten Familienrezepten ein Engpass
-zeigen, ist der günstigste nächste Schritt eine gezielte Nachmessung (mehr
-echte Handschrift-Scans) und erst danach die Prüfung eines Alternativmodells –
-nicht der Einbau eines kostenpflichtigen Dienstes.
+Nachdem die Erkennung an einem **echten handschriftlichen Familienrezept**
+inhaltlich scheiterte, wurden auf demselben Originalfoto drei Workers-AI-Modelle
+mit identischem Prompt verglichen: Llama 4 Scout (bisher), Gemma 4 (neu im
+Einsatz) und Moondream 3.1. Zusätzlich wurde der Prompt gezielt überarbeitet
+(Transkription, Vollständigkeit, Schichtgrenze Zutaten/Zubereitung, exakte
+Wortwiedergabe, Brüche).
+
+Ergebnis (Details und Messwerte in
+[`docs/photo-ocr-test-results.md`](photo-ocr-test-results.md)):
+
+- **Llama 4 Scout** ließ auch mit verbessertem Prompt kurze Zutatenzeilen aus,
+  verfremdete Wörter, ordnete keine Gruppen zu und erzeugte Sammel-Schritte;
+  der alte Prompt erzeugte zusätzlich riesige Schrittblöcke.
+- **Gemma 4** erkannte mit demselben Foto alle Zutatenzeilen, die sichtbaren
+  Gruppen und die vollständige Mengenangabe (einschließlich „1½“); Zutaten und
+  Zubereitung blieben getrennt, unsichere Stellen wurden markiert. Es ist
+  zugleich deutlich günstiger pro Token als Llama 4 Scout.
+- **Moondream 3.1** lieferte über die dokumentierte Workers-AI-REST-Schnittstelle
+  in diesem Konto nur leere Ergebnisse (`result: {}`) – unabhängig von
+  Data-URI, rohem Base64 oder öffentlicher Bild-URL und ohne Fehlermeldung.
+  Das Modell ist damit derzeit nicht belastbar einsetzbar.
+- **Gemini 3.1 Flash-Lite** wurde **nicht** aktiviert: kostenpflichtiger
+  Drittanbieter, eigene Datenverarbeitung, und nach dem Gemma-Ergebnis kein
+  belegter Bedarf. Er bleibt der nächste Kandidat, falls sich der Engpass bei
+  weiteren echten Handschriften bestätigt.
 
 ## Strukturierte Ausgabe und Validierung
 
@@ -130,13 +158,15 @@ Verarbeitung.
 - Workers AI im Free-Tier: **10.000 Neuronen pro Tag**, Reset 00:00 UTC.
   Danach schlägt die Erkennung mit `429 quota-exhausted` fehl, ohne Kosten zu
   verursachen.
-- Modellpreis laut Cloudflare: 24.545 Neuronen pro Mio. Input-Tokens,
-  77.273 Neuronen pro Mio. Output-Tokens.
-- Gemessen in den Live-Tests: **133–167 Neuronen für eine einzelne
-  Rezeptseite**, **215 Neuronen für ein zweiseitiges Rezept** (`usage.neurons`
-  der API; 7 Aufrufe = 1.068 Neuronen). Das entspricht grob **45–70
-  Ein-Seiten-Erkennungen pro Tag** im Free-Tier. Die genauen Messwerte stehen
-  in [`docs/photo-ocr-test-results.md`](photo-ocr-test-results.md).
+- Modellpreis laut Cloudflare: **Gemma 4** 9.091 Neuronen pro Mio.
+  Input-Tokens und 27.273 pro Mio. Output-Tokens (Llama 4 Scout zum Vergleich:
+  24.545 / 77.273).
+- Gemessen in den Live-Tests: echte Handschriftseite **52–60 Neuronen** mit
+  Gemma 4 (Llama 4 Scout: 135–169 Neuronen bei derselben Seite); synthetische
+  Ein-Seiten-Rezepte im echten Handler **48–49 Neuronen**. Das entspricht grob
+  **160–190 Ein-Seiten-Erkennungen pro Tag** im Free-Tier. Die genauen
+  Messwerte stehen in
+  [`docs/photo-ocr-test-results.md`](photo-ocr-test-results.md).
 - Bei erschöpftem Kontingent erscheint eine deutsche Meldung mit dem Hinweis,
   dass keine Kosten entstehen, und ein Link zum manuellen Anlegen. Es gibt
   keine automatische Umstellung auf einen kostenpflichtigen Tarif.
@@ -203,13 +233,18 @@ Lesereihenfolge vor der Erkennung prüfen.
 
 - **Handschrift ist naturgemäß schwieriger** als Druck. Sehr kleine, blasse,
   verwackelte oder stark beschriftete Fotos können zu unleserlichen Stellen
-  führen; diese werden markiert, nicht erfunden. Bei echten Familienrezepten
-  bitte mit einigen Beispielen nachprüfen.
+  führen; diese werden markiert, nicht erfunden. Im Test mit einer echten
+  Handschriftseite blieben einzelne sehr schwer lesbare Wörter unsicher bzw.
+  wurden falsch gelesen (z. B. ein Fachwort und eine Zeile ganz unten am
+  Blatt); Zutaten, Mengen und Gruppen waren vollständig. Die Modellwahl stützt
+  sich auf **eine** echte Handschriftseite; ein zweites echtes Handschriftfoto
+  lag nicht vor. Die Vorschau mit Warnungen und Fotoabgleich bleibt deshalb
+  Pflicht.
 - **Seitenlimit 4**: Rezepte über mehr als vier Seiten müssen auf mehrere
   Importe aufgeteilt oder manuell ergänzt werden.
-- **Latenz**: in den Live-Tests 23–52 s pro Aufruf (eine bis zwei Seiten). Die
-  Oberfläche zeigt währenddessen einen Ladezustand, erlaubt Abbruch und wartet
-  bis zu 180 s.
+- **Latenz**: Gemma 4 brauchte in den Live-Tests 13–46 s pro Seite,
+  Moondream-Aufrufe waren nicht auswertbar. Die Oberfläche zeigt währenddessen
+  einen Ladezustand, erlaubt Abbruch und wartet bis zu 180 s.
 - **HEIC**: iPhones liefern Fotos meist als JPEG an das Datei-Eingabefeld bzw.
   Safari kann HEIC dekodieren; falls ein Browser ein Format nicht öffnen kann,
   erscheint ein Hinweis, das Foto als JPEG zu speichern.
@@ -217,9 +252,11 @@ Lesereihenfolge vor der Erkennung prüfen.
   Missbrauchsbremse, keine globale Garantie.
 - **PDF-Import** ist für Desktop gedacht; auf dem iPhone ist der Weg über
   Fotos der vorgesehene Weg.
-- **Testbilder sind synthetisch**: Die Live-Messung nutzt gerenderte
-  gedruckte/handschriftliche Rezepte mit bekannten Inhalten. Echte Scans und
-  Fotos aus der Familie sind die wichtigste offene Validierung (siehe unten).
+- **Testdaten**: Der Großteil der automatisierten Live-Messung nutzt
+  synthetische, gerenderte Testseiten. Zusätzlich wurde ein echtes
+  handschriftliches Familienrezept gegen die Referenz geprüft (Ergebnis siehe
+  Testdokument). Ein weiteres echtes Handschriftfoto und ein echtes gedrucktes
+  Familienrezept stehen als manuelle Abnahme noch aus.
 
 ## Testabdeckung und Nachprüfung
 
@@ -256,7 +293,18 @@ CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... \
 
 Der erste Lauf misst die Modellqualität an synthetischen Fixtures, der zweite
 führt den echten Handler aus `functions/api/recipe-ocr.ts` mit einem
-REST-gestützten AI-Binding-Ersatz und gemockter Haushaltsprüfung aus. Der
+REST-gestützten AI-Binding-Ersatz und gemockter Haushaltsprüfung aus.
+Für Modellvergleiche auf einem echten Foto dient zusätzlich
+`server/photo-ocr-model-compare.test.ts`; Bild und Ground Truth liegen aus
+Datenschutzgründen nur lokal unter `fixtures-private/` und werden nie
+committet:
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... \
+  PHOTO_OCR_COMPARE_IMAGE=fixtures-private/photo-compare/photo.jpg \
+  PHOTO_OCR_COMPARE_GT=fixtures-private/photo-compare/ground-truth.json \
+  pnpm vitest run server/photo-ocr-model-compare.test.ts
+``` Der
 veröffentlichte Endpunkt selbst verlangt zusätzlich ein gültiges
 Haushalts-Token und wird nach dem Deploy mit einem echten Familienkonto
 geprüft.
@@ -290,4 +338,6 @@ geprüft.
 - `tests/fixtures/photo-ocr/` – synthetische Testbilder + Ground Truth
 - `server/photo-ocr-trial.test.ts`, `server/photo-ocr-handler-live.test.ts` –
   Opt-in-Live-Tests
+- `server/photo-ocr-model-compare.test.ts` – opt-in Modellvergleich
+  (Llama/Gemma/Moondream) auf einem echten Foto; private Daten bleiben lokal
 - `scripts/generate-photo-ocr-fixtures.py` – deterministischer Fixture-Generator

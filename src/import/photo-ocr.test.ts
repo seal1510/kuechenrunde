@@ -51,7 +51,24 @@ describe('validateOcrRecipe', () => {
     expect(recipe.ingredients[0]?.group).toBe('')
     expect(recipe.ingredients[0]?.quantity).toBe('250')
     expect(recipe.steps).toHaveLength(1)
-    expect(recipe.warnings).toEqual(['Hinweis'])
+    // Die vorhandene Modell-Warnung bleibt erhalten; zusätzlich macht die
+    // Validierung den stillen Verlust der leeren Zeilen sichtbar.
+    expect(recipe.warnings[0]).toBe('Hinweis')
+    expect(recipe.warnings.join(' ')).toContain('Zutatenzeile')
+    expect(recipe.warnings.join(' ')).toContain('Zubereitungsschritt')
+  })
+
+  it('warns instead of silently accepting a recipe without ingredients or steps', () => {
+    const withoutIngredients = validateOcrRecipe(
+      minimalRecipe({ ingredients: [], steps: [{ text: 'Alles verrühren.' }] }),
+    )
+    expect(withoutIngredients.recognized).toBe(true)
+    expect(withoutIngredients.warnings.join(' ')).toContain('keine Zutaten')
+
+    const withoutSteps = validateOcrRecipe(
+      minimalRecipe({ ingredients: [{ quantity: '250', unit: 'g', name: 'Mehl' }], steps: [] }),
+    )
+    expect(withoutSteps.warnings.join(' ')).toContain('keine Zubereitungsschritte')
   })
 
   it('derives recognized=false and adds a warning when no recipe content exists', () => {
@@ -109,7 +126,10 @@ describe('splitQuantityAndUnit', () => {
 })
 
 describe('applyOcrConsistencyChecks', () => {
-  function recipe(ingredients: OcrRecipe['ingredients']): OcrRecipe {
+  function recipe(
+    ingredients: OcrRecipe['ingredients'],
+    steps: OcrRecipe['steps'] = [],
+  ): OcrRecipe {
     return {
       recognized: true,
       title: 'Testrezept',
@@ -120,7 +140,7 @@ describe('applyOcrConsistencyChecks', () => {
       totalTime: '',
       notes: '',
       ingredients,
-      steps: [],
+      steps,
       uncertainties: [],
       warnings: [],
     }
@@ -158,6 +178,67 @@ describe('applyOcrConsistencyChecks', () => {
     expect(checked.uncertainties[0]?.reference).toBe('Zutat 2 (zucker)')
     expect(checked.uncertainties[0]?.note).toContain('200 g')
     expect(checked.uncertainties[0]?.note).toContain('180 g')
+  })
+
+  it('marks an ingredient that looks like a preparation step', () => {
+    const checked = applyOcrConsistencyChecks(
+      recipe(
+        [
+          {
+            group: 'Fleisch',
+            quantity: '',
+            unit: '',
+            name: 'marinieren',
+            purchaseNote: '',
+            preparationNote: '',
+            uncertain: false,
+            uncertainty: '',
+          },
+        ],
+        [],
+      ),
+    )
+    expect(checked.ingredients[0]?.uncertain).toBe(true)
+    expect(checked.ingredients[0]?.uncertainty).toContain('Zubereitungsschritt')
+    expect(checked.uncertainties).toHaveLength(1)
+  })
+
+  it('marks a step that looks like an ingredient line but leaves real steps alone', () => {
+    const step = (text: string): OcrRecipe['steps'][number] => ({
+      text,
+      uncertain: false,
+      uncertainty: '',
+    })
+    const checked = applyOcrConsistencyChecks(
+      recipe(
+        [
+          {
+            group: '',
+            quantity: '250',
+            unit: 'g',
+            name: 'Mehl',
+            purchaseNote: '',
+            preparationNote: '',
+            uncertain: false,
+            uncertainty: '',
+          },
+        ],
+        [
+          step('250 g Mehl und 2 EL Zucker verrühren.'),
+          step('10 Minuten kochen.'),
+          step('Teig 30 Minuten ruhen lassen.'),
+          step('2 EL Olivenöl'),
+        ],
+      ),
+    )
+    expect(checked.steps[0]?.uncertain).toBe(false)
+    // "250 g Mehl ..." enthält ein Handlungsverb (verrühren) → kein Hinweis.
+    expect(checked.steps[0]?.uncertainty).toBe('')
+    expect(checked.steps[1]?.uncertain).toBe(false)
+    expect(checked.steps[2]?.uncertain).toBe(false)
+    // Reine Zutatenzeile als Schritt → markiert, aber nicht verschoben.
+    expect(checked.steps[3]?.uncertain).toBe(true)
+    expect(checked.steps[3]?.uncertainty).toContain('Zutatenzeile')
   })
 
   it('is idempotent and leaves identical duplicate amounts alone', () => {

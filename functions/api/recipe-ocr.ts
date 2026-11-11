@@ -45,9 +45,11 @@ import {
 } from '../lib/http'
 import {
   PHOTO_AI_MISSING_BINDING_MESSAGE,
+  PHOTO_AI_TRUNCATED_MESSAGE,
   classifyPhotoAiError,
   extractModelText,
   extractPhotoAiUsage,
+  isTruncatedModelResponse,
   runPhotoOcr,
   validatePhotoPages,
   type AiBinding,
@@ -210,6 +212,12 @@ export async function handleRecipeOcr(
 
     try {
       const text = extractModelText(raw)
+      // Abgeschnittene Antworten werden nicht als generischer Formatfehler
+      // gemeldet: Der Nutzer soll wissen, dass er mit weniger Seiten erneut
+      // versuchen kann, statt dass die Erkennung „kaputt“ wirkt.
+      if (isTruncatedModelResponse(raw)) {
+        return errorResponse(502, 'invalid-ai-response', PHOTO_AI_TRUNCATED_MESSAGE)
+      }
       const value = extractJsonObject(text)
       // Zusätzlich zur Schema-Validierung: doppelte Zutaten mit
       // unterschiedlichen Mengen sichtbar als unklar markieren.

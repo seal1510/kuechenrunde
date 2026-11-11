@@ -3,9 +3,9 @@
  * Copyright (C) 2026 openCook Web contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Misst die tatsächliche Erkennungsqualität des Workers-AI-Modells
- * `@cf/meta/llama-4-scout-17b-16e-instruct` gegen die synthetischen Fixtures
- * unter `tests/fixtures/photo-ocr/`.
+ * Misst die tatsächliche Erkennungsqualität des produktiven Workers-AI-Modells
+ * (`PHOTO_OCR_MODEL`, derzeit Gemma 4) gegen die synthetischen Fixtures unter
+ * `tests/fixtures/photo-ocr/`.
  *
  * Der Lauf ist absichtlich ein Opt-in:
  *   - Ohne `CLOUDFLARE_ACCOUNT_ID` und `CLOUDFLARE_API_TOKEN` wird die Suite
@@ -32,6 +32,7 @@ import {
   OCR_SYSTEM_PROMPT,
   PHOTO_OCR_CONTRACT_VERSION,
   applyOcrConsistencyChecks,
+  PHOTO_OCR_CHAT_TEMPLATE_KWARGS,
   PHOTO_OCR_MAX_OUTPUT_TOKENS,
   PHOTO_OCR_MAX_PAGES,
   PHOTO_OCR_MODEL,
@@ -794,7 +795,8 @@ async function requestModel(files: string[]): Promise<ModelResponse> {
         body: JSON.stringify({
           messages,
           temperature: PHOTO_OCR_TEMPERATURE,
-          max_tokens: PHOTO_OCR_MAX_OUTPUT_TOKENS,
+          max_completion_tokens: PHOTO_OCR_MAX_OUTPUT_TOKENS,
+          chat_template_kwargs: PHOTO_OCR_CHAT_TEMPLATE_KWARGS,
         }),
         signal: controller.signal,
       })
