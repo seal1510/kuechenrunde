@@ -10711,3 +10711,491 @@ body.plan-panel-open {
     flex: 1 1 auto;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Phone navigation and compact app header                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The phone shell is selected by the existing 720px breakpoint. The second
+ * clause keeps iPhones in landscape (wide but short viewport) in the app
+ * layout instead of falling back to the desktop link rows. Macs and other
+ * fine-pointer desktops never match it.
+ */
+:root {
+  --mobile-nav-height: 3.6rem;
+}
+
+.mobile-nav,
+.library-import-menu {
+  display: none;
+}
+
+.library-import-options {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.library-import-option {
+  display: grid;
+  gap: 0.05rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.library-import-option strong {
+  font-size: var(--text-sm);
+}
+
+.library-import-option span {
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+}
+
+.library-import-option:hover,
+.library-import-option:focus-visible {
+  background: var(--accent-soft);
+  color: var(--text);
+  outline: none;
+}
+
+/* Bottom sheet shared with the "Mehr" trigger */
+body.mobile-sheet-open {
+  overflow: hidden;
+}
+
+.more-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  /*
+   * Above the permanent bar (40) and regular modals (50), but below the
+   * unsaved-changes prompt (60) and the full-screen planning panel (300).
+   */
+  z-index: 55;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: var(--overlay);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.more-sheet {
+  width: min(100%, 34rem);
+  max-height: min(86dvh, 44rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  animation: more-sheet-in 180ms var(--ease);
+}
+
+@keyframes more-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(1.25rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.more-sheet-handle {
+  width: 2.1rem;
+  height: 0.28rem;
+  margin: 0.55rem auto 0.15rem;
+  border-radius: var(--radius-pill);
+  background: var(--line-strong);
+}
+
+.more-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.1rem 0.75rem 0.35rem 1rem;
+}
+
+.more-sheet-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.more-sheet-close {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+}
+
+.more-sheet-close svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.more-sheet-close:hover,
+.more-sheet-close:focus-visible {
+  background: var(--surface-2);
+  color: var(--text);
+  outline: none;
+}
+
+.more-sheet-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.more-sheet-links {
+  display: flex;
+  flex-direction: column;
+  padding: 0 0.55rem;
+}
+
+.more-sheet-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 3.1rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  text-decoration: none;
+  font-size: var(--text-base);
+  font-weight: 550;
+}
+
+.more-sheet-link + .more-sheet-link {
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+
+.more-sheet-link:hover,
+.more-sheet-link:focus-visible {
+  background: var(--surface-2);
+  color: var(--text);
+  outline: none;
+}
+
+.more-sheet-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.more-sheet-link-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
+.more-sheet-link-icon svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.more-sheet-link-label {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.more-sheet-chevron {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: 0 0 auto;
+  color: var(--faint);
+}
+
+.more-sheet-account {
+  margin: 0.45rem 0.55rem 0;
+  padding: 0.7rem 0.55rem;
+  border-top: 1px solid var(--line);
+}
+
+.more-sheet-account-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.more-sheet-account-email {
+  margin: 0.15rem 0 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.more-sheet-logout {
+  width: calc(100% - 1.1rem);
+  min-height: 2.9rem;
+  margin: 0.6rem 0.55rem 0;
+}
+
+@media (max-width: 720px), (max-height: 500px) and (max-width: 1024px) and (pointer: coarse) {
+  .app-shell {
+    --mobile-nav-total: calc(
+      var(--mobile-nav-height) + env(safe-area-inset-bottom)
+    );
+  }
+
+  /*
+   * The header scrolls away with the content. It keeps only the small app
+   * mark and the product name; the cloud badge and the long subtitle are
+   * intentionally not rendered on the phone.
+   */
+  .app-header {
+    position: static;
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .app-header-inner {
+    min-height: 3.25rem;
+    padding-block: 0.35rem;
+    flex-wrap: nowrap;
+    gap: 0.75rem;
+  }
+
+  .brand {
+    gap: 0.55rem;
+    min-width: 0;
+  }
+
+  .brand-mark {
+    width: 1.95rem;
+    height: 1.95rem;
+    border-radius: 9px;
+    font-size: 0.9rem;
+  }
+
+  .brand strong {
+    font-size: 1.04rem;
+    line-height: 1.1;
+  }
+
+  .brand-subtitle,
+  .cloud-mode-badge,
+  .main-nav,
+  .cloud-nav,
+  .app-footer {
+    display: none;
+  }
+
+  .app-main {
+    padding-top: 0.9rem;
+    padding-bottom: calc(var(--mobile-nav-total) + 1.25rem);
+  }
+
+  .page {
+    gap: 1rem;
+  }
+
+  /* Permanent four-destination bar. */
+  .mobile-nav {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.1rem;
+    padding: 0.3rem max(0.4rem, env(safe-area-inset-left))
+      calc(0.3rem + env(safe-area-inset-bottom))
+      max(0.4rem, env(safe-area-inset-right));
+    border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    box-shadow: 0 -14px 34px -26px rgba(0, 0, 0, 0.55);
+    backdrop-filter: saturate(1.25) blur(18px);
+    -webkit-backdrop-filter: saturate(1.25) blur(18px);
+    transition:
+      transform var(--transition),
+      opacity var(--transition);
+  }
+
+  .mobile-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    min-width: 0;
+    min-height: 3rem;
+    padding: 0.3rem 0.15rem;
+    border: 0;
+    border-radius: 13px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.1;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast);
+  }
+
+  .mobile-nav-item svg {
+    width: 1.4rem;
+    height: 1.4rem;
+    flex: 0 0 auto;
+  }
+
+  .mobile-nav-item > span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-nav-item:hover {
+    color: var(--text);
+  }
+
+  .mobile-nav-item.is-active,
+  .mobile-nav-item.is-open {
+    color: var(--accent-strong);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+
+  .mobile-nav-item.is-active svg,
+  .mobile-nav-item.is-open svg {
+    color: var(--accent);
+  }
+
+  .mobile-nav-item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  /* Keyboard-aware hide: form controls stay above the keyboard. */
+  html.kr-keyboard-open .mobile-nav {
+    transform: translateY(calc(100% + 1rem));
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /*
+   * Existing phone action rows stay reachable, but move above the permanent
+   * navigation instead of being covered by it.
+   */
+  .detail-mobile-actions {
+    bottom: var(--mobile-nav-total);
+    padding-bottom: 0.65rem;
+  }
+
+  .editor-actionbar {
+    bottom: var(--mobile-nav-total);
+    padding-bottom: 0.4rem;
+  }
+
+  .editor-form :is(input, textarea, select, button, summary) {
+    scroll-margin-block: 7rem 9rem;
+  }
+
+  .move-snackbar {
+    bottom: calc(var(--mobile-nav-total) + 0.9rem);
+  }
+
+  /* Recipe library: one primary action plus one folded import action. */
+  .library-head {
+    align-items: stretch;
+    gap: 0.7rem;
+  }
+
+  .library-head h1 {
+    font-size: clamp(1.65rem, 7.5vw, 2.2rem);
+  }
+
+  .library-count {
+    margin-top: 0.35rem;
+    font-size: var(--text-xs);
+  }
+
+  .library-count::before {
+    width: 1.1rem;
+  }
+
+  .library-head .page-head-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .library-head .library-action-secondary,
+  .library-empty-import {
+    display: none;
+  }
+
+  .library-head .page-head-actions > .button {
+    width: 100%;
+    min-height: 2.9rem;
+  }
+
+  .library-import-menu {
+    position: relative;
+    display: block;
+    min-width: 0;
+  }
+
+  .library-import-menu > summary {
+    list-style: none;
+    width: 100%;
+    min-height: 2.9rem;
+    cursor: pointer;
+  }
+
+  .library-import-menu > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .library-import-menu[open] > summary {
+    border-color: var(--accent-border);
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+  }
+
+  .library-import-options {
+    position: absolute;
+    z-index: 35;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    left: 0;
+  }
+
+  .library-controls {
+    padding: 0.7rem;
+    border-radius: var(--radius-lg);
+  }
+}

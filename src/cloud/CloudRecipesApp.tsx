@@ -25,6 +25,8 @@ import { CloudImageUrlCache } from '../data/cloudImageUrls'
 import { CloudRecipeImageService } from '../data/cloudImages'
 import type { CloudRecordsStore } from '../data/cloudRecords'
 import { PlanBackendProvider } from '../mealplan/planBackend'
+import { isLibraryArea } from '../navigation/mobileNavModel'
+import { MobileNavigation } from '../navigation/MobileNavigation'
 import { CookPage } from '../pages/CookPage'
 import { PlanPage } from '../pages/PlanPage'
 import { ShoppingPage } from '../pages/ShoppingPage'
@@ -69,13 +71,6 @@ function CloudUnavailablePage() {
   )
 }
 
-const isLibraryArea = (route: Route): boolean =>
-  route.name === 'library' ||
-  route.name === 'recipe' ||
-  route.name === 'recipe-new' ||
-  route.name === 'recipe-edit' ||
-  route.name === 'cook'
-
 export function CloudRecipesApp({
   store,
   email,
@@ -89,6 +84,10 @@ export function CloudRecipesApp({
   const applyRoute = useCallback((hash: string) => {
     setRoute(parseRoute(hash))
   }, [])
+  const handleLogout = useCallback(() => {
+    clearCloudImageNotice()
+    void onLogout()
+  }, [onLogout])
 
   const storage = useMemo(
     () => createSupabaseImageStorage(requireSupabase()),
@@ -222,10 +221,7 @@ export function CloudRecipesApp({
               <button
                 type="button"
                 className="button quiet"
-                onClick={() => {
-                  clearCloudImageNotice()
-                  void onLogout()
-                }}
+                onClick={handleLogout}
               >
                 Abmelden
               </button>
@@ -245,6 +241,14 @@ export function CloudRecipesApp({
               </div>
             ) : null}
             <CloudImageUrlProvider cache={imageUrls}>{content}</CloudImageUrlProvider>
+            {route.name === 'cook' ? null : (
+              <MobileNavigation
+                route={route}
+                email={email}
+                includeFamily
+                onLogout={handleLogout}
+              />
+            )}
           </NavigationGuardProvider>
         </CookBackendProvider>
       </ShoppingBackendProvider>

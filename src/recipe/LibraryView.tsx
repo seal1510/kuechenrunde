@@ -130,26 +130,44 @@ export function RecipeLibraryView({
           </a>
           {cloudMode ? (
             <>
-              <a className="button quiet" href={URL_IMPORT_HASH}>
+              <a className="button quiet library-action-secondary" href={URL_IMPORT_HASH}>
                 URL-Import
               </a>
-              <a className="button quiet" href="#/import">
+              <a className="button quiet library-action-secondary" href="#/import">
                 Mela-Import
               </a>
-              <a className="button quiet" href="#/backup">
+              <a className="button quiet library-action-secondary" href="#/backup">
                 Backup
               </a>
             </>
           ) : (
             <>
-              <a className="button quiet" href="#/import">
+              <a className="button quiet library-action-secondary" href="#/import">
                 Import
               </a>
-              <a className="button quiet" href="#/backup">
+              <a className="button quiet library-action-secondary" href="#/backup">
                 Backup
               </a>
             </>
           )}
+          {/*
+           * The desktop keeps all direct actions above. On phones the two
+           * import routes are folded into one "Import" menu and Backup moves
+           * to the "Mehr" sheet.
+           */}
+          <details className="library-import-menu">
+            <summary className="button quiet">Import</summary>
+            <div className="library-import-options">
+              <a className="library-import-option" href={URL_IMPORT_HASH}>
+                <strong>URL-Rezeptimport</strong>
+                <span>Rezept von einer Webseite übernehmen</span>
+              </a>
+              <a className="library-import-option" href="#/import">
+                <strong>Mela-Import</strong>
+                <span>Mela-Datei auswählen und prüfen</span>
+              </a>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -241,15 +259,15 @@ export function RecipeLibraryView({
           <div className="notice-actions">
             {cloudMode ? (
               <>
-                <a className="button" href={URL_IMPORT_HASH}>
+                <a className="button library-empty-import" href={URL_IMPORT_HASH}>
                   Rezept per URL importieren
                 </a>
-                <a className="button" href="#/import">
+                <a className="button library-empty-import" href="#/import">
                   Mela-Datei importieren
                 </a>
               </>
             ) : (
-              <a className="button" href="#/import">
+              <a className="button library-empty-import" href="#/import">
                 Zum Import
               </a>
             )}

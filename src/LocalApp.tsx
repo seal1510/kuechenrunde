@@ -9,15 +9,10 @@ import { PlanPage } from './pages/PlanPage'
 import { ShoppingPage } from './pages/ShoppingPage'
 import { LocalBackupPage } from './pages/LocalBackupPage'
 import { AboutPage } from './pages/AboutPage'
+import { isLibraryArea } from './navigation/mobileNavModel'
+import { MobileNavigation } from './navigation/MobileNavigation'
 import { NavigationGuardProvider } from './routing/NavigationGuard'
 import { parseRoute, type Route } from './routing/routes'
-
-const isLibraryArea = (route: Route) =>
-  route.name === 'library' ||
-  route.name === 'recipe' ||
-  route.name === 'recipe-new' ||
-  route.name === 'recipe-edit' ||
-  route.name === 'cook'
 
 export function LocalApp() {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash))
@@ -102,6 +97,8 @@ export function LocalApp() {
           {route.name === 'backup' ? <LocalBackupPage /> : null}
           {route.name === 'about' ? <AboutPage /> : null}
         </main>
+
+        {route.name === 'cook' ? null : <MobileNavigation route={route} />}
 
         {focused ? null : (
         <footer className="app-footer">
