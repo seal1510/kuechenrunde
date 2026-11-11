@@ -38,22 +38,26 @@ function FilterSelect({
   value,
   options,
   onChange,
+  showLabel = false,
 }: {
   label: string
   value: string
   options: string[]
   onChange: (value: string) => void
+  showLabel?: boolean
 }) {
   return (
     <label className={`select-field${value ? ' is-active' : ''}`}>
-      <span className="visually-hidden">{label}</span>
+      <span className={showLabel ? 'library-sheet-filter-label' : 'visually-hidden'}>
+        {label}
+      </span>
       <select
         className={value ? 'is-active' : ''}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         aria-label={label}
       >
-        <option value="">{label}</option>
+        <option value="">{showLabel ? 'Alle' : label}</option>
         {options.map((option) => (
           <option key={option} value={option}>
             {option}
@@ -146,30 +150,35 @@ export function LibraryFilterSheet({
 
       <div className="library-sheet-filters">
         <FilterSelect
+          showLabel
           label={LIBRARY_FILTER_LABELS.category}
           value={filters.category}
           options={categories}
           onChange={(value) => onFilterChange('category', value)}
         />
         <FilterSelect
+          showLabel
           label={LIBRARY_FILTER_LABELS.cuisine}
           value={filters.cuisine}
           options={cuisines}
           onChange={(value) => onFilterChange('cuisine', value)}
         />
         <FilterSelect
+          showLabel
           label={LIBRARY_FILTER_LABELS.dishType}
           value={filters.dishType}
           options={dishTypes}
           onChange={(value) => onFilterChange('dishType', value)}
         />
         <FilterSelect
+          showLabel
           label={LIBRARY_FILTER_LABELS.effort}
           value={filters.effort}
           options={efforts}
           onChange={(value) => onFilterChange('effort', value)}
         />
         <FilterSelect
+          showLabel
           label={LIBRARY_FILTER_LABELS.tag}
           value={filters.tag}
           options={tags}

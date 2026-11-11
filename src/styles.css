@@ -11313,9 +11313,20 @@ html.kr-keyboard-open .bottom-sheet {
 }
 
 .library-sheet-filters .select-field {
+  display: flex;
   flex: 0 0 auto;
+  flex-direction: column;
+  gap: 0.2rem;
   width: 100%;
   min-width: 0;
+}
+
+.library-sheet-filter-label {
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  font-weight: 650;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
 }
 
 .library-sheet-filters select {
