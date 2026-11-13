@@ -8,11 +8,7 @@ import {
   type RecipeOcrDependencies,
 } from './recipe-ocr'
 import { HttpError } from '../lib/http'
-import {
-  PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE,
-  PHOTO_AI_TRUNCATED_MESSAGE,
-  type AiBinding,
-} from '../lib/photo-ai'
+import { PHOTO_AI_TRUNCATED_MESSAGE, type AiBinding } from '../lib/photo-ai'
 import type { AuthorizedMember } from '../lib/supabase-auth'
 import {
   OCR_ASSEMBLY_SYSTEM_PROMPT,
@@ -415,7 +411,7 @@ describe('Pages Function /api/recipe-ocr', () => {
     expect(payload.usage).toEqual({ promptTokens: 1434, completionTokens: 597 })
   })
 
-  it('behält die erkannten Schritte und warnt, wenn die Aufbereitung fehlschlägt', async () => {
+  it('meldet eine fehlgeschlagene Aufbereitung als Fehler statt die Roherkennung auszugeben', async () => {
     const recipeWithTranscription = {
       ...recipeJson,
       transcription: 'Titel\n250 g Mehl\nAlles verrühren.',
@@ -428,19 +424,34 @@ describe('Pages Function /api/recipe-ocr', () => {
     const run = vi.fn(async (_model: string, _input: unknown) => {
       call += 1
       if (call === 1) return recognized
-      throw aiError(3036)
+      throw new Error('kaputte Aufbereitung')
     })
 
     const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(502)
     expect(run).toHaveBeenCalledTimes(2)
-    const payload = (await response.json()) as {
-      recipe: { steps: Array<Record<string, unknown>>; warnings: string[] }
-      usage: Record<string, unknown>
+    const payload = (await response.json()) as { ok: boolean; code: string; error: string; recipe?: unknown }
+    expect(payload.ok).toBe(false)
+    expect(payload.code).toBe('assembly-failed')
+    expect(payload.error).toBe(PHOTO_OCR_ERROR_MESSAGES['assembly-failed'])
+    expect(payload.recipe).toBeUndefined()
+  })
+
+  it('reicht ein erschöpftes Kontingent der Aufbereitung als Quota-Fehler durch', async () => {
+    const recipeWithTranscription = {
+      ...recipeJson,
+      transcription: 'Titel\n250 g Mehl\nAlles verrühren.',
     }
-    expect(payload.recipe.steps).toEqual(recipeJson.steps)
-    expect(payload.recipe.warnings).toContain(PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE)
-    expect(payload.usage).toEqual({ promptTokens: 1000, completionTokens: 500 })
+    let call = 0
+    const run = vi.fn(async (_model: string, _input: unknown) => {
+      call += 1
+      if (call === 1) return { response: JSON.stringify(recipeWithTranscription) }
+      throw aiError(3036)
+    })
+    const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
+    expect(response.status).toBe(429)
+    const payload = (await response.json()) as { code: string }
+    expect(payload.code).toBe('quota-exhausted')
   })
 
   it('übernimmt bereinigte Zutatenbezeichnungen und -gruppen, ohne Mengen zu ändern', async () => {
@@ -506,7 +517,7 @@ describe('Pages Function /api/recipe-ocr', () => {
     expect(payload.recipe.ingredients[1]?.group).toBe('Teig')
   })
 
-  it('verwirft eine unplausible Aufbereitung und behält die erkannten Schritte', async () => {
+  it('meldet eine unplausible Aufbereitung als Fehler', async () => {
     const recipeWithTranscription = {
       ...recipeJson,
       transcription: 'Titel\n250 g Mehl\nAlles verrühren.',
@@ -528,17 +539,12 @@ describe('Pages Function /api/recipe-ocr', () => {
       }
     })
     const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
-    expect(response.status).toBe(200)
-    const payload = (await response.json()) as {
-      recipe: { steps: Array<Record<string, unknown>>; warnings: string[] }
-      usage: Record<string, unknown>
-    }
-    expect(payload.recipe.steps).toEqual(recipeJson.steps)
-    expect(payload.recipe.warnings).toContain(PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE)
-    expect(payload.usage).toEqual({ promptTokens: 1100, completionTokens: 510 })
+    expect(response.status).toBe(502)
+    const payload = (await response.json()) as { code: string }
+    expect(payload.code).toBe('assembly-failed')
   })
 
-  it('fällt bei unbrauchbarer Aufbereitungsantwort auf die erkannten Schritte zurück', async () => {
+  it('meldet eine ungültige Aufbereitungsantwort als Fehler', async () => {
     const recipeWithTranscription = {
       ...recipeJson,
       transcription: 'Titel\n250 g Mehl\nAlles verrühren.',
@@ -550,12 +556,9 @@ describe('Pages Function /api/recipe-ocr', () => {
       return { response: 'kein json' }
     })
     const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
-    expect(response.status).toBe(200)
-    const payload = (await response.json()) as {
-      recipe: { steps: Array<Record<string, unknown>>; warnings: string[] }
-    }
-    expect(payload.recipe.steps).toEqual(recipeJson.steps)
-    expect(payload.recipe.warnings).toContain(PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE)
+    expect(response.status).toBe(502)
+    const payload = (await response.json()) as { code: string }
+    expect(payload.code).toBe('assembly-failed')
   })
 
   it('accepts recognized:false as a successful result and fills the page report', async () => {

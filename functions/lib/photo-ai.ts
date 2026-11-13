@@ -291,10 +291,6 @@ export async function runPhotoOcrAssembly(
   return ai.run(PHOTO_OCR_MODEL, buildPhotoOcrAssemblyInput(recipe, transcription))
 }
 
-/** Sichtbarer Hinweis, wenn die Aufbereitung fehlschlägt (Erkennung bleibt). */
-export const PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE =
-  'Die Zubereitungsschritte konnten nicht automatisch aufbereitet werden. Die erkannten Schritte wurden unverändert übernommen; bitte mit dem Foto abgleichen.'
-
 /* ------------------------------------------------------------------ *
  * Antwort-Extraktion
  * ------------------------------------------------------------------ */

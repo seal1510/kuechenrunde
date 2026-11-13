@@ -52,7 +52,6 @@ import {
   jsonResponse,
 } from '../lib/http'
 import {
-  PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE,
   PHOTO_AI_MISSING_BINDING_MESSAGE,
   PHOTO_AI_TRUNCATED_MESSAGE,
   classifyPhotoAiError,
@@ -237,34 +236,58 @@ export async function handleRecipeOcr(
       let recipe = validateOcrRecipe(value)
       let usage = extractPhotoAiUsage(raw)
       // Zweiter, text-only Aufruf: aus Transkription + validierter
-      // Zutatenliste verständliche Schritte bauen. Schlägt er fehl, bleibt die
-      // Erkennung nutzbar; die Schritte werden dann nur als unsicher markiert.
+      // Zutatenliste verständliche Schritte bauen. Die Aufbereitung ist
+      // verpflichtend: Fällt sie aus, wird NICHT die rohe Erkennung als
+      // erfolgreich ausgegeben (sie kann unbrauchbar sein), sondern ein
+      // klarer Fehler zurückgegeben. Die Fotos bleiben im Editor erhalten,
+      // sodass ohne erneute Fotoauswahl neu gestartet werden kann.
       if (recipe.recognized && recipe.ingredients.length > 0 && transcription.trim()) {
         try {
           const assembled = await runPhotoOcrAssembly(ai, recipe, transcription)
           if (isTruncatedModelResponse(assembled)) {
-            addAssemblyFallbackWarning(recipe)
-          } else {
-            const polished = validateOcrPolish(
-              recipe,
-              extractJsonObject(extractModelText(assembled)),
-              transcription,
+            console.warn('[photo-ocr] assembly failed: truncated')
+            return errorResponse(
+              502,
+              'assembly-failed',
+              PHOTO_OCR_ERROR_MESSAGES['assembly-failed'],
             )
-            // Die Nutzung ist auch bei einer verworfenen Antwort angefallen.
-            usage = mergePhotoOcrUsage(usage, extractPhotoAiUsage(assembled))
-            if (isPlausibleOcrAssemblySteps(polished.recipe.steps, recipe)) {
-              recipe = polished.recipe
-              if (polished.rejectedNames > 0 || polished.rejectedGroups > 0) {
-                addPolishWarning(recipe)
-              }
-            } else {
-              addAssemblyFallbackWarning(recipe)
-            }
           }
-        } catch {
-          // Auch Quota-, Format- und Netzwerkfehler des zweiten Aufrufs dürfen
-          // den bereits erfolgreichen Import nicht scheitern lassen.
-          addAssemblyFallbackWarning(recipe)
+          const polished = validateOcrPolish(
+            recipe,
+            extractJsonObject(extractModelText(assembled)),
+            transcription,
+          )
+          // Die Nutzung ist auch bei einer verworfenen Antwort angefallen.
+          usage = mergePhotoOcrUsage(usage, extractPhotoAiUsage(assembled))
+          if (!isPlausibleOcrAssemblySteps(polished.recipe.steps, recipe)) {
+            console.warn('[photo-ocr] assembly failed: implausible')
+            return errorResponse(
+              502,
+              'assembly-failed',
+              PHOTO_OCR_ERROR_MESSAGES['assembly-failed'],
+            )
+          }
+          recipe = polished.recipe
+          if (polished.rejectedNames > 0 || polished.rejectedGroups > 0) {
+            addPolishWarning(recipe)
+          }
+        } catch (error) {
+          const failure = classifyPhotoAiError(error)
+          // Nur technisch eindeutige Ursachen durchreichen; Format- und
+          // Plausibilitätsfehler erscheinen als assembly-failed.
+          console.warn(`[photo-ocr] assembly failed: ${failure.code}`)
+          if (
+            failure.code === 'quota-exhausted' ||
+            failure.code === 'busy' ||
+            failure.code === 'timeout'
+          ) {
+            return errorResponse(failure.status, failure.code, failure.message)
+          }
+          return errorResponse(
+            502,
+            'assembly-failed',
+            PHOTO_OCR_ERROR_MESSAGES['assembly-failed'],
+          )
         }
       }
 
@@ -310,17 +333,6 @@ function addPolishWarning(recipe: OcrRecipe): void {
 
 function isRecordValue(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/**
- * Sichtbarer, aber nicht fataler Hinweis, wenn die Schrittaufbereitung
- * fehlschlägt. Der Import bleibt mit den erkannten Schritten möglich.
- */
-function addAssemblyFallbackWarning(recipe: OcrRecipe): void {
-  if (recipe.warnings.length >= PHOTO_OCR_MAX_WARNINGS) return
-  if (!recipe.warnings.includes(PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE)) {
-    recipe.warnings.push(PHOTO_AI_ASSEMBLY_FALLBACK_MESSAGE)
-  }
 }
 
 /** Cloudflare Pages entry point. Only the `/api/recipe-ocr` route invokes it. */

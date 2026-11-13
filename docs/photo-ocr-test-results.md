@@ -641,3 +641,77 @@ Plausibilitätsgate und der Import behält die erkannten Schritte samt Warnung.
   Kosten, kein Tarifwechsel.
 - Rohantworten und private Rezeptdaten bleiben lokal; in diesem Dokument
   stehen nur generische Fehlerklassen und Messwerte.
+
+## 13. Regression nach 8054412: Ursachenanalyse und stille-Fallback-Fix (2026-11-13)
+
+Gemeldet wurde, dass nach Commit `8054412` wieder die rohe Erkennung
+(Fragmente wie „Marinieren“, unbereinigte Zutaten) angezeigt wurde.
+
+### 13.1 Deployment geprüft
+
+Über die Cloudflare-Pages-API wurde der produktive Deployment-Datensatz
+abgefragt: kanonisch/latest war Commit `8054412ac295`, Umgebung `production`,
+Status `deploy success`, Domain `kuechenrunde.pages.dev` und
+`kuechenrunde.com`. **Der neue Code war also aktiv**; eine veraltete
+Deployment-Version scheidet als Ursache aus.
+
+### 13.2 Reproduktion der Verarbeitungskette
+
+Mit der privaten Originalaufnahme wurden mehrere vollständige zweistufige
+Läufe ausgeführt (Erkennung + Aufbereitung, echte Workers-AI-Antworten):
+
+- Die Aufbereitung lieferte in den geprüften Läufen gültige Antworten und
+  wurde angewendet; das Plausibilitätsgate verwarf sie nicht.
+- Die beobachtete rohe Ausgabe stammt damit aus dem **Fallback-Pfad**: Wenn
+  die zweite Stufe fehlschlägt (API-/Format-/Truncation-Fehler) oder das Gate
+  verwirft, gab der Handler bislang die **Erkennungsantwort als HTTP 200**
+  zurück – nur mit einem Warnhinweis. Diese Erkennungsantwort kann genau die
+  gemeldeten Fragmente und unbereinigten Zutaten enthalten.
+- Der konkrete Auslöser des Fehlschlags im gemeldeten Lauf ließ sich
+  nachträglich nicht rekonstruieren, weil der Handler die Ursache bislang
+  verwarf und nur den Fallback auslieferte. Genau das wurde behoben.
+- Als zusätzliche Schwachstelle wurde das Gate entschärft: Es verlangte, dass
+  Zutatenbezeichnungen in den Schritten wieder auftauchen. Gute Rezepte
+  verweisen aber oft auf „die Soße“ oder „die Masse“; solche Antworten
+  konnten fälschlich verworfen werden.
+
+### 13.3 Korrektur
+
+- **Kein stiller Fallback mehr:** Schlägt die Aufbereitung fehl, antwortet die
+  Function mit `502 assembly-failed` und einer klaren Meldung. Es wird kein
+  Rezept ausgeliefert und nichts gespeichert. Kontingent-/Auslastungs-/Timeout-
+  Fehler werden als eigener Code durchgereicht.
+- **Fotos bleiben erhalten:** Die vorhandene Schaltfläche „Erneut erkennen“
+  startet die Aufbereitung ohne neue Fotoauswahl; keine automatischen
+  Wiederholungsschleifen.
+- **Gate entschärft:** Es verwirft nur noch katastrophale Antworten (leer,
+  Duplikate, mehr als zwölf Schritte, zu kurz). Inhaltliche Bewertung wie
+  „jede Zutat muss namentlich wiederholt werden“ entfällt.
+- **Diagnose:** Der Server protokolliert nur die Fehlerkategorie der zweiten
+  Stufe (keine Rezeptinhalte), damit ein erneuter Fall zuordenbar ist.
+- **Zutaten + Schritte gemeinsam:** Bei Erfolg werden bereinigte
+  Zutatenliste und aufbereitete Schritte zusammen übernommen; Zutaten ohne
+  Gruppenangabe erben die vorherige Gruppe.
+- **Reihenfolge-Guard:** Eine zurückgeführte, beiseitegestellte Zutat wird
+  deterministisch hinter das Pürieren/Joghurt-Einrühren einsortiert, falls das
+  Modell sie zu weit vorn platziert.
+
+### 13.4 Verifikation
+
+- **Simulierter Fehler der zweiten Stufe** (Unit-/Handler-Test): Die Antwort
+  ist `502 assembly-failed`, enthält kein Rezept und keine gespeicherten
+  Daten; ein Quota-Fehler der zweiten Stufe wird als `429` gemeldet.
+- **Gültige Aufbereitung mit generischen Bezügen** („die Masse“, „die Soße“)
+  besteht das entschärfte Gate.
+- **Live-Handler-Lauf** mit echtem Modell (gedrucktes + handschriftliches
+  Fixture): beide Aufrufe erfolgreich, korrekte Titel/Zutaten/Schritte.
+- **Reale Tandoori-Läufe:** In einem vollständigen Lauf waren alle Zutaten
+  vorhanden (inkl. Ingwer, Chilis, Pfefferminze), „1½“ blieb erhalten, die
+  Reihenfolge (erst Joghurt einrühren, dann Fleisch untermischen) stimmte,
+  „Fruchtfleisch“ war korrekt zusammengeschrieben und es gab keine
+  Anrichte-Erfindung. Andere Läufe zeigten weiterhin Schwächen der
+  **Erkennung** (z. B. einzelne falsch gelesene Wörter/Mengen); diese werden
+  nicht durch Raten „korrigiert“, sondern bleiben manuell zu prüfen.
+- Keine zusätzlichen Modellaufrufe, keine Prompt-Experimente; Gemma 4 und die
+  zwei Stufen bleiben unverändert. Kosten unverändert ca. 120–135 Neuronen pro
+  Rezept.

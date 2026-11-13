@@ -199,6 +199,7 @@ export type PhotoOcrErrorCode =
   | 'busy'
   | 'timeout'
   | 'invalid-ai-response'
+  | 'assembly-failed'
   | 'upstream'
   | 'internal'
 
@@ -237,6 +238,8 @@ export const PHOTO_OCR_ERROR_MESSAGES: Record<PhotoOcrErrorCode, string> = {
   timeout: 'Die Erkennung hat zu lange gedauert. Bitte mit weniger Seiten erneut versuchen.',
   'invalid-ai-response':
     'Die KI-Antwort konnte nicht zuverlässig gelesen werden. Bitte die Fotos erneut erkennen lassen.',
+  'assembly-failed':
+    'Die Zubereitungsschritte konnten nicht zuverlässig aufbereitet werden. Es wurde nichts gespeichert. Bitte die Erkennung erneut starten oder das Rezept manuell anlegen.',
   upstream: 'Der KI-Dienst ist derzeit nicht erreichbar. Bitte später erneut versuchen.',
   internal: 'Die Foto-Erkennung ist fehlgeschlagen. Bitte erneut versuchen.',
 }
@@ -810,7 +813,34 @@ export function validateOcrAssemblySteps(value: unknown): OcrStep[] {
     }
   }
   ordered.sort((left, right) => left.key - right.key || left.rawIndex - right.rawIndex)
-  return ordered.map((entry) => entry.step)
+  const result = ordered.map((entry) => entry.step)
+
+  // Kulinarische Grundreihenfolge: Eine beiseitegestellte Zutat (typisch
+  // Fleisch) wird erst zurückgegeben, nachdem die Soße fertig ist (püriert,
+  // Joghurt eingerührt). Solche Rekonstruktionsschritte stehen im Modell
+  // gelegentlich zu weit vorn; das wird hier deterministisch korrigiert.
+  const reAdd = /\b(wieder|zurück|zurueck|zur so(?:ß|ss)e|unter die so(?:ß|ss)e|untermisch|vermisch|unterhebe)\b/i
+  const sauceWork = /\b(pürier|purier|joghurt)\b/i
+  const lastSauce = result.reduce(
+    (last, step, index) => (sauceWork.test(step.text) ? index : last),
+    -1,
+  )
+  if (lastSauce >= 0) {
+    const early = result
+      .map((step, index) => ({ step, index }))
+      .filter((entry) => entry.index < lastSauce && reAdd.test(entry.step.text) && !sauceWork.test(entry.step.text))
+    if (early.length > 0) {
+      const moved = new Set(early.map((entry) => entry.step))
+      const remaining = result.filter((step) => !moved.has(step))
+      const insertAt = Math.max(
+        0,
+        remaining.findIndex((step) => step === result[lastSauce]) + 1,
+      )
+      remaining.splice(insertAt, 0, ...early.map((entry) => entry.step))
+      return remaining
+    }
+  }
+  return result
 }
 
 /** Ergebnis der zweiten Stufe: bereinigtes Rezept plus Zähler für das Reporting. */
@@ -974,7 +1004,14 @@ export function validateOcrPolish(
     const proposedGroup =
       typeof entry.group === 'string' ? entry.group.trim() : ingredient.group
     if (visibleGroups.length > 0) {
-      if (allowedGroups.has(compactIngredient(proposedGroup))) {
+      if (!proposedGroup && index > 0) {
+        // Eine Zutat ohne Gruppenangabe zwischen gruppierten Zutaten gehört
+        // zur vorherigen Gruppe (z. B. ein Topping mitten im Soßenblock).
+        const previous = next.ingredients[index - 1]
+        if (previous && previous.group) {
+          ingredient.group = previous.group
+        }
+      } else if (allowedGroups.has(compactIngredient(proposedGroup))) {
         if (proposedGroup !== ingredient.group) {
           ingredient.group = proposedGroup.slice(0, 120)
         }
@@ -1051,38 +1088,21 @@ function normalizeAssemblyMatch(value: string): string {
  * inhaltlich zu korrigieren: Unplausible Antworten werden verworfen und der
  * Import fällt auf die erkannten Schritte zurück.
  */
-export function isPlausibleOcrAssemblySteps(steps: readonly OcrStep[], recipe: OcrRecipe): boolean {
+export function isPlausibleOcrAssemblySteps(steps: readonly OcrStep[], _recipe: OcrRecipe): boolean {
+  // Bewusst nur katastrophale Fehlantworten verwerfen. Eine inhaltliche
+  // Bewertung (z. B. ob jede Zutat namentlich in den Schritten vorkommt) wäre
+  // zu streng: Gute Rezepte verweisen oft auf „die Soße“ oder „die Masse“,
+  // statt Zutaten zu wiederholen. Solche Antworten dürfen nicht in den
+  // Fallback laufen.
   if (steps.length === 0) return false
   if (steps.length > 12) return false
-  // Eine Aufbereitung, die deutlich weniger Schritte liefert als die
-  // Erkennung, ist meist eine Fehlantwort (die Erkennung hatte die Zeilen).
-  if (recipe.steps.length >= 4 && steps.length < 3) return false
-  if (recipe.steps.length > 0 && steps.length < Math.min(2, recipe.steps.length)) return false
-
   const normalized = steps.map((step) => normalizeAssemblyMatch(step.text))
   const combined = normalized.join(' ')
-  if (combined.length < 40) return false
-
+  if (combined.length < 20) return false
   const seen = new Set<string>()
   for (const text of normalized) {
     if (seen.has(text)) return false
     seen.add(text)
-  }
-
-  if (recipe.ingredients.length >= 4) {
-    const haystack = ` ${combined} `
-    let covered = 0
-    for (const ingredient of recipe.ingredients) {
-      const tokens = normalizeAssemblyMatch(ingredient.name)
-        .split(' ')
-        .filter((token) => token.length >= 4)
-      if (tokens.length === 0) {
-        covered += 1
-        continue
-      }
-      if (tokens.some((token) => haystack.includes(` ${token} `))) covered += 1
-    }
-    if (covered / recipe.ingredients.length < 0.4) return false
   }
   return true
 }

@@ -161,6 +161,25 @@ describe('validateOcrAssemblySteps', () => {
     ])
   })
 
+  it('stellt eine zurückgeführte Zutat hinter das Pürieren/Einrühren der Soße', () => {
+    const steps = validateOcrAssemblySteps({
+      steps: [
+        { text: 'Die Soße anbraten.', sourceLines: [2] },
+        { text: 'Das Fleisch wieder zur Soße geben.', sourceLines: [3] },
+        { text: 'Die Soße pürieren.', sourceLines: [5] },
+        { text: 'Den Joghurt einrühren.', sourceLines: [6] },
+        { text: 'Mit Kräutern bestreuen.', sourceLines: [7] },
+      ],
+    })
+    expect(steps.map((step) => step.text)).toEqual([
+      'Die Soße anbraten.',
+      'Die Soße pürieren.',
+      'Den Joghurt einrühren.',
+      'Das Fleisch wieder zur Soße geben.',
+      'Mit Kräutern bestreuen.',
+    ])
+  })
+
   it('zieht unsichere Rekonstruktionsschritte nicht anhand falscher Quellzeilen nach vorn', () => {
     const steps = validateOcrAssemblySteps({
       steps: [
@@ -256,6 +275,30 @@ describe('validateOcrPolish', () => {
     expect(result.recipe.ingredients[0]?.group).toBe('Teig')
   })
 
+  it('ordnet Zutaten ohne Gruppenangabe der vorherigen Gruppe zu', () => {
+    const recipe = validateOcrRecipe(
+      minimalRecipe({
+        ingredients: [
+          { group: 'Soße', quantity: '250', unit: 'ml', name: 'Joghurt' },
+          { group: '', quantity: '1', unit: 'TL', name: 'Petersilie' },
+        ],
+        steps: [{ text: 'Joghurt und Petersilie verrühren und servieren.' }],
+      }),
+    )
+    const result = validateOcrPolish(
+      recipe,
+      {
+        ingredients: [
+          { index: 1, name: 'Joghurt', group: 'Soße' },
+          { index: 2, name: 'Petersilie', group: '' },
+        ],
+        steps: [{ text: 'Joghurt und Petersilie verrühren und servieren.', sourceLines: [1] }],
+      },
+      'Fleisch\nSoße\n250 ml Joghurt\n1 TL Petersilie\nBeilage\nReis',
+    )
+    expect(result.recipe.ingredients[1]?.group).toBe('Soße')
+  })
+
   it('ersetzt erfundene Gruppen anhand der sichtbaren Überschriften', () => {
     const recipe = validateOcrRecipe(
       minimalRecipe({
@@ -340,11 +383,23 @@ describe('isPlausibleOcrAssemblySteps', () => {
   })
 
   it('verwirft einzelne oder inhaltsleere Fehlantworten', () => {
-    expect(isPlausibleOcrAssemblySteps([step('Alles anrichten.')], recipe())).toBe(false)
     expect(isPlausibleOcrAssemblySteps([], recipe())).toBe(false)
+    expect(isPlausibleOcrAssemblySteps([step('Kurz.')], recipe())).toBe(false)
+  })
+
+  it('akzeptiert gute Schritte mit generischen Bezügen (keine Zutatenwiederholung)', () => {
+    // Gute Rezepte verweisen oft auf „die Masse“ oder „die Soße“, statt alle
+    // Zutaten erneut aufzuzählen. Das darf nicht als unplausibel gelten.
     expect(
-      isPlausibleOcrAssemblySteps([step('Mehl mit Milch servieren.')], recipe()),
-    ).toBe(false)
+      isPlausibleOcrAssemblySteps(
+        [
+          step('Die Zutaten zu einem Teig verrühren.'),
+          step('Die Masse in die Form geben.'),
+          step('Den Teig backen und abkühlen lassen.'),
+        ],
+        recipe(),
+      ),
+    ).toBe(true)
   })
 
   it('verwirft wiederholte oder ausufernde Listen', () => {

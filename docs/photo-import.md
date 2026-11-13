@@ -90,14 +90,20 @@ gespeichert (`importSource: 'photo'`, Rohmetadaten in `raw`).
   Die Anzahl der Schritte ergibt sich aus dem Rezept; eine feste Vorgabe gibt
   es nicht. Eine Zutatenbereinigung wird nur übernommen, wenn sie der
   Originalbezeichnung sehr ähnlich ist (reine Schreibkorrektur, keine
-  inhaltliche Ersetzung).
+  inhaltliche Ersetzung). Zutaten ohne Gruppenangabe zwischen gruppierten
+  Zutaten erben die vorherige Gruppe.
   Der Aufbereitungsaufruf nutzt zusätzlich `response_format: { type:
   'json_object' }` und ein deterministisches Plausibilitätsgate: Liefert das
   Modell nur einen einzelnen falschen Satz, Duplikate, eine Schleife oder
   deutlich weniger Schritte als die Erkennung, wird die Antwort verworfen.
-  Schlägt der zweite Aufruf fehl (Format, Plausibilität, Netzwerk, Kontingent),
-  bleibt der Import mit den erkannten Schritten nutzbar und zeigt einen
-  deutlichen Warnhinweis.
+  Schlägt der zweite Aufruf fehl (Format, Plausibilität, Netzwerk, Kontingent,
+  Timeout), wird **nicht** die rohe Erkennung als Erfolg ausgegeben: Die
+  Anfrage endet mit `502 assembly-failed` und einer verständlichen Meldung. Es
+  wird nichts gespeichert; die Fotos bleiben im Import erhalten, sodass über
+  die vorhandene Schaltfläche „Erneut erkennen“ ohne neue Fotoauswahl neu
+  aufbereitet werden kann. Technische Fehlerursachen (z. B. erschöpftes
+  Kontingent) werden als eigener Fehlercode durchgereicht. Der Server
+  protokolliert dabei ausschließlich eine Kategorie (keine Rezeptinhalte).
 - Nach Erkennung und Aufbereitung laufen deterministische Zusatzprüfungen auf
   dem Server: doppelte Zutatennamen mit unterschiedlichen Mengen werden als
   unklar markiert (typisch für durchgestrichene Korrekturen),
