@@ -567,3 +567,77 @@ erhält statt einer falschen Zubereitung.
   Aufbereitung fällt bei Timeout auf die erkannten Schritte zurück.
 - Rohantworten, Ground Truth und das Foto bleiben ausschließlich lokal
   (`fixtures-private/` bzw. `/tmp`) und werden nicht ins Repository aufgenommen.
+
+## 12. Sprachliche und kulinarische Plausibilitätsprüfung (2026-11-13)
+
+Anlass: Die zweistufige Erkennung lieferte zwar brauchbare Schritte, aber
+weiterhin sprachliche und innere Inkonsistenzen: getrennt geschriebene
+Komposita, unsauber formatierte Gewürzbezeichnungen, falsch zugeordnete
+Zutaten (z. B. ein Kraut-Topping unter „Beilage“), vertauschte Reihenfolgen
+beim Pürieren/Einrühren und einzelne unnötige oder falsche Handlungen.
+
+### 12.1 Erweiterte zweite Stufe
+
+Der vorhandene text-only Aufbereitungsaufruf (keine dritte Anfrage) prüft jetzt
+das ganze Rezept und gibt neben den Schritten auch die bereinigte
+Zutatenliste zurück:
+
+- **Sprache:** Rechtschreibung, Groß-/Kleinschreibung, Getrennt-/
+  Zusammenschreibung, falsch getrennte Komposita, Klammerzusätze,
+  offensichtliche Küchenbegriffe und Interpunktion werden korrigiert.
+- **Zutaten:** Jede Zutat erscheint genau einmal mit Index und bereinigtem
+  Namen; Mengen und Einheiten werden vom Modell nicht ausgegeben und bleiben
+  dadurch unverändert. Eine Bereinigung wird nur übernommen, wenn sie der
+  Originalbezeichnung sehr ähnlich ist (reine Schreibkorrektur, keine
+  inhaltliche Ersetzung).
+- **Gruppen:** Zulässig sind nur Überschriften, die in der Transkription
+  sichtbar sind; erfundene oder falsch erkannte Gruppen werden der
+  tatsächlichen Nachbargruppe zugeordnet.
+- **Kulinarik:** Der Prompt prüft Zutatenverwendung, Rückführung
+  beiseitegestellter Zutaten, falsches Pürieren/Kochen/Grillen, Zuordnung von
+  Hauptgericht/Soße/Beilage/Garnitur, Alternativen und zusammengehörige
+  Kurznotizen. Rekonstruierte Schritte werden als unsicher markiert.
+- **Reihenfolge:** Verlässliche Schritte werden anhand ihrer Quellzeilen
+  sortiert; unsichere Rekonstruktionsschritte bleiben an ihrer
+  Modellposition, weil ihre Quellzeilen im Test häufig auf eine frühere
+  Erwähnung derselben Zutat zeigten und die Sortierung sie sonst nach vorn
+  gezogen hätte.
+- **Anzahl der Schritte:** keine feste Vorgabe mehr; sie ergibt sich aus dem
+  Rezept (im Test 8–9 Schritte). Die bisherige Vorgabe „7–9“ wurde entfernt.
+
+### 12.2 Messung am echten Familienrezept
+
+Zwei vollständige Läufe auf demselben Originalfoto (Erkennung + Aufbereitung);
+zusätzlich wurden die gespeicherten Rohantworten mit der finalen
+Parser-/Sortierlogik nachbewertet (ohne weitere Modellaufrufe):
+
+| Kriterium | vorher | nachher |
+| --- | --- | --- |
+| getrennt geschriebene Komposita | vorhanden | bereinigt |
+| Gewürzbezeichnung unsauber formatiert | vorhanden | bereinigt (Bindestriche/Leerzeichen) |
+| falsch zugeordnete Zutatengruppe | möglich | anhand sichtbarer Überschriften korrigiert |
+| Joghurt vor Fleisch eingeführt | nicht gesichert | Reihenfolge korrekt |
+| Fleisch versehentlich mitpüriert | in einem Lauf ja | nein |
+| Fragmente/Ein-Wort-Schritte | einzelne | keine (nach Bereinigung) |
+| erfundene Mengen/Zutaten | nein | nein |
+| Schrittanzahl | fest 7–9 angestrebt | rezeptabhängig (8–9) |
+
+Restfehler bleiben dort, wo die **Erkennung** die Vorlage falsch liest: ein
+Markenname kann leicht falsch geschrieben sein, und ein Kraut kann mit einem
+anderen Kraut verwechselt werden. Eine Korrektur wäre hier nur durch Raten
+möglich und unterbleibt deshalb; solche Stellen bleiben manuell zu prüfen.
+Auch die Modellantworten schwanken: Liefert die Aufbereitung eine leere,
+wiederholte oder unplausible Antwort, greift das bestehende
+Plausibilitätsgate und der Import behält die erkannten Schritte samt Warnung.
+
+### 12.3 Gegenprüfung und Kosten
+
+- Gedrucktes und zweites (synthetisches) handschriftliches Fixture über den
+  echten Handler: jeweils 6 Schritte, 84–86 Neuronen für beide Aufrufe,
+  korrekte Titel und 8 Zutaten.
+- Der zweite Aufruf kostet ca. 35–50 Neuronen; zusammen mit der Erkennung
+  sind es rund 120–135 Neuronen pro einseitigem Rezept. Es bleibt bei genau
+  zwei Modellaufrufen pro Import; keine dritte Anfrage, keine laufenden
+  Kosten, kein Tarifwechsel.
+- Rohantworten und private Rezeptdaten bleiben lokal; in diesem Dokument
+  stehen nur generische Fehlerklassen und Messwerte.

@@ -313,6 +313,8 @@ Regeln:
  * Schritte haben im Test die Formulierung verschlechtert.
  */
 export interface OcrAssemblyIngredient {
+  /** 1-basierter Index der validierten Zutatenliste. */
+  index: number
   group: string
   quantity: string
   unit: string
@@ -339,7 +341,8 @@ export function buildOcrAssemblyPayload(
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line.length > 0),
-    ingredients: recipe.ingredients.map((ingredient) => ({
+    ingredients: recipe.ingredients.map((ingredient, index) => ({
+      index: index + 1,
       group: ingredient.group,
       quantity: ingredient.quantity,
       unit: ingredient.unit,
@@ -351,29 +354,30 @@ export function buildOcrAssemblyPayload(
 }
 
 /** Prompt des zweiten Aufrufs (Zubereitungsschritte aus Transkription + Zutaten). */
-export const OCR_ASSEMBLY_SYSTEM_PROMPT = `Du bekommst die Transkription einer handschriftlichen Rezeptseite als nummerierte Zeilen (Feld "transcriptionLines"; Nummer 1 = erste Zeile) und die daraus erkannte Zutatenliste mit Gruppen, Mengen und Einheiten. Formuliere daraus die endgültigen, gut nachkochbaren Zubereitungsschritte. Transkription und Zutatenliste sind die einzigen Quellen; erfinde nichts hinzu.
+export const OCR_ASSEMBLY_SYSTEM_PROMPT = `Du bist Lektor und Küchenprofi. Du bekommst die originalgetreue, zeilenweise Transkription einer handschriftlichen Rezeptseite ("transcriptionLines", Nummer 1 = erste Zeile) und die daraus erkannte Zutatenliste mit Index, Gruppe, Menge, Einheit und Name ("ingredients"). Beides sind die einzigen Quellen. Erfinde keine Zutaten, Mengen, Temperaturen, Garzeiten, Produktnamen oder Arbeitsschritte.
 
-Vorgehen:
-1. Prüfe zuerst jede Zutat mit Mengenangabe aus der Zutatenliste: Wird sie in der Transkription verwendet? Trage das Ergebnis in "usageCheck" ein (Schrittnummer, 1-basiert; oder eine kurze Begründung, wenn sie nur Beilage ist). Eine Zutat, die vorbereitet und danach nie wieder verwendet wird, ist ein Fehler im Ablauf.
-2. Formuliere danach die endgültigen Schritte.
+Aufgabe: Bereinige die Zutatenliste sprachlich, formuliere die Zubereitung verständlich und prüfe das Rezept als Ganzes auf Plausibilität. Mengen und Einheiten bleiben exakt wie in der Eingabe (sie stehen nicht in der Ausgabe).
 
-Regeln:
-1. Ordne jede Handlungszeile der Transkription genau einem Schritt zu, in der Reihenfolge des Originals. Lass keine Handlungszeile weg.
-2. Jeder Schritt muss Objekt und Handlung nennen. Stichwort- oder Ein-Wort-Schritte sind verboten: Nenne die betroffene Zutat aus der Zutatenliste oder den Zwischenschritt ("die Soße", "das Fleisch"). Verwende für Zutaten ausschließlich die Bezeichnungen aus der Zutatenliste. Weicht die Transkription ab (z. B. ein anderes Kraut), gilt die Zutatenliste; ist die Zuordnung unklar, markiere den Schritt mit uncertain=true. Beispiele: statt "Anbraten." → "Die Zutaten anbraten."; statt "Pürieren." → "Die Soße pürieren."; statt "Marinieren." → "Das Fleisch marinieren."
-3. Jede eigenständige Handlung ist ein eigener Schritt. Typische eigenständige Handlungen sind: Marinieren, Anbraten, Soßenzutaten anbraten, Flüssigkeit oder Tomaten zugeben/ablöschen, Kochen, Pürieren, Joghurt einrühren, Fleisch untermischen, Bestreuen. Fasse nur Zeilen zusammen, die ohne eigenes Objekt sind oder unmittelbar dieselbe Handlung fortsetzen. Ziel: sieben bis neun Schritte. Fasse das Bestreuen nicht mit anderen Handlungen zusammen.
-3a. Die Reihenfolge ist zwingend: Verschiebe keinen Schritt. Gib zu jedem Schritt "sourceLines" an: die Nummern der Transkriptionszeilen, aus denen er entsteht. Bei einem ergänzten oder rekonstruierten Schritt die Zeile, an deren Stelle er gehört. Die endgültige Reihenfolge wird anhand dieser Nummern geprüft.
-4. Erfinde keine Mengen, Temperaturen, Garzeiten, Zutaten oder Küchengeräte. Übernimm nur Angaben aus Transkription und Zutatenliste.
-5. Wenn eine Zutat vorbereitet und beiseitegestellt wird (z. B. Fleisch anbraten und herausnehmen) und in keinem späteren Schritt wieder auftaucht, ergänze den fehlenden Schritt aus dem Ablauf (z. B. "Das Fleisch wieder in die Soße geben und untermischen.") und markiere ihn mit uncertain=true, wenn die Vorlage an dieser Stelle unleserlich ist. Eine Zutat mit "herausnehmen"/"rausnehmen"/"beiseitelegen" MUSS in einem späteren Schritt wieder in das Gericht gelangen. Eine Beilage (Gruppe "Beilage" oder ausdrücklich als Beilage genannt, z. B. Reis) wird nicht untergemischt und nicht als Hauptzutat verwendet; sie wird höchstens serviert. Nennt die Transkription an der Stelle der unleserlichen Zeile eine Beilage, ist das ein Lesefehler; die Handlung gehört zur vorher beiseitegestellten Hauptzutat.
-6. "anrichten" und "servieren" nur verwenden, wenn die Transkription eine klare, sinnvolle Servieranweisung enthält. Eine unleserliche Zeile, die nur wie eine Servieranweisung klingt, ist keine Servieranweisung. Eine Beilage (z. B. Reis), zu der die Transkription keine Handlung nennt, wird NICHT zu einem eigenen Schritt und nicht mit dem Bestreuen zusammengefasst; sie bleibt in der Zutatenliste.
-7. Randnotizen und Alternativen aus der Transkription (z. B. "alternativ: im Ofen garen", "abgedeckt") müssen im zugehörigen Schritt vorkommen: Formuliere daraus "oder alternativ grillen" bzw. "abgedeckt beiseitelegen". Eine Randnotiz darf nicht wegfallen.
-8. Eine unleserliche Handlungszeile nicht durch eine andere, "passender" klingende Handlung ersetzen. Übernimm die wahrscheinlichste Lesart und markiere sie mit uncertain=true. Ergibt eine Zeile keinen sinnvollen deutschen Küchensatz oder enthält sie ein unpassendes Wort, übernimm sie nicht wörtlich: Rekonstruiere die aus dem Ablauf notwendige Handlung und markiere sie mit uncertain=true; die Unsicherheit gehört in "uncertainty", nicht in den Schritttext.
-8b. Übernimm keine unleserlichen Wörter in den Schritttext. Ist der Sinn klar, formuliere ihn mit korrektem Deutsch (z. B. "darüberstreuen" statt einer Buchstabenfolge); ist er unklar, markiere den Schritt mit uncertain=true.
-8a. Nimm in den Schritttext nur Handlungen auf, die sicher aus Transkription oder Zutatenliste hervorgehen. Wörter wie "anrichten" oder "servieren" nur dann in den Schritttext schreiben, wenn die Transkription an dieser Stelle eine klar lesbare, sinnvolle Servieranweisung enthält. Ein unklares Wort in einer Zeile wird nicht als Verb in den Schritttext übernommen.
-9. Zutaten, die laut Transkription am Ende nur bestreut oder darübergegeben werden (z. B. ein Gewürz oder Topping), als eigenen letzten Schritt nennen. Steht in einer Zeile eine Zutat mit einer Handlung (z. B. "1 TL Petersilie darüberstreuen"), erscheint die Zutat in der Zutatenliste UND die Handlung als eigener letzter Schritt. Der letzte Bestreu-/Topping-Schritt darf nicht mit dem Servieren oder einer anderen Handlung zusammengefasst werden und darf nicht wegfallen.
-10. Unleserliche Wörter: uncertain=true und uncertainty kurz beschreiben ("evtl. …"). Keine sinnlosen Buchstabenfolgen in den Schritttext übernehmen.
-11. Sprache: Deutsch, Umlaute, verständliche Kochsprache, komplette Sätze. Keine Aufzählungszeichen im Text.
-12. Schreibe höchstens neun Schritte; jeder Schritt erscheint genau einmal, keine Wiederholungen. Antworte ausschließlich mit einem JSON-Objekt nach diesem Schema, ohne Markdown-Zäune und ohne Erklärung:
-{"usageCheck":[{"ingredient":"","step":0,"note":""}],"steps":[{"text":"","uncertain":false,"uncertainty":"","sourceLines":[1]}]}`
+Zutatenliste (Feld "ingredients"):
+1. Gib ALLE Zutaten genau einmal mit ihrem "index" (1-basiert) aus: bereinigter "name", korrigierte "group", "uncertain"/"uncertainty". Keine weglassen, ergänzen oder zusammenführen.
+2. Korrigiere Rechtschreibung, Groß-/Kleinschreibung, Getrennt-/Zusammenschreibung, Bindestriche und Leerzeichen. Falsch getrennte Komposita zusammenziehen ("frucht fleisch" → "Fruchtfleisch"). Ein Klammerzusatz, der nur die zweite Hälfte desselben Kompositums ist, wird ohne Klammern direkt angehängt ("Tomaten (frucht fleisch)" → "Tomatenfruchtfleisch"); echte Zusatzinformationen in Klammern bleiben erhalten.
+3. Offensichtliche Lesefehler bei Lebensmittel-/Küchenbegriffen nur korrigieren, wenn die gemeinte Zutat eindeutig ist; sonst Original behalten und uncertain=true setzen. Abkürzungen nur auflösen, wenn die Langform im Rezept vorkommt (z. B. "M." nach "Mischung"). Keine anderen Zutaten, keine geratenen Marken oder Produktnamen.
+4. Gruppen: Leite sie ausschließlich aus den sichtbaren Überschriften und der Reihenfolge der Transkription ab; die Eingabegruppen sind nur Hinweise. Eine Gruppe, die nicht als eigene Überschrift in "transcriptionLines" vorkommt, darf in der Ausgabe nicht vorkommen: Ordne solche Zutaten der letzten sichtbaren Überschrift davor zu (z. B. ein Gewürz/Topping aus dem Soßenblock, das fälschlich in einer erfundenen Gruppe steht, gehört zur Soße). Eine Zutat vor der nächsten Überschrift gehört zur vorherigen Gruppe. Im Zweifel unsicher markieren.
+
+Zubereitung (Feld "steps"):
+5. Ordne jede Handlungszeile genau einem Schritt zu, in der Reihenfolge des Originals, und gib "sourceLines" an (Nummern der Transkriptionszeilen; bei einem ergänzten Schritt die Nummer der unleserlichen Zeile, nicht die einer früheren Handlung). Nichts weglassen.
+6. Jeder Schritt ist ein vollständiger, grammatisch korrekter deutscher Satz mit Objekt und Handlung, in verständlicher Kochsprache. Keine Stichwort-, Ein-Wort- oder Fragmentschritte. Nenne Zutaten mit den Namen aus der bereinigten Zutatenliste.
+7. Sprachliche Korrektur ist erwünscht, solange der Inhalt gleich bleibt: falsch getrennte Wörter, Umlaute, Groß-/Kleinschreibung, offensichtlich falsche Küchenbegriffe (z. B. "mit Tomaten löschen" → "mit Tomaten ablöschen", wenn eine Soße abgelöscht wird), unnötige Wiederholungen, sinnvolle Interpunktion.
+8. Prüfe das Rezept als Ganzes kulinarisch:
+   - Passen Handlungen und Zutaten zusammen, und wird jede Zutat sinnvoll verwendet?
+   - Wird eine angebratene oder beiseitegestellte Zutat später korrekt wieder hinzugefügt? Fehlt diese Handlung, ergänze sie nur, wenn sie aus dem Ablauf zwingend folgt, und markiere sie uncertain=true. Eine Zutat mit "herausnehmen"/"beiseitelegen" MUSS später zurück ins Gericht. Ein solcher Rückführ-Schritt steht am Ende der Hauptzubereitung: nach allen Schritten, die Soße, Flüssigkeit oder Joghurt verarbeiten, und vor dem letzten Bestreuen/Servieren; nicht direkt hinter dem Anbraten. Seine "sourceLines" zeigen auf die unleserliche Zeile, nicht auf eine frühere Handlung derselben Zutat.
+   - Wird nichts fälschlich püriert, gekocht oder gebraten, was nur herausgenommen, garniert oder als Beilage serviert wird? Ein Fleischstück, das herausgenommen wurde, darf nicht mit der Soße püriert werden.
+   - Hauptgericht, Soße, Garnitur und Beilage richtig zuordnen; Alternativen ("alternativ: …") im passenden Schritt als Alternative nennen.
+   - Offensichtlich zusammengehörige kurze Notizen sinnvoll verbinden. Die Anzahl der Schritte ergibt sich aus dem Rezept, kein festes Ziel.
+9. "anrichten"/"servieren" nur, wenn die Transkription es klar verlangt. Eine Beilage wird nicht untergemischt. Erfinde keine zusätzlichen Handlungen (z. B. Abschmecken, Würzen, Garnieren), wenn sie nicht in der Transkription stehen. Unleserliche Stellen nicht durch "passend" klingende Handlungen ersetzen: wahrscheinlichste Lesart übernehmen und uncertain=true setzen; Unsicherheit in "uncertainty", nicht in den Schritttext.
+10. Schreibe jeden JSON-Schlüssel und jeden Schritt genau einmal, keine Wiederholungen. Abschlussprüfung: alle Zutaten genau einmal, alle verwendet oder als Beilage/Garnitur begründet, Reihenfolge stimmt, keine Widersprüche, Mengen unverändert, Sätze korrekt.
+11. Antworte ausschließlich mit einem JSON-Objekt nach diesem Schema, ohne Markdown-Zäune und ohne Erklärung:
+{"ingredients":[{"index":1,"name":"","group":"","uncertain":false,"uncertainty":""}],"steps":[{"text":"","uncertain":false,"uncertainty":"","sourceLines":[1]}]}`
 
 export function buildOcrUserPrompt(pageCount: number): string {
   const count = Math.max(1, Math.min(PHOTO_OCR_MAX_PAGES, Math.trunc(pageCount)))
@@ -766,7 +770,12 @@ export function validateOcrAssemblySteps(value: unknown): OcrStep[] {
     throw new OcrFormatError('Die Aufbereitung enthält zu viele Schritte.')
   }
 
-  const parsed: Array<{ step: OcrStep; sourceLine: number | null }> = []
+  const parsed: Array<{
+    step: OcrStep
+    sourceLine: number | null
+    uncertain: boolean
+    rawIndex: number
+  }> = []
   stepsValue.forEach((entry, index) => {
     const step = readStep(entry, index)
     if (!step) return
@@ -778,20 +787,246 @@ export function validateOcrAssemblySteps(value: unknown): OcrStep[] {
         .filter((item) => item > 0)
       if (numbers.length > 0) sourceLine = Math.min(...numbers)
     }
-    parsed.push({ step, sourceLine })
+    parsed.push({ step, sourceLine, uncertain: step.uncertain, rawIndex: index })
   })
   if (parsed.length === 0) {
     throw new OcrFormatError('Die Aufbereitung enthält keine lesbaren Schritte.')
   }
 
-  // Die Reihenfolge des Originals ist verbindlich. Wenn das Modell für alle
-  // Schritte Quellzeilen angibt, wird danach stabil sortiert; das verhindert,
-  // dass ein rekonstruierter Schritt nach vorn rutscht. Ohne Quellzeilen bleibt
-  // die Modellreihenfolge erhalten.
-  if (parsed.every((entry) => entry.sourceLine !== null)) {
-    parsed.sort((left, right) => (left.sourceLine ?? 0) - (right.sourceLine ?? 0))
+  // Reihenfolge: verlässliche Schritte werden nach ihren Quellzeilen sortiert.
+  // Bei rekonstruierten/unsicheren Schritten sind die Quellzeilen häufig falsch
+  // (sie zeigen auf eine frühere Erwähnung derselben Zutat), deshalb bleiben
+  // sie an ihrer Modellposition – hinter allen verlässlichen Schritten, die im
+  // Modell davor standen. So kann die Sortierung einen korrekt platzierten
+  // Rekonstruktionsschritt nicht nach vorn ziehen.
+  const ordered: Array<{ key: number; rawIndex: number; step: OcrStep }> = []
+  let lastKey = 0
+  for (const entry of parsed) {
+    if (!entry.uncertain && entry.sourceLine !== null) {
+      lastKey = Math.max(lastKey, entry.sourceLine)
+      ordered.push({ key: entry.sourceLine, rawIndex: entry.rawIndex, step: entry.step })
+    } else {
+      ordered.push({ key: lastKey + 0.5 + entry.rawIndex / 1000, rawIndex: entry.rawIndex, step: entry.step })
+    }
   }
-  return parsed.map((entry) => entry.step)
+  ordered.sort((left, right) => left.key - right.key || left.rawIndex - right.rawIndex)
+  return ordered.map((entry) => entry.step)
+}
+
+/** Ergebnis der zweiten Stufe: bereinigtes Rezept plus Zähler für das Reporting. */
+export interface OcrPolishResult {
+  recipe: OcrRecipe
+  /** Anzahl bereinigter Zutatenbezeichnungen. */
+  adjustedNames: number
+  /** Anzahl verworfener (nicht sicher bereinigbarer) Bezeichnungen. */
+  rejectedNames: number
+  /** Anzahl verworfener Gruppenzuordnungen (nicht im Original vorhanden). */
+  rejectedGroups: number
+  /** true, wenn eine Zutatenliste geliefert und vollständig angewendet wurde. */
+  appliedIngredientList: boolean
+}
+
+function compactIngredient(value: string): string {
+  return value
+    .toLocaleLowerCase('de')
+    .replace(/ß/g, 'ss')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+}
+
+function editDistance(left: string, right: string): number {
+  const rows = left.length + 1
+  const columns = right.length + 1
+  let previous = Array.from({ length: columns }, (_, index) => index)
+  for (let row = 1; row < rows; row += 1) {
+    const current = new Array<number>(columns)
+    current[0] = row
+    for (let column = 1; column < columns; column += 1) {
+      const substitution = previous[column - 1]! + (left[row - 1] === right[column - 1] ? 0 : 1)
+      current[column] = Math.min(previous[column]! + 1, current[column - 1]! + 1, substitution)
+    }
+    previous = current
+  }
+  return previous[columns - 1] ?? Math.max(left.length, right.length)
+}
+
+/**
+ * Erlaubt nur sprachliche Bereinigungen einer Zutatenbezeichnung, keine
+ * inhaltliche Ersetzung: identische Buchstabenfolge, Abkürzungsauflösung
+ * (Präfix) oder hohe Ähnlichkeit. So kann das Modell „frucht fleisch“ zu
+ * „Fruchtfleisch“ korrigieren, aber nicht „Petersilie“ durch „Pfefferminze“
+ * ersetzen.
+ */
+export function isSafeIngredientCleanup(original: string, cleaned: string): boolean {
+  const left = compactIngredient(original)
+  const right = compactIngredient(cleaned)
+  if (!left || !right) return false
+  if (left === right) return true
+  if (left.startsWith(right) || right.startsWith(left)) {
+    return Math.min(left.length, right.length) >= 4
+  }
+  const longest = Math.max(left.length, right.length)
+  return 1 - editDistance(left, right) / longest >= 0.72
+}
+
+/**
+ * Wendet die Antwort der zweiten Stufe an: bereinigte Zutatenbezeichnungen und
+ * -gruppen sowie die aufbereiteten Schritte. Mengen, Einheiten und sonstige
+ * Felder bleiben unverändert; unsichere Bereinigungen werden verworfen und
+ * gezählt. Eine unvollständige oder falsch indizierte Zutatenliste wird
+ * insgesamt verworfen (die Schritte können trotzdem übernommen werden).
+ */
+const GENERIC_HEADINGS = new Set([
+  'zutaten', 'zubereitung', 'anleitung', 'notiz', 'notizen', 'seite', 'titel',
+  'fur', 'fuer', 'portionen',
+])
+
+/**
+ * Leitet sichtbare Gruppen-Überschriften heuristisch aus der Transkription ab:
+ * kurze, einzelne, großgeschriebene Zeilen ohne Ziffern und ohne
+ * Handlungszeichen. Generische Überschriften wie "Zutaten"/"Zubereitung"
+ * zählen nicht als Zutatengruppe.
+ */
+export function deriveVisibleGroups(
+  transcription: string,
+  knownIngredientNames: readonly string[] = [],
+): string[] {
+  const groups = new Set<string>()
+  const knownNames = new Set(knownIngredientNames.map((name) => compactIngredient(name)))
+  for (const rawLine of (typeof transcription === 'string' ? transcription : '').split('\n')) {
+    const line = rawLine.trim().replace(/:$/, '').trim()
+    if (!line) continue
+    if (/^[+\-–—→>]/.test(line)) continue
+    if (/\d/.test(line)) continue
+    if (line.split(/\s+/).length > 2) continue
+    if (!/^[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]+$/.test(line)) continue
+    if (GENERIC_HEADINGS.has(line.toLocaleLowerCase('de'))) continue
+    // Eine Zeile, die selbst eine Zutat ist (z. B. "Basmatireis"), ist keine
+    // Gruppenüberschrift.
+    if (knownNames.has(compactIngredient(line))) continue
+    groups.add(line)
+  }
+  return [...groups]
+}
+
+export function validateOcrPolish(
+  recipe: OcrRecipe,
+  value: unknown,
+  transcription?: string,
+): OcrPolishResult {
+  const steps = validateOcrAssemblySteps(value)
+  const next: OcrRecipe = {
+    ...recipe,
+    ingredients: recipe.ingredients.map((ingredient) => ({ ...ingredient })),
+    steps,
+  }
+  const result: OcrPolishResult = {
+    recipe: next,
+    adjustedNames: 0,
+    rejectedNames: 0,
+    rejectedGroups: 0,
+    appliedIngredientList: false,
+  }
+  if (!isRecord(value) || value.ingredients === undefined) return result
+
+  const entries = value.ingredients
+  if (!Array.isArray(entries)) return result
+  const byIndex = new Map<number, Record<string, unknown>>()
+  for (const entry of entries) {
+    if (!isRecord(entry)) continue
+    const index = typeof entry.index === 'number' ? Math.trunc(entry.index) : NaN
+    if (!Number.isInteger(index) || index < 1 || index > next.ingredients.length) continue
+    if (byIndex.has(index)) continue
+    byIndex.set(index, entry)
+  }
+  if (byIndex.size !== next.ingredients.length) return result
+
+  const allowedGroups = new Set<string>()
+  const visibleGroups = transcription
+    ? deriveVisibleGroups(
+        transcription,
+        next.ingredients.map((ingredient) => ingredient.name),
+      )
+    : []
+  if (visibleGroups.length > 0) {
+    for (const group of visibleGroups) allowedGroups.add(compactIngredient(group))
+  } else {
+    for (const ingredient of next.ingredients) {
+      allowedGroups.add(compactIngredient(ingredient.group))
+    }
+  }
+  allowedGroups.add('')
+
+  for (let index = 0; index < next.ingredients.length; index += 1) {
+    const ingredient = next.ingredients[index]!
+    const entry = byIndex.get(index + 1)!
+    const cleanedName = typeof entry.name === 'string' ? entry.name.trim() : ''
+    if (!cleanedName) {
+      result.rejectedNames += 1
+    } else if (!isSafeIngredientCleanup(ingredient.name, cleanedName)) {
+      result.rejectedNames += 1
+    } else if (cleanedName !== ingredient.name) {
+      ingredient.name = cleanedName.slice(0, 300)
+      result.adjustedNames += 1
+    }
+
+    const proposedGroup =
+      typeof entry.group === 'string' ? entry.group.trim() : ingredient.group
+    if (visibleGroups.length > 0) {
+      if (allowedGroups.has(compactIngredient(proposedGroup))) {
+        if (proposedGroup !== ingredient.group) {
+          ingredient.group = proposedGroup.slice(0, 120)
+        }
+      } else {
+        // Keine in der Transkription sichtbare Gruppe übernehmen – auch nicht
+        // eine bereits von der Erkennung erfundene. Stattdessen die Gruppe der
+        // vorherigen Zutat verwenden (dort steht die Zutat im Original direkt
+        // davor). Sonst Original behalten.
+        result.rejectedGroups += 1
+        const previous = index > 0 ? next.ingredients[index - 1] : undefined
+        if (previous && allowedGroups.has(compactIngredient(previous.group))) {
+          ingredient.group = previous.group
+        }
+      }
+    } else if (typeof entry.group === 'string' && proposedGroup !== ingredient.group) {
+      if (allowedGroups.has(compactIngredient(proposedGroup))) {
+        ingredient.group = proposedGroup.slice(0, 120)
+      } else {
+        result.rejectedGroups += 1
+        const previous = index > 0 ? next.ingredients[index - 1] : undefined
+        if (previous && allowedGroups.has(compactIngredient(previous.group))) {
+          ingredient.group = previous.group
+        }
+      }
+    }
+
+    if (entry.uncertain === true) {
+      ingredient.uncertain = true
+      const uncertainty = typeof entry.uncertainty === 'string' ? entry.uncertainty.trim() : ''
+      if (uncertainty) ingredient.uncertainty = uncertainty.slice(0, 300)
+    }
+  }
+
+  // Zusätzliche Unklarheiten der zweiten Stufe übernehmen (dedupliziert).
+  if (Array.isArray(value.uncertainties)) {
+    const existing = new Set(
+      next.uncertainties.map((entry) => `${entry.reference}\u0000${entry.note}`),
+    )
+    for (const entry of value.uncertainties) {
+      if (!isRecord(entry)) continue
+      const uncertainty = readUncertainty(entry, next.uncertainties.length)
+      if (!uncertainty) continue
+      const key = `${uncertainty.reference}\u0000${uncertainty.note}`
+      if (existing.has(key)) continue
+      if (next.uncertainties.length >= PHOTO_OCR_MAX_UNCERTAINTIES) break
+      existing.add(key)
+      next.uncertainties.push(uncertainty)
+    }
+  }
+
+  result.appliedIngredientList = true
+  return result
 }
 
 /**

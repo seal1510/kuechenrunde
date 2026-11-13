@@ -37,7 +37,7 @@ import {
   extractJsonObject,
   isPlausibleOcrAssemblySteps,
   mergePhotoOcrUsage,
-  validateOcrAssemblySteps,
+  validateOcrPolish,
   validateOcrPageReports,
   validateOcrRecipe,
   type PhotoOcrErrorCode,
@@ -229,12 +229,12 @@ export async function handleRecipeOcr(
         return errorResponse(502, 'invalid-ai-response', PHOTO_AI_TRUNCATED_MESSAGE)
       }
       const value = extractJsonObject(text)
-      const recipe = validateOcrRecipe(value)
       const transcription =
         isRecordValue(value) && typeof value.transcription === 'string'
           ? value.transcription
           : ''
 
+      let recipe = validateOcrRecipe(value)
       let usage = extractPhotoAiUsage(raw)
       // Zweiter, text-only Aufruf: aus Transkription + validierter
       // Zutatenliste verständliche Schritte bauen. Schlägt er fehl, bleibt die
@@ -245,13 +245,18 @@ export async function handleRecipeOcr(
           if (isTruncatedModelResponse(assembled)) {
             addAssemblyFallbackWarning(recipe)
           } else {
-            const assembledSteps = validateOcrAssemblySteps(
+            const polished = validateOcrPolish(
+              recipe,
               extractJsonObject(extractModelText(assembled)),
+              transcription,
             )
             // Die Nutzung ist auch bei einer verworfenen Antwort angefallen.
             usage = mergePhotoOcrUsage(usage, extractPhotoAiUsage(assembled))
-            if (isPlausibleOcrAssemblySteps(assembledSteps, recipe)) {
-              recipe.steps = assembledSteps
+            if (isPlausibleOcrAssemblySteps(polished.recipe.steps, recipe)) {
+              recipe = polished.recipe
+              if (polished.rejectedNames > 0 || polished.rejectedGroups > 0) {
+                addPolishWarning(recipe)
+              }
             } else {
               addAssemblyFallbackWarning(recipe)
             }
@@ -294,6 +299,13 @@ export async function handleRecipeOcr(
   } catch (error) {
     return errorToResponse(error)
   }
+}
+
+function addPolishWarning(recipe: OcrRecipe): void {
+  const message =
+    'Einige Zutatenbezeichnungen oder -gruppen konnten nicht sicher bereinigt werden. Bitte mit dem Foto abgleichen.'
+  if (recipe.warnings.length >= PHOTO_OCR_MAX_WARNINGS) return
+  if (!recipe.warnings.includes(message)) recipe.warnings.push(message)
 }
 
 function isRecordValue(value: unknown): value is Record<string, unknown> {

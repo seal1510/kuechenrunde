@@ -443,6 +443,69 @@ describe('Pages Function /api/recipe-ocr', () => {
     expect(payload.usage).toEqual({ promptTokens: 1000, completionTokens: 500 })
   })
 
+  it('übernimmt bereinigte Zutatenbezeichnungen und -gruppen, ohne Mengen zu ändern', async () => {
+    const recipeWithTranscription = {
+      ...recipeJson,
+      transcription: 'Teig\n250 g Mehl\n1 TL Zucker\nAlles verrühren.',
+      ingredients: [
+        {
+          group: 'Teig',
+          quantity: '250',
+          unit: 'g',
+          name: 'Mehl (weizen)',
+          purchaseNote: '',
+          preparationNote: '',
+          uncertain: false,
+          uncertainty: '',
+        },
+        {
+          group: 'Füllung',
+          quantity: '1',
+          unit: 'TL',
+          name: 'Zucker',
+          purchaseNote: '',
+          preparationNote: '',
+          uncertain: false,
+          uncertainty: '',
+        },
+      ],
+    }
+    const assembled = {
+      response: JSON.stringify({
+        ingredients: [
+          { index: 1, name: 'Mehl (Weizen)', group: 'Teig' },
+          { index: 2, name: 'Zucker', group: 'Teig' },
+        ],
+        steps: [
+          {
+            text: 'Mehl und Zucker zu einem glatten Teig verrühren und kurz ruhen lassen.',
+            uncertain: false,
+            uncertainty: '',
+            sourceLines: [1, 2],
+          },
+        ],
+      }),
+      usage: { prompt_tokens: 200, completion_tokens: 30 },
+    }
+    let call = 0
+    const run = vi.fn(async (_model: string, _input: unknown) => {
+      call += 1
+      return call === 1
+        ? { response: JSON.stringify(recipeWithTranscription), usage: { prompt_tokens: 1000, completion_tokens: 500 } }
+        : assembled
+    })
+
+    const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
+    expect(response.status).toBe(200)
+    const payload = (await response.json()) as {
+      recipe: { ingredients: Array<Record<string, unknown>> }
+    }
+    expect(payload.recipe.ingredients[0]?.name).toBe('Mehl (Weizen)')
+    expect(payload.recipe.ingredients[0]?.quantity).toBe('250')
+    expect(payload.recipe.ingredients[0]?.unit).toBe('g')
+    expect(payload.recipe.ingredients[1]?.group).toBe('Teig')
+  })
+
   it('verwirft eine unplausible Aufbereitung und behält die erkannten Schritte', async () => {
     const recipeWithTranscription = {
       ...recipeJson,

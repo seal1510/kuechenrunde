@@ -5,10 +5,12 @@ import {
   buildOcrAssemblyPayload,
   extractJsonObject,
   isPlausibleOcrAssemblySteps,
+  isSafeIngredientCleanup,
   mergePhotoOcrUsage,
   splitQuantityAndUnit,
   validateOcrAssemblySteps,
   validateOcrPageReports,
+  validateOcrPolish,
   validateOcrRecipe,
   type OcrRecipe,
 } from './photo-ocr'
@@ -101,6 +103,7 @@ describe('buildOcrAssemblyPayload', () => {
     expect(payload.transcriptionLines).toEqual(['Titel', '1 EL Öl', 'Alles mischen.'])
     expect(payload.ingredients).toEqual([
       {
+        index: 1,
         group: 'Teig',
         quantity: '250',
         unit: 'g',
@@ -116,6 +119,7 @@ describe('buildOcrAssemblyPayload', () => {
       transcriptionLines: [],
       ingredients: [
         {
+          index: 1,
           group: '',
           quantity: '250',
           unit: 'g',
@@ -157,6 +161,28 @@ describe('validateOcrAssemblySteps', () => {
     ])
   })
 
+  it('zieht unsichere Rekonstruktionsschritte nicht anhand falscher Quellzeilen nach vorn', () => {
+    const steps = validateOcrAssemblySteps({
+      steps: [
+        { text: 'Erster Schritt.', sourceLines: [4] },
+        { text: 'Zweiter Schritt.', sourceLines: [8] },
+        {
+          text: 'Wieder hinzugeben.',
+          uncertain: true,
+          uncertainty: 'rekonstruiert',
+          sourceLines: [4],
+        },
+        { text: 'Bestreuen.', sourceLines: [15] },
+      ],
+    })
+    expect(steps.map((step) => step.text)).toEqual([
+      'Erster Schritt.',
+      'Zweiter Schritt.',
+      'Wieder hinzugeben.',
+      'Bestreuen.',
+    ])
+  })
+
   it('lässt die Modellreihenfolge stehen, wenn Quellzeilen fehlen', () => {
     const steps = validateOcrAssemblySteps({
       steps: [{ text: 'Erst.' }, { text: 'Dann.' }],
@@ -169,6 +195,110 @@ describe('validateOcrAssemblySteps', () => {
     expect(() => validateOcrAssemblySteps({ steps: 'keine Liste' })).toThrow(OcrFormatError)
     expect(() => validateOcrAssemblySteps({ steps: [] })).toThrow(OcrFormatError)
     expect(() => validateOcrAssemblySteps({ steps: [{ text: '   ' }] })).toThrow(OcrFormatError)
+  })
+})
+
+describe('isSafeIngredientCleanup', () => {
+  it('erlaubt nur sprachliche Bereinigungen, keine inhaltliche Ersetzung', () => {
+    expect(isSafeIngredientCleanup('Pomito Tomaten (frucht fleisch)', 'Pomito Tomatenfruchtfleisch')).toBe(true)
+    expect(isSafeIngredientCleanup('tandoori Sherwood- M.', 'Tandoori Sherwood-Mischung')).toBe(true)
+    expect(isSafeIngredientCleanup('Chilies', 'Chilis')).toBe(true)
+    expect(isSafeIngredientCleanup('Petersilie', 'Pfefferminze')).toBe(false)
+    expect(isSafeIngredientCleanup('Mehl', 'Zucker')).toBe(false)
+  })
+})
+
+describe('validateOcrPolish', () => {
+  const source = (): OcrRecipe =>
+    validateOcrRecipe(
+      minimalRecipe({
+        ingredients: [
+          { group: 'Teig', quantity: '250', unit: 'g', name: 'Mehl' },
+          { group: 'Füllung', quantity: '1', unit: 'TL', name: 'Zucker' },
+        ],
+        steps: [
+          { text: 'Mehl und Zucker verrühren und backen lassen.' },
+          { text: 'Den Teig ruhen lassen.' },
+        ],
+      }),
+    )
+
+  it('wendet sichere Namens- und Gruppenkorrekturen an, ohne Mengen zu ändern', () => {
+    const result = validateOcrPolish(source(), {
+      ingredients: [
+        { index: 1, name: 'Mehl (Weizen)', group: 'Teig', uncertain: false, uncertainty: '' },
+        { index: 2, name: 'Zucker', group: 'Teig', uncertain: false, uncertainty: '' },
+      ],
+      steps: [
+        { text: 'Mehl und Zucker zu einem Teig verrühren und backen.', sourceLines: [1] },
+        { text: 'Den Teig vor dem Backen ruhen lassen.', sourceLines: [2] },
+      ],
+    })
+    expect(result.appliedIngredientList).toBe(true)
+    expect(result.adjustedNames).toBe(1)
+    expect(result.recipe.ingredients[0]?.name).toBe('Mehl (Weizen)')
+    expect(result.recipe.ingredients[0]?.quantity).toBe('250')
+    expect(result.recipe.ingredients[0]?.unit).toBe('g')
+    expect(result.recipe.ingredients[1]?.group).toBe('Teig')
+  })
+
+  it('verwirft unsichere Namensänderungen und unbekannte Gruppen, behält das Original', () => {
+    const result = validateOcrPolish(source(), {
+      ingredients: [
+        { index: 1, name: 'Pfefferminze', group: 'Gewürze' },
+        { index: 2, name: 'Zucker', group: 'Füllung' },
+      ],
+      steps: [{ text: 'Mehl und Zucker verrühren und backen lassen.', sourceLines: [1, 2] }],
+    })
+    expect(result.rejectedNames).toBe(1)
+    expect(result.rejectedGroups).toBe(1)
+    expect(result.recipe.ingredients[0]?.name).toBe('Mehl')
+    expect(result.recipe.ingredients[0]?.group).toBe('Teig')
+  })
+
+  it('ersetzt erfundene Gruppen anhand der sichtbaren Überschriften', () => {
+    const recipe = validateOcrRecipe(
+      minimalRecipe({
+        ingredients: [
+          { group: 'Fleisch', quantity: '600', unit: 'g', name: 'Hähnchenbrust' },
+          { group: 'Soße', quantity: '250', unit: 'ml', name: 'Joghurt' },
+          { group: 'Garnitur', quantity: '1', unit: 'TL', name: 'Petersilie' },
+          { group: 'Beilage', quantity: '', unit: '', name: 'Reis' },
+        ],
+        steps: [{ text: 'Alles zubereiten und servieren.' }],
+      }),
+    )
+    const transcription = 'Fleisch\n600 g Hähnchenbrust\nSoße\n250 ml Joghurt\n1 TL Petersilie\nBeilage\nReis'
+    const result = validateOcrPolish(
+      recipe,
+      {
+        ingredients: [
+          { index: 1, name: 'Hähnchenbrust', group: 'Fleisch' },
+          { index: 2, name: 'Joghurt', group: 'Soße' },
+          { index: 3, name: 'Petersilie', group: 'Garnitur' },
+          { index: 4, name: 'Reis', group: 'Beilage' },
+        ],
+        steps: [{ text: 'Alles zubereiten und servieren.', sourceLines: [1] }],
+      },
+      transcription,
+    )
+    expect(result.recipe.ingredients[2]?.group).toBe('Soße')
+    expect(result.rejectedGroups).toBe(1)
+  })
+
+  it('sortiert Schritte anhand der Quellzeilen und ignoriert Zusatzfelder', () => {
+    const result = validateOcrPolish(source(), {
+      usageCheck: [{ ingredient: 'Mehl', step: 1 }],
+      steps: [
+        { text: 'Zweiter Schritt.', sourceLines: [2] },
+        { text: 'Erster Schritt.', sourceLines: [1] },
+      ],
+    })
+    expect(result.recipe.steps.map((step) => step.text)).toEqual([
+      'Erster Schritt.',
+      'Zweiter Schritt.',
+    ])
+    expect(result.appliedIngredientList).toBe(false)
   })
 })
 

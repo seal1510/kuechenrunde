@@ -288,6 +288,7 @@ describe('buildPhotoOcrAssemblyInput / runPhotoOcrAssembly', () => {
     expect(text).toContain('transcriptionLines')
     expect(text).toContain('Zeile 2')
     expect(text).toContain('Mehl')
+    expect(text).toContain('"index":1')
     expect(text).not.toContain('Fragmente.')
     expect(text).not.toContain('image_url')
   })

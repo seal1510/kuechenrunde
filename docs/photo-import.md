@@ -50,9 +50,10 @@ gespeichert (`importSource: 'photo'`, Rohmetadaten in `raw`).
 - Zwei getrennte Aufgaben, wie im echten Familienrezept-Test begründet:
   1. **Erkennung** (1 Aufruf, mit allen Seitenbildern): Transkription,
      Zutaten, Mengen, Gruppen, vorläufige Schritte.
-  2. **Aufbereitung der Zubereitung** (1 text-only Aufruf, nur wenn eine
-     Transkription vorliegt): Aus Transkription + validierter Zutatenliste
-     werden verständliche, vollständige Schritte gebaut. Die fragmentierten
+  2. **Aufbereitung und Plausibilitätsprüfung** (1 text-only Aufruf, nur wenn
+     eine Transkription vorliegt): Aus Transkription + validierter
+     Zutatenliste werden ein sprachlich bereinigtes Rezept und eine
+     ganzheitliche kulinarische Prüfung erstellt. Die fragmentierten
      Erkennungsschritte gehen dabei bewusst **nicht** ein, weil sie die
      Formulierung im Test verschlechtert haben.
   Die Seiten werden in der vom Nutzer festgelegten Reihenfolge als ein Rezept
@@ -69,13 +70,27 @@ gespeichert (`importSource: 'photo'`, Rohmetadaten in `raw`).
   ohne „Verbesserung“ ähnlicher Wörter, vollständige Brüche („1½“ ist
   eins-einhalb) und sichtbare Zutatengruppen.
 - Der Aufbereitungs-Prompt arbeitet nur mit der Transkription und der
-  Zutatenliste. Er verlangt vollständige Sätze mit Objekt (keine
-  „Marinieren.“-Fragmente), verbindet zusammengehörige Kurznotizen, behält
-  die Originalreihenfolge (jeder Schritt nennt seine Quellzeilen, der Server
-  sortiert danach) und ergänzt einen fehlenden Schritt nur dann aus dem
-  Ablauf, wenn eine Zutat vorbereitet und beiseitegestellt wurde (dann
-  `uncertain=true`). Erfinden von Mengen, Temperaturen, Garzeiten oder
-  Zutaten ist verboten; unleserliche Stellen werden als unsicher markiert.
+  Zutatenliste. Er
+  - **bereinigt sprachlich**: Rechtschreibung, Groß-/Kleinschreibung,
+    Getrennt-/Zusammenschreibung, falsch getrennte Komposita, Klammerzusätze,
+    offensichtliche Küchenbegriffe (z. B. „löschen“ → „ablöschen“ bei einer
+    Soße) und Interpunktion;
+  - **korrigiert Gruppenzuordnungen**, wenn die erkannte Gruppe nicht als
+    Überschrift in der Transkription vorkommt (z. B. ein Kraut-Topping, das
+    fälschlich unter „Beilage“ steht) – die zulässigen Gruppen leitet der
+    Server deterministisch aus den sichtbaren Überschriften ab;
+  - **formuliert vollständige Sätze** mit Objekt (keine
+    „Marinieren.“-Fragmente), verbindet zusammengehörige Kurznotizen und
+    prüft die Reihenfolge (z. B. Joghurt vor Fleisch, kein Pürieren bereits
+    herausgenommenen Fleischs);
+  - **erfindet nichts**: Mengen und Einheiten werden vom Modell nicht
+    ausgegeben und bleiben unverändert; fehlende Schritte werden nur aus dem
+    Ablauf rekonstruiert und als unsicher markiert; unleserliche Stellen
+    bleiben unsicher.
+  Die Anzahl der Schritte ergibt sich aus dem Rezept; eine feste Vorgabe gibt
+  es nicht. Eine Zutatenbereinigung wird nur übernommen, wenn sie der
+  Originalbezeichnung sehr ähnlich ist (reine Schreibkorrektur, keine
+  inhaltliche Ersetzung).
   Der Aufbereitungsaufruf nutzt zusätzlich `response_format: { type:
   'json_object' }` und ein deterministisches Plausibilitätsgate: Liefert das
   Modell nur einen einzelnen falschen Satz, Duplikate, eine Schleife oder
@@ -185,10 +200,10 @@ Verarbeitung.
   Input-Tokens und 27.273 pro Mio. Output-Tokens (Llama 4 Scout zum Vergleich:
   24.545 / 77.273).
 - Gemessen in den Live-Tests (Erkennung + Aufbereitung): echte Handschriftseite
-  **rund 100–115 Neuronen** mit Gemma 4 – davon ca. 65 für die Erkennung und
-  30–45 für die Aufbereitung. Zum Vergleich: die reine Erkennung ohne
+  **rund 120–135 Neuronen** mit Gemma 4 – davon ca. 65–85 für die Erkennung und
+  35–50 für die Aufbereitung. Zum Vergleich: die reine Erkennung ohne
   Aufbereitung lag bei 52–65 Neuronen, Llama 4 Scout bei 135–169. Das
-  entspricht grob **85–100 vollständigen Rezeptimporten pro Tag** im Free-Tier.
+  entspricht grob **70–85 vollständigen Rezeptimporten pro Tag** im Free-Tier.
   Die genauen Messwerte stehen in
   [`docs/photo-ocr-test-results.md`](photo-ocr-test-results.md).
 - Bei erschöpftem Kontingent erscheint eine deutsche Meldung mit dem Hinweis,
