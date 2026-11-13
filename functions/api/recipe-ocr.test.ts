@@ -517,6 +517,29 @@ describe('Pages Function /api/recipe-ocr', () => {
     expect(payload.recipe.ingredients[1]?.group).toBe('Teig')
   })
 
+  it('akzeptiert umfangreiche Aufbereitungen mit 15–20 Schritten', async () => {
+    const recipeWithTranscription = {
+      ...recipeJson,
+      transcription: 'Titel\n250 g Mehl\nAlles verrühren.',
+    }
+    const steps = Array.from({ length: 18 }, (_, index) => ({
+      text: `Bereite Teilschritt ${index + 1} sorgfältig zu und stelle ihn beiseite.`,
+      uncertain: false,
+      uncertainty: '',
+      sourceLines: [index + 1],
+    }))
+    let call = 0
+    const run = vi.fn(async (_model: string, _input: unknown) => {
+      call += 1
+      if (call === 1) return { response: JSON.stringify(recipeWithTranscription) }
+      return { response: JSON.stringify({ steps }) }
+    })
+    const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
+    expect(response.status).toBe(200)
+    const payload = (await response.json()) as { recipe: { steps: Array<Record<string, unknown>> } }
+    expect(payload.recipe.steps).toHaveLength(18)
+  })
+
   it('meldet eine unplausible Aufbereitung als Fehler', async () => {
     const recipeWithTranscription = {
       ...recipeJson,

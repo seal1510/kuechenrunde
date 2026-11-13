@@ -161,11 +161,16 @@ describe('validateOcrAssemblySteps', () => {
     ])
   })
 
-  it('stellt eine zurückgeführte Zutat hinter das Pürieren/Einrühren der Soße', () => {
+  it('ordnet einen Rückführ-Schritt nur bei gestützter Quellreihenfolge hinter die Soßenverarbeitung', () => {
     const steps = validateOcrAssemblySteps({
       steps: [
+        {
+          text: 'Das Fleisch wieder zur Soße geben.',
+          uncertain: true,
+          uncertainty: 'rekonstruiert',
+          sourceLines: [8],
+        },
         { text: 'Die Soße anbraten.', sourceLines: [2] },
-        { text: 'Das Fleisch wieder zur Soße geben.', sourceLines: [3] },
         { text: 'Die Soße pürieren.', sourceLines: [5] },
         { text: 'Den Joghurt einrühren.', sourceLines: [6] },
         { text: 'Mit Kräutern bestreuen.', sourceLines: [7] },
@@ -178,6 +183,32 @@ describe('validateOcrAssemblySteps', () => {
       'Das Fleisch wieder zur Soße geben.',
       'Mit Kräutern bestreuen.',
     ])
+  })
+
+  it('lässt die Reihenfolge stehen, wenn die Quellzeilen die Umordnung nicht stützen', () => {
+    const unsupported = validateOcrAssemblySteps({
+      steps: [
+        {
+          text: 'Das Fleisch wieder zur Soße geben.',
+          uncertain: true,
+          uncertainty: 'rekonstruiert',
+          sourceLines: [3],
+        },
+        { text: 'Die Soße anbraten.', sourceLines: [2] },
+        { text: 'Die Soße pürieren.', sourceLines: [5] },
+        { text: 'Den Joghurt einrühren.', sourceLines: [6] },
+      ],
+    })
+    expect(unsupported.map((step) => step.text)[0]).toBe('Das Fleisch wieder zur Soße geben.')
+
+    const noLines = validateOcrAssemblySteps({
+      steps: [
+        { text: 'Das Fleisch wieder zur Soße geben.', uncertain: true, uncertainty: 'rekonstruiert' },
+        { text: 'Die Soße pürieren.', sourceLines: [5] },
+        { text: 'Den Joghurt einrühren.', sourceLines: [6] },
+      ],
+    })
+    expect(noLines.map((step) => step.text)[0]).toBe('Das Fleisch wieder zur Soße geben.')
   })
 
   it('zieht unsichere Rekonstruktionsschritte nicht anhand falscher Quellzeilen nach vorn', () => {
@@ -402,15 +433,35 @@ describe('isPlausibleOcrAssemblySteps', () => {
     ).toBe(true)
   })
 
-  it('verwirft wiederholte oder ausufernde Listen', () => {
+  it('akzeptiert umfangreiche Rezepte mit 15–20 eigenständigen Schritten', () => {
+    const medium = Array.from({ length: 15 }, (_, index) => step(`Bereite die Komponente ${index} sorgfältig zu.`))
+    const large = Array.from({ length: 20 }, (_, index) => step(`Verarbeite die Zutat ${index} nach Anweisung.`))
+    expect(isPlausibleOcrAssemblySteps(medium, recipe())).toBe(true)
+    expect(isPlausibleOcrAssemblySteps(large, recipe())).toBe(true)
+  })
+
+  it('verwirft Wiederholungsschleifen und ungewöhnlich große Antworten', () => {
     expect(
       isPlausibleOcrAssemblySteps(
         [step('Den Teig verrühren und backen.'), step('Den Teig verrühren und backen.')],
         recipe(),
       ),
     ).toBe(false)
-    const many = Array.from({ length: 14 }, (_, index) => step(`Schritt Nummer ${index} ausführen.`))
-    expect(isPlausibleOcrAssemblySteps(many, recipe())).toBe(false)
+    const loop = [
+      step('Den Teig verrühren.'),
+      step('Den Teig ruhen lassen.'),
+      step('Den Teig verrühren.'),
+      step('Den Teig ruhen lassen.'),
+      step('Den Teig verrühren.'),
+      step('Den Teig ruhen lassen.'),
+    ]
+    expect(isPlausibleOcrAssemblySteps(loop, recipe())).toBe(false)
+    const tooMany = Array.from({ length: 41 }, (_, index) => step(`Einzelschritt ${index} ausführen.`))
+    expect(isPlausibleOcrAssemblySteps(tooMany, recipe())).toBe(false)
+    const huge = Array.from({ length: 20 }, (_, index) =>
+      step(`Schritt ${index}: ${'sehr ausführliche Anweisung '.repeat(60)}`),
+    )
+    expect(isPlausibleOcrAssemblySteps(huge, recipe())).toBe(false)
   })
 })
 

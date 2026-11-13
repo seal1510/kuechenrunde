@@ -684,17 +684,21 @@ Läufe ausgeführt (Erkennung + Aufbereitung, echte Workers-AI-Antworten):
 - **Fotos bleiben erhalten:** Die vorhandene Schaltfläche „Erneut erkennen“
   startet die Aufbereitung ohne neue Fotoauswahl; keine automatischen
   Wiederholungsschleifen.
-- **Gate entschärft:** Es verwirft nur noch katastrophale Antworten (leer,
-  Duplikate, mehr als zwölf Schritte, zu kurz). Inhaltliche Bewertung wie
-  „jede Zutat muss namentlich wiederholt werden“ entfällt.
+- **Gate entschärft:** Es verwirft nur noch tatsächliche Fehlerbilder (leer,
+  Duplikate, Wiederholungsschleifen, ungewöhnlich große Antworten, zu kurz).
+  Die Schrittanzahl ist kein Ausschlusskriterium (15–20 Schritte sind
+  zulässig); inhaltliche Bewertung wie „jede Zutat muss namentlich wiederholt
+  werden“ entfällt.
 - **Diagnose:** Der Server protokolliert nur die Fehlerkategorie der zweiten
   Stufe (keine Rezeptinhalte), damit ein erneuter Fall zuordenbar ist.
 - **Zutaten + Schritte gemeinsam:** Bei Erfolg werden bereinigte
   Zutatenliste und aufbereitete Schritte zusammen übernommen; Zutaten ohne
   Gruppenangabe erben die vorherige Gruppe.
-- **Reihenfolge-Guard:** Eine zurückgeführte, beiseitegestellte Zutat wird
-  deterministisch hinter das Pürieren/Joghurt-Einrühren einsortiert, falls das
-  Modell sie zu weit vorn platziert.
+- **Reihenfolge-Guard (nur mit Beleg):** Ein als unsicher markierter
+  Rückführ-Schritt wird nur dann hinter das Pürieren/Joghurt-Einrühren
+  einsortiert, wenn seine erkannten Quellzeilen nach den Quellzeilen dieser
+  Soßenschritte liegen. Fehlt dieser Beleg oder widerspricht er, bleibt die
+  ursprüngliche Reihenfolge erhalten.
 
 ### 13.4 Verifikation
 

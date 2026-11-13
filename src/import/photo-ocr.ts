@@ -802,45 +802,70 @@ export function validateOcrAssemblySteps(value: unknown): OcrStep[] {
   // sie an ihrer Modellposition – hinter allen verlässlichen Schritten, die im
   // Modell davor standen. So kann die Sortierung einen korrekt platzierten
   // Rekonstruktionsschritt nicht nach vorn ziehen.
-  const ordered: Array<{ key: number; rawIndex: number; step: OcrStep }> = []
+  const ordered: Array<{
+    key: number
+    rawIndex: number
+    step: OcrStep
+    sourceLine: number | null
+  }> = []
   let lastKey = 0
   for (const entry of parsed) {
     if (!entry.uncertain && entry.sourceLine !== null) {
       lastKey = Math.max(lastKey, entry.sourceLine)
-      ordered.push({ key: entry.sourceLine, rawIndex: entry.rawIndex, step: entry.step })
+      ordered.push({
+        key: entry.sourceLine,
+        rawIndex: entry.rawIndex,
+        step: entry.step,
+        sourceLine: entry.sourceLine,
+      })
     } else {
-      ordered.push({ key: lastKey + 0.5 + entry.rawIndex / 1000, rawIndex: entry.rawIndex, step: entry.step })
+      ordered.push({
+        key: lastKey + 0.5 + entry.rawIndex / 1000,
+        rawIndex: entry.rawIndex,
+        step: entry.step,
+        sourceLine: entry.sourceLine,
+      })
     }
   }
   ordered.sort((left, right) => left.key - right.key || left.rawIndex - right.rawIndex)
-  const result = ordered.map((entry) => entry.step)
 
-  // Kulinarische Grundreihenfolge: Eine beiseitegestellte Zutat (typisch
-  // Fleisch) wird erst zurückgegeben, nachdem die Soße fertig ist (püriert,
-  // Joghurt eingerührt). Solche Rekonstruktionsschritte stehen im Modell
-  // gelegentlich zu weit vorn; das wird hier deterministisch korrigiert.
+  // Einzige zulässige Umordnung: Ein als unsicher markierter Rückführ-Schritt
+  // ("... wieder zur Soße ...") wird nur dann hinter die Soßenverarbeitung
+  // gesetzt, wenn die erkannten Quellzeilen das stützen – also wenn die
+  // Quellzeile des Rückführ-Schritts nach allen Quellzeilen der
+  // Pürier-/Joghurt-Schritte liegt. Ohne diese Bestätigung bleibt die
+  // ursprüngliche Reihenfolge erhalten.
   const reAdd = /\b(wieder|zurück|zurueck|zur so(?:ß|ss)e|unter die so(?:ß|ss)e|untermisch|vermisch|unterhebe)\b/i
   const sauceWork = /\b(pürier|purier|joghurt)\b/i
-  const lastSauce = result.reduce(
-    (last, step, index) => (sauceWork.test(step.text) ? index : last),
+  const sauceLines = ordered
+    .filter((entry) => sauceWork.test(entry.step.text) && entry.sourceLine !== null)
+    .map((entry) => entry.sourceLine as number)
+  const lastSauceIndex = ordered.reduce(
+    (last, entry, index) => (sauceWork.test(entry.step.text) ? index : last),
     -1,
   )
-  if (lastSauce >= 0) {
-    const early = result
-      .map((step, index) => ({ step, index }))
-      .filter((entry) => entry.index < lastSauce && reAdd.test(entry.step.text) && !sauceWork.test(entry.step.text))
-    if (early.length > 0) {
-      const moved = new Set(early.map((entry) => entry.step))
-      const remaining = result.filter((step) => !moved.has(step))
-      const insertAt = Math.max(
-        0,
-        remaining.findIndex((step) => step === result[lastSauce]) + 1,
-      )
-      remaining.splice(insertAt, 0, ...early.map((entry) => entry.step))
-      return remaining
-    }
+  const maxSauceLine = sauceLines.length > 0 ? Math.max(...sauceLines) : null
+  const movable = ordered
+    .map((entry, index) => ({ entry, index }))
+    .filter(
+      ({ entry, index }) =>
+        index < lastSauceIndex &&
+        reAdd.test(entry.step.text) &&
+        !sauceWork.test(entry.step.text) &&
+        entry.step.uncertain &&
+        entry.sourceLine !== null &&
+        maxSauceLine !== null &&
+        entry.sourceLine > maxSauceLine,
+    )
+  if (movable.length > 0) {
+    const movableSet = new Set(movable.map(({ entry }) => entry))
+    const anchor = ordered[lastSauceIndex]!
+    const remaining = ordered.filter((entry) => !movableSet.has(entry))
+    const insertAt = Math.max(0, remaining.indexOf(anchor) + 1)
+    remaining.splice(insertAt, 0, ...movable.map(({ entry }) => entry))
+    return remaining.map((entry) => entry.step)
   }
-  return result
+  return ordered.map((entry) => entry.step)
 }
 
 /** Ergebnis der zweiten Stufe: bereinigtes Rezept plus Zähler für das Reporting. */
@@ -1089,21 +1114,26 @@ function normalizeAssemblyMatch(value: string): string {
  * Import fällt auf die erkannten Schritte zurück.
  */
 export function isPlausibleOcrAssemblySteps(steps: readonly OcrStep[], _recipe: OcrRecipe): boolean {
-  // Bewusst nur katastrophale Fehlantworten verwerfen. Eine inhaltliche
-  // Bewertung (z. B. ob jede Zutat namentlich in den Schritten vorkommt) wäre
-  // zu streng: Gute Rezepte verweisen oft auf „die Soße“ oder „die Masse“,
-  // statt Zutaten zu wiederholen. Solche Antworten dürfen nicht in den
-  // Fallback laufen.
+  // Bewusst nur tatsächliche Anzeichen einer kaputten Antwort verwerfen. Die
+  // bloße Länge ist kein Fehler: umfangreiche Rezepte haben legitim 15–20
+  // Schritte. Eine inhaltliche Bewertung (ob jede Zutat namentlich erneut
+  // vorkommt) wäre ebenfalls zu streng, weil gute Rezepte oft auf „die Soße“
+  // oder „die Masse“ verweisen.
   if (steps.length === 0) return false
-  if (steps.length > 12) return false
+  // Ungewöhnlich große Antworten (Schleifen/ausufernde Generierung).
+  if (steps.length > 40) return false
+
   const normalized = steps.map((step) => normalizeAssemblyMatch(step.text))
   const combined = normalized.join(' ')
   if (combined.length < 20) return false
-  const seen = new Set<string>()
-  for (const text of normalized) {
-    if (seen.has(text)) return false
-    seen.add(text)
-  }
+  if (combined.length > 20_000) return false
+
+  // Wiederholungsschleifen: exakt doppelte Schritte oder eine Mehrheit
+  // inhaltlich identischer Schritte.
+  const unique = new Set(normalized)
+  if (unique.size !== normalized.length) return false
+  if (normalized.length >= 4 && unique.size < Math.ceil(normalized.length / 2)) return false
+
   return true
 }
 

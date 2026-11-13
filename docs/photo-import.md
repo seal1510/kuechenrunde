@@ -94,8 +94,10 @@ gespeichert (`importSource: 'photo'`, Rohmetadaten in `raw`).
   Zutaten erben die vorherige Gruppe.
   Der Aufbereitungsaufruf nutzt zusätzlich `response_format: { type:
   'json_object' }` und ein deterministisches Plausibilitätsgate: Liefert das
-  Modell nur einen einzelnen falschen Satz, Duplikate, eine Schleife oder
-  deutlich weniger Schritte als die Erkennung, wird die Antwort verworfen.
+  Modell eine leere, doppelte, wiederholte (Schleife) oder ungewöhnlich große
+  Antwort, wird sie verworfen. Die Anzahl der Schritte ist **kein**
+  Ausschlusskriterium – auch umfangreiche Rezepte mit 15–20 Schritten werden
+  verarbeitet.
   Schlägt der zweite Aufruf fehl (Format, Plausibilität, Netzwerk, Kontingent,
   Timeout), wird **nicht** die rohe Erkennung als Erfolg ausgegeben: Die
   Anfrage endet mit `502 assembly-failed` und einer verständlichen Meldung. Es
