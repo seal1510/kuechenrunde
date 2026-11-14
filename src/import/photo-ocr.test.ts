@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   OcrFormatError,
   applyOcrConsistencyChecks,
+  applyOcrLanguageCorrections,
   buildOcrAssemblyPayload,
   extractJsonObject,
+  mergeDuplicateTopLevelArrays,
   isPlausibleOcrAssemblySteps,
   isSafeIngredientCleanup,
   mergePhotoOcrUsage,
@@ -146,7 +148,7 @@ describe('validateOcrAssemblySteps', () => {
     expect(steps[0]).not.toHaveProperty('sourceLines')
   })
 
-  it('sortiert Schritte anhand der Quellzeilen in die Originalreihenfolge', () => {
+  it('behält die Modellreihenfolge und markiert widersprüchliche Quellzeilen als unsicher', () => {
     const steps = validateOcrAssemblySteps({
       steps: [
         { text: 'Zweiter Schritt.', sourceLines: [5] },
@@ -155,34 +157,39 @@ describe('validateOcrAssemblySteps', () => {
       ],
     })
     expect(steps.map((step) => step.text)).toEqual([
-      'Erster Schritt.',
       'Zweiter Schritt.',
+      'Erster Schritt.',
       'Dritter Schritt.',
     ])
+    // Quellzeile 2 liegt vor 5: Der Widerspruch wird sichtbar markiert,
+    // aber nicht stillschweigend umsortiert.
+    expect(steps[1]?.uncertain).toBe(true)
+    expect(steps[0]?.uncertain).toBe(false)
+    expect(steps[2]?.uncertain).toBe(false)
   })
 
-  it('ordnet einen Rückführ-Schritt nur bei gestützter Quellreihenfolge hinter die Soßenverarbeitung', () => {
+  it('zieht einen Rückführ-Schritt nicht anhand falscher Quellzeilen nach vorn', () => {
+    // Realdaten-Fall: Das Modell liefert die korrekte Reihenfolge (Fleisch
+    // zuletzt), verweist aber mit sourceLines auf die frühere Anbrat-Zeile.
     const steps = validateOcrAssemblySteps({
       steps: [
-        {
-          text: 'Das Fleisch wieder zur Soße geben.',
-          uncertain: true,
-          uncertainty: 'rekonstruiert',
-          sourceLines: [8],
-        },
-        { text: 'Die Soße anbraten.', sourceLines: [2] },
-        { text: 'Die Soße pürieren.', sourceLines: [5] },
-        { text: 'Den Joghurt einrühren.', sourceLines: [6] },
-        { text: 'Mit Kräutern bestreuen.', sourceLines: [7] },
+        { text: 'Die Hähnchenbrust scharf anbraten und herausnehmen.', sourceLines: [6] },
+        { text: 'Ingwer und Zwiebel anbraten.', sourceLines: [8] },
+        { text: 'Die Soße pürieren.', sourceLines: [13] },
+        { text: 'Den Joghurt mit hinein pürieren.', sourceLines: [14] },
+        { text: 'Die Hähnchenbrust wieder zu der Soße geben.', sourceLines: [6] },
+        { text: 'Mit Pfefferminze bestreuen.', sourceLines: [16] },
       ],
     })
     expect(steps.map((step) => step.text)).toEqual([
-      'Die Soße anbraten.',
+      'Die Hähnchenbrust scharf anbraten und herausnehmen.',
+      'Ingwer und Zwiebel anbraten.',
       'Die Soße pürieren.',
-      'Den Joghurt einrühren.',
-      'Das Fleisch wieder zur Soße geben.',
-      'Mit Kräutern bestreuen.',
+      'Den Joghurt mit hinein pürieren.',
+      'Die Hähnchenbrust wieder zu der Soße geben.',
+      'Mit Pfefferminze bestreuen.',
     ])
+    expect(steps[4]?.uncertain).toBe(true)
   })
 
   it('lässt die Reihenfolge stehen, wenn die Quellzeilen die Umordnung nicht stützen', () => {
@@ -360,7 +367,7 @@ describe('validateOcrPolish', () => {
     expect(result.rejectedGroups).toBe(1)
   })
 
-  it('sortiert Schritte anhand der Quellzeilen und ignoriert Zusatzfelder', () => {
+  it('behält die Modellreihenfolge und ignoriert Zusatzfelder', () => {
     const result = validateOcrPolish(source(), {
       usageCheck: [{ ingredient: 'Mehl', step: 1 }],
       steps: [
@@ -369,8 +376,8 @@ describe('validateOcrPolish', () => {
       ],
     })
     expect(result.recipe.steps.map((step) => step.text)).toEqual([
-      'Erster Schritt.',
       'Zweiter Schritt.',
+      'Erster Schritt.',
     ])
     expect(result.appliedIngredientList).toBe(false)
   })
@@ -692,5 +699,121 @@ describe('applyOcrConsistencyChecks', () => {
       ]),
     )
     expect(applyOcrConsistencyChecks(changed).uncertainties).toHaveLength(1)
+  })
+})
+
+describe('applyOcrLanguageCorrections', () => {
+  const LABELS = ['Minze', 'Pfefferminze', 'Pfefferminzblätter', 'Ingwer', 'Tomate', 'Tomaten', 'Salz', 'Mehl']
+
+  const recipe = (): OcrRecipe =>
+    validateOcrRecipe({
+      recognized: true,
+      title: 'Testrezept',
+      ingredients: [
+        { group: 'Soße', quantity: '1', unit: 'TL', name: 'Pfefferminz' },
+        { group: 'Soße', quantity: '1', unit: 'TL', name: 'Pfefferminte' },
+        { group: 'Soße', quantity: '1', unit: 'EL', name: 'tandoori Sherwood- M.' },
+        { group: 'Soße', quantity: '1', unit: 'EL', name: 'tandoori Sherwood-Mischung' },
+        { group: 'Soße', quantity: '1', unit: 'TL', name: 'Chilie' },
+      ],
+      steps: [
+        { text: 'Mit Pfefferminz bestreuen.' },
+        { text: 'Pfefferminte darüberstreuen.' },
+        { text: 'Die Hähnchenbrust mit Pfefferminz würzen.' },
+      ],
+    })
+
+  it('korrigiert eindeutige Schreibfehler anhand etablierter Schreibweisen', () => {
+    const result = applyOcrLanguageCorrections(recipe(), '', LABELS)
+    const names = result.recipe.ingredients.map((ingredient) => ingredient.name)
+    expect(names[0]).toBe('Pfefferminze')
+    expect(names[1]).toBe('Pfefferminze')
+    expect(result.corrections).toContainEqual({ from: 'Pfefferminz', to: 'Pfefferminze' })
+    expect(result.corrections).toContainEqual({ from: 'Pfefferminte', to: 'Pfefferminze' })
+  })
+
+  it('korrigiert Schreibfehler in Schritten und Transkription, aber keine fremden Wörter', () => {
+    const result = applyOcrLanguageCorrections(
+      recipe(),
+      '1 TL Pfefferminz dünberstreuen\nAlles gut verrühren.',
+      LABELS,
+    )
+    expect(result.recipe.steps[0]?.text).toBe('Mit Pfefferminze bestreuen.')
+    expect(result.recipe.steps[1]?.text).toBe('Pfefferminze darüberstreuen.')
+    expect(result.recipe.steps[2]?.text).toBe('Die Hähnchenbrust mit Pfefferminze würzen.')
+    expect(result.transcription).toContain('Pfefferminze')
+    expect(result.transcription).toContain('verrühren')
+  })
+
+  it('löst eindeutige Namensabkürzungen auf und lässt Mengen unverändert', () => {
+    const result = applyOcrLanguageCorrections(recipe(), '', LABELS)
+    expect(result.recipe.ingredients[2]?.name).toBe('tandoori Sherwood-Mischung')
+    expect(result.recipe.ingredients[0]?.quantity).toBe('1')
+    expect(result.recipe.ingredients[0]?.unit).toBe('TL')
+  })
+
+  it('rät bei mehrdeutigen Schreibweisen nicht und markiert sie als unsicher', () => {
+    const ambiguous = applyOcrLanguageCorrections(
+      validateOcrRecipe({
+        recognized: true,
+        title: 'Test',
+        ingredients: [{ name: 'Tomate' }, { name: 'Tomete' }],
+        steps: [{ text: 'Alles verrühren.' }],
+      }),
+      '',
+      ['Tomate', 'Tomaten', 'Tomete'],
+    )
+    expect(ambiguous.recipe.ingredients[1]?.name).toBe('Tomete')
+  })
+
+  it('zieht nur den zweiten Teil eines getrennt geschriebenen Kompositums zusammen', () => {
+    const split = applyOcrLanguageCorrections(
+      validateOcrRecipe({
+        recognized: true,
+        title: 'Test',
+        ingredients: [
+          { name: 'Pomito Tomaten (frucht fleisch)' },
+          { name: 'Tomaten (gehackt)' },
+          { name: 'Petersilie (glatt)' },
+        ],
+        steps: [{ text: 'Mit Pomito Tomaten (frucht fleisch) ablöschen.' }],
+      }),
+      '',
+      LABELS,
+    )
+    expect(split.recipe.ingredients[0]!.name).toBe('Pomito Tomatenfruchtfleisch')
+    expect(split.recipe.ingredients[1]!.name).toBe('Tomaten (gehackt)')
+    expect(split.recipe.ingredients[2]!.name).toBe('Petersilie (glatt)')
+    expect(split.recipe.steps[0]!.text).toBe('Mit Pomito Tomatenfruchtfleisch ablöschen.')
+  })
+
+  it('ist idempotent', () => {
+    const once = applyOcrLanguageCorrections(recipe(), 'Pfefferminz', LABELS)
+    const twice = applyOcrLanguageCorrections(once.recipe, once.transcription, LABELS)
+    expect(twice.corrections).toHaveLength(0)
+    expect(twice.recipe.ingredients.map((ingredient) => ingredient.name)).toEqual(
+      once.recipe.ingredients.map((ingredient) => ingredient.name),
+    )
+  })
+})
+
+describe('mergeDuplicateTopLevelArrays', () => {
+  it('führt wiederholte Listen-Schlüssel zusammen statt Daten zu verlieren', () => {
+    const source =
+      '{"ingredients":[{"name":"Mehl"}],"steps":[{"text":"A"}],"steps":[{"text":"B"}]}'
+    expect(mergeDuplicateTopLevelArrays(source)).toBe(
+      '{"ingredients":[{"name":"Mehl"}],"steps":[{"text":"A"},{"text":"B"}]}',
+    )
+    expect(extractJsonObject(source)).toEqual({
+      ingredients: [{ name: 'Mehl' }],
+      steps: [{ text: 'A' }, { text: 'B' }],
+    })
+  })
+
+  it('lässt gültige Objekte unverändert und repariert keine fremden Typen', () => {
+    expect(mergeDuplicateTopLevelArrays('{"steps":[{"text":"A"}]}')).toBeNull()
+    expect(
+      mergeDuplicateTopLevelArrays('{"steps":[{"text":"A"}],"steps":{"text":"B"}}'),
+    ).toBeNull()
   })
 })

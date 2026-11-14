@@ -411,6 +411,159 @@ describe('Pages Function /api/recipe-ocr', () => {
     expect(payload.usage).toEqual({ promptTokens: 1434, completionTokens: 597 })
   })
 
+  it('korrigiert OCR-Schreibfehler über den Zutatenkatalog – vor und nach dem Modell', async () => {
+    const recognizedRecipe = {
+      ...recipeJson,
+      transcription: 'Soße\n1 TL Pfefferminz darüberstreuen',
+      ingredients: [
+        {
+          group: 'Soße',
+          quantity: '1',
+          unit: 'TL',
+          name: 'Pfefferminz',
+          purchaseNote: '',
+          preparationNote: '',
+          uncertain: false,
+          uncertainty: '',
+        },
+      ],
+    }
+    const recognized = { response: JSON.stringify(recognizedRecipe) }
+    const assembled = {
+      response: JSON.stringify({
+        ingredients: [
+          { index: 1, name: 'Pfefferminz', group: 'Soße', uncertain: false, uncertainty: '' },
+        ],
+        steps: [
+          {
+            text: 'Mit Pfefferminte bestreuen.',
+            uncertain: false,
+            uncertainty: '',
+            sourceLines: [2],
+          },
+        ],
+      }),
+    }
+    let call = 0
+    const run = vi.fn(async (_model: string, _input: unknown) => {
+      call += 1
+      return call === 1 ? recognized : assembled
+    })
+
+    const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
+    expect(response.status, await response.clone().text()).toBe(200)
+
+    // Das Modell sieht schon die korrigierte Zutatenliste/Transkription.
+    const secondInput = run.mock.calls[1]![1] as {
+      messages: Array<{ role: string; content: unknown }>
+    }
+    expect(secondInput.messages[1]!.content as string).toContain('Pfefferminze')
+
+    const payload = (await response.json()) as {
+      recipe: {
+        ingredients: Array<{ name: string }>
+        steps: Array<{ text: string }>
+      }
+    }
+    expect(payload.recipe.ingredients[0]!.name).toBe('Pfefferminze')
+    expect(payload.recipe.steps[0]!.text).toBe('Mit Pfefferminze bestreuen.')
+  })
+
+  it('führt wiederholte steps-Schlüssel zusammen und akzeptiert boolesche Unsicherheit', async () => {
+    const recognizedRecipe = {
+      ...recipeJson,
+      transcription: 'Teig\n250 g Mehl\nTeig kneten.\nTeig backen.',
+    }
+    const recognized = { response: JSON.stringify(recognizedRecipe) }
+    const assemblyText =
+      '{"ingredients":[{"index":1,"name":"Mehl","group":"","uncertain":false,"uncertainty":""}],' +
+      '"steps":[{"text":"Den Teig kneten.","uncertain":false,"uncertainty":"","sourceLines":[3]}],' +
+      '"steps":[{"text":"Den Teig backen.","uncertain":true,"uncertainty":true,"sourceLines":[4]}]}'
+    const assembled = { response: assemblyText }
+    let call = 0
+    const run = vi.fn(async (_model: string, _input: unknown) => {
+      call += 1
+      return call === 1 ? recognized : assembled
+    })
+
+    const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
+    expect(response.status, await response.clone().text()).toBe(200)
+    const payload = (await response.json()) as {
+      recipe: { steps: Array<{ text: string; uncertain: boolean; uncertainty: string }> }
+    }
+    expect(payload.recipe.steps.map((step) => step.text)).toEqual([
+      'Den Teig kneten.',
+      'Den Teig backen.',
+    ])
+    expect(payload.recipe.steps[1]).toEqual({
+      text: 'Den Teig backen.',
+      uncertain: true,
+      uncertainty: '',
+    })
+  })
+
+  it('behält die Modellreihenfolge, wenn sourceLines einen Rückführ-Schritt nach vorn ziehen', async () => {
+    const recognizedRecipe = {
+      ...recipeJson,
+      transcription: 'Fleisch\nHähnchenbrust anbraten.\nSoße anbraten.\nSoße pürieren.\nJoghurt einrühren.\nFleisch wieder zugeben.\nPfefferminze darüberstreuen.',
+    }
+    const recognized = { response: JSON.stringify(recognizedRecipe) }
+    const assembled = {
+      response: JSON.stringify({
+        ingredients: [
+          { index: 1, name: 'Mehl', group: '', uncertain: false, uncertainty: '' },
+        ],
+        steps: [
+          {
+            text: 'Die Hähnchenbrust anbraten und herausnehmen.',
+            uncertain: false,
+            uncertainty: '',
+            sourceLines: [2],
+          },
+          { text: 'Die Soße anbraten.', uncertain: false, uncertainty: '', sourceLines: [3] },
+          { text: 'Die Soße pürieren.', uncertain: false, uncertainty: '', sourceLines: [4] },
+          {
+            text: 'Den Joghurt einrühren und mitpürieren.',
+            uncertain: false,
+            uncertainty: '',
+            sourceLines: [5],
+          },
+          {
+            text: 'Die Hähnchenbrust wieder zur Soße geben.',
+            uncertain: false,
+            uncertainty: '',
+            // Falsche Quellzeile aus dem echten Test: zeigt auf das Anbraten.
+            sourceLines: [2],
+          },
+          {
+            text: 'Mit Pfefferminze bestreuen.',
+            uncertain: false,
+            uncertainty: '',
+            sourceLines: [7],
+          },
+        ],
+      }),
+    }
+    let call = 0
+    const run = vi.fn(async (_model: string, _input: unknown) => {
+      call += 1
+      return call === 1 ? recognized : assembled
+    })
+
+    const response = await handleRecipeOcr(validRequest(), envWith(run as AiBinding['run']), deps())
+    expect(response.status, await response.clone().text()).toBe(200)
+    const payload = (await response.json()) as {
+      recipe: { steps: Array<{ text: string; uncertain: boolean }> }
+    }
+    const texts = payload.recipe.steps.map((step) => step.text)
+    const sauceIndex = texts.findIndex((text) => text.includes('Soße pürieren'))
+    const yoghurtIndex = texts.findIndex((text) => text.includes('Joghurt'))
+    const reAddIndex = texts.findIndex((text) => text.includes('wieder zur Soße'))
+    expect(reAddIndex).toBeGreaterThan(sauceIndex)
+    expect(reAddIndex).toBeGreaterThan(yoghurtIndex)
+    expect(payload.recipe.steps[reAddIndex]!.uncertain).toBe(true)
+  })
+
   it('meldet eine fehlgeschlagene Aufbereitung als Fehler statt die Roherkennung auszugeben', async () => {
     const recipeWithTranscription = {
       ...recipeJson,

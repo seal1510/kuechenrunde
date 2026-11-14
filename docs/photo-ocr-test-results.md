@@ -719,3 +719,169 @@ Läufe ausgeführt (Erkennung + Aufbereitung, echte Workers-AI-Antworten):
 - Keine zusätzlichen Modellaufrufe, keine Prompt-Experimente; Gemma 4 und die
   zwei Stufen bleiben unverändert. Kosten unverändert ca. 120–135 Neuronen pro
   Rezept.
+
+## 14. Qualitätsrunde 2026-11-14: Ursachen der drei Tandoori-Fehler und Behebung
+
+Gemeldet wurden drei Fehler im echten iPhone-Test mit dem Tandoori-Foto:
+„Pfefferminte“ statt „Pfefferminze“, die Hähnchenbrust-Rückführung vor der
+Soßenzubereitung und „Das Gericht mit Pfefferminte anrichten“ statt
+„Pfefferminze darüberstreuen“. Alle drei wurden zunächst mit dem
+**ausgelieferten Stand** (`86a6f05`) auf demselben Originalfoto reproduziert,
+danach modellseitig und deterministisch behoben.
+
+### 14.1 Reproduktion mit dem ausgelieferten Stand
+
+Ablauf: produktionsgleiche Bildaufbereitung (EXIF-korrekt, lange Kante 2048 px,
+JPEG), echter Erkennungsaufruf mit Gemma 4, echter Aufbereitungsaufruf mit dem
+damaligen Prompt, danach die damaligen Parser-Funktionen (aus `HEAD`).
+Ergebnis eines Laufs (Bildvariante mit etwas anderer JPEG-Kodierung):
+
+```text
+Zutaten: … | Joghurt | Pfefferminte | Basmatireis
+1. Die Hähnchenbrust mit der tandoori Sherwood-Mischung, Salz und Chilis marinieren.
+2. Die Hähnchenbrust scharf anbraten oder alternativ grillen und anschließend
+   herausnehmen (mit Deckel abgedeckt).
+3. Die Hähnchenbrust wieder zur Soße geben.
+4. Ingwer, Zwiebel, tandoori Sherwood-Mischung und hot curry paste Sherwood. anbraten.
+5. Mit Pomito Tomatenfruchtfleisch ablöschen und 10 Minuten kochen.
+6. Die Masse im Pürierglas pürieren.
+7. Den Joghurt mit hinein pürieren.
+8. Das Curry mit Basmatireis anrichten und mit Pfefferminte bestreuen.
+```
+
+Damit sind alle drei gemeldeten Fehler in **einem** Lauf enthalten.
+
+### 14.2 Ursachen – Modellfehler und Parserfehler getrennt
+
+| Beobachtung | Entstehung | Beleg |
+| --- | --- | --- |
+| „Pfefferminte“ | **Erkennung (Stufe 1):** Das Vision-Modell liest das handschriftliche „Pfefferminze“ je nach JPEG-Kodierung als „Pfefferminz“, „Pfefferminte“ oder „Pfeffermine“. Die Aufbereitung übernimmt diese Schreibweise; der Katalog wurde nie befragt. | 7 Läufe auf demselben Foto: 6× „Pfefferminz“, 1× „Pfefferminzblätter“; andere Encoder-Varianten: „Pfefferminte“, „Pfeffermine“. |
+| Fehlerhafte Prüfung | **Parser/Guard:** `isSafeIngredientCleanup` akzeptiert 1–2 Buchstabenänderungen (Ähnlichkeit ≥ 72 %). „Pfefferminz → Pfefferminte“ galt damit als „sichere“ Bereinigung; es gab keine Wörterbuchprüfung. | Unit-Test: `isSafeIngredientCleanup('Pfefferminze', 'Pfefferminte') === true`. |
+| Fleisch vor Soße | **Zuerst Modellfehler in `sourceLines`, dann Parserfehler:** Das Modell gab die Schritte in korrekter Reihenfolge aus, verwies beim Rückführ-Schritt aber auf die frühere „anbraten/rausnehmen“-Zeile. Der Parser sortierte daraufhin alle Schritte nach `sourceLines` und zog den Rückführ-Schritt vor die Soße. | Reallauf: Modellposition 7, `sourceLines: [6]`; alter Parser machte daraus Position 3. |
+| „anrichten“ statt „darüberstreuen“ | **Erkennung + Prompt:** Die unterste Handschriftzeile „+ Fleisch daruntermischen“ wird als „Reich damit anrichten“/„Reich damit vermischen“ gelesen, „darüberstreuen“ als „dünberstreuen“/„dünsterien“. Der alte Prompt erlaubte das Zusammenfassen von Zeilen und freie sprachliche Umformung; das Modell verband die beiden verstümmelten Zeilen mit der Beilage zu „Das Curry mit Basmatireis anrichten und mit Pfefferminte bestreuen.“ | Erkennungstranskription und Aufbereitungsrohantwort im Lauf oben; Wiederholung mit q70-/Bicubic-Varianten. |
+
+**Fazit:** Fehler 1 ist ein reiner Erkennungsfehler, den die zweite Stufe nicht
+auffing. Fehler 2 ist ein Modellfehler bei `sourceLines`, der erst durch die
+nachträgliche Sortierung zum falschen Ablauf wurde. Fehler 3 ist eine
+Kombination aus Erkennungsfehler und zu freizügiger Umformulierung. Die
+bisherigen „Plausibilitätsgates“ prüften nur Struktur (leer/doppelt/zu lang)
+und konnten keine dieser drei Klassen erkennen.
+
+### 14.3 Eignung von Gemma 4 für die zweite Stufe
+
+Vergleich auf **derselben** Transkription und Zutatenliste (Tandoori, 13
+Zutaten), jeweils ein Aufruf, neuer Aufbereitungs-Prompt, Temperatur 0:
+
+| Modell | Gültiges JSON | Rechtschreibung/Produkte | Reihenfolge & Handlungstreue | Latenz | Neuronen |
+| --- | --- | --- | --- | --- | --- |
+| `@cf/google/gemma-4-26b-a4b-it` (Ist) | ja | übernimmt Eingabe Schreibweise; deterministische Korrektur fängt Fehler ab | Rückführ-Schritt korrekt nach Joghurt; „darüberstreuen“ bleibt erhalten | 4–15 s | **34–40** |
+| `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | ja | korrigiert nichts, normalisiert Bindestriche | Reihenfolge korrekt, aber Grammatikfehler („Die Pfefferminz darüberstreuen“) | 22–29 s | 218–250 |
+| `@cf/mistralai/mistral-small-3.1-24b-instruct` | ja | ersetzte Marken („Tandoori-Mischung“ ohne „Sherwood“) | verschmolz Rückführung und Bestreuen falsch | 18–20 s | 112–125 |
+| `@cf/zai-org/glm-4.7-flash` | nein | — | leer/abgeschnitten (`finish_reason: length`) bei 2.048 und 4.096 Ausgabe-Tokens | 38–86 s | 87–162 |
+| `@cf/qwen/qwen3.8-27b` | nein | — | leer/abgeschnitten (`finish_reason: length`) | 76 s | 686 |
+
+**Ergebnis:** Gemma 4 ist für die zweite Stufe ausreichend, sofern (a) der
+Prompt die Handlungstreue erzwingt und (b) offensichtliche Schreibfehler
+deterministisch über den Zutatenkatalog korrigiert werden. Die Alternativen
+waren nicht besser und deutlich teurer; GLM/Qwen waren in dieser
+REST-Konfiguration nicht nutzbar. Kein kostenpflichtiges Modell wurde
+aktiviert.
+
+### 14.4 Umgesetzte Korrekturen
+
+1. **Deterministische Sprachkorrektur** (`applyOcrLanguageCorrections` in
+   `src/import/photo-ocr.ts`, Wörterbuch aus
+   `src/domain/ingredientSpelling.ts`):
+   - läuft vor und nach dem Aufbereitungsaufruf,
+   - korrigiert eindeutige OCR-Fehlschreibweisen auf Katalogschreibweisen
+     („Pfefferminz“/„Pfefferminte“ → „Pfefferminze“),
+   - zieht zweiteilige kleingeschriebene Klammerzusätze zusammen
+     („Pomito Tomaten (frucht fleisch)“ → „Pomito Tomatenfruchtfleisch“),
+   - löst eindeutige Namensabkürzungen auf („M.“ → „Mischung“),
+   - gleicht Schreibweisen in den Schritttexten an die Zutatenliste an,
+   - rät nicht bei Mehrdeutigkeit, sondern markiert unsicher; Marken bleiben
+     unverändert; idempotent.
+2. **Reihenfolge:** Der Parser sortiert nicht mehr nach `sourceLines`. Die
+   Modellreihenfolge bleibt erhalten; widersprüchliche Quellzeilen werden am
+   Schritt als unsicher markiert. Die frühere Sonderregel für Rückführ-Schritte
+   entfällt ersatzlos.
+3. **Aufbereitungs-Prompt:** eine Handlungszeile = ein Schritt; Verb der
+   Vorlage erhalten; unklare Zeilen nicht durch plausible andere Handlungen
+   ersetzen und nicht doppelt ausgeben; vollständige Infinitivsätze mit
+   Bezugsobjekt; Rückführ-Schritt nur begründet und unsicher markiert.
+4. **Parser-Robustheit:** wiederholte Top-Level-Listen-Schlüssel (`"steps"`)
+   werden zusammengeführt (verhinderte ein stilles Ein-Schritt-Rezept);
+   boolesche `uncertainty`-Werte werden toleriert.
+
+### 14.5 Verifikation mit echten Modellläufen
+
+Qualitätsabnahme über den echten Handler (`server/photo-ocr-handler-live.test.ts`,
+privates Foto + lokale Grundwahrheit), finaler Code:
+
+| Kriterium | Ergebnis |
+| --- | --- |
+| Zutaten | 13, inkl. Hähnchenbrust, Ingwer, Zwiebel, Joghurt, Pfefferminze, Basmatireis |
+| „Pfefferminze“ | korrekt in Zutatenliste **und** Schritt |
+| Soße vor Fleisch | Soße anbraten/ablöschen/kochen/pürieren vor der Rückführung |
+| Joghurt vor Fleisch | Joghurt-Schritt vor dem Rückführ-Schritt |
+| Darüberstreuen | letzter Schritt „Die Pfefferminze darüberstreuen.“ |
+| Erfundene Handlung | keine „anrichten“-Erfindung mehr |
+| Kosten | 99,1–102,8 Neuronen pro Rezept (Erkennung + Aufbereitung) |
+
+Sechs vollständige Läufe mit dem finalen Code lieferten diese Kriterien; fünf
+davon wurden automatisch geprüft und bestanden, ein Lauf überschritt wegen
+einer langsamen Modellantwort das Test-Timeout (Rezeptinhalt dennoch korrekt).
+
+**Gegenprobe an anderen Rezepten** (synthetische Fixtures, gleicher Handler):
+
+- gedrucktes Rezept (Kürbis-Kokos-Suppe): 8 Zutaten, 7 Schritte, sauberes
+  Deutsch, 86,6 Neuronen.
+- handschriftliches Rezept (Gedeckter Apfelkuchen): 8 Zutaten, 7 Schritte,
+  84,4 Neuronen.
+- schwierige Handschrift (Mohn-Zitronen-Kuchen): 8 Zutaten, 5 Schritte,
+  80,1 Neuronen.
+
+**Beispiel-Ergebnis Tandoori (Lauf 2/2 der letzten Abnahme):**
+
+```text
+Zutaten: 600 g Hähnchenbrust · 2 EL tandoori Sherwood-Mischung · 1 TL Salz ·
+2 Chilis · 5 cm Ingwer · 1 Zwiebel · 2 Tüten Pomito Tomatenfruchtfleisch ·
+1 EL tandoori Sherwood-Mischung · 2 EL hot curry paste Sherwood. ·
+1 1/2 TL Salz · 250 ml Joghurt · 1 TL Pfefferminze · Basmatireis
+
+1. Die Hähnchenbrust mit der tandoori Sherwood-Mischung, dem Salz und den
+   Chili marinieren.
+2. Die Hähnchenbrust scharf anbraten und rausnehmen (Deckel drauf).
+3. Die Ingwer, die Zwiebel, die tandoori Sherwood-Mischung und die hot curry
+   paste Sherwood. anbraten.
+4. Mit Pomito Tomatenfruchtfleisch ablöschen.
+5. Die Soße 10 Minuten kochen.
+6. Die Soße im Pürierglas pürieren.
+7. Den Joghurt mit hinein pürieren.
+8. Die Hähnchenbrust unter die Soße untermischen. (unsicher)
+9. Die Pfefferminze darüberstreuen.
+```
+
+Der Rückführ-Schritt (8) ist absichtlich als unsicher markiert, weil er aus
+dem Ablauf rekonstruiert wurde; die Erkennung liest die entsprechende
+Handschriftzeile weiterhin gelegentlich falsch.
+
+**Restgrenzen:** Die Erkennung (Stufe 1) bleibt unverändert und kann
+Handschriftwörter weiterhin falsch lesen (im Test z. B. „Fleisch
+daruntermischen“). Solche Stellen werden nicht durch Raten „korrigiert“,
+sondern – wie der Rückführ-Schritt – als unsicher markiert. Einzelne
+Grammatikfehler des Textmodells (z. B. „Die Ingwer … anbraten“) bleiben
+möglich und sind im Editor korrigierbar.
+
+### 14.6 Kosten und Tests
+
+- Genau zwei Modellaufrufe pro Import; gemessen **99–103 Neuronen** pro
+  Tandoori-Rezept und **80–87 Neuronen** bei den Gegenproben. Im Free-Tier
+  (10.000 Neuronen/Tag) sind das rund **95–100 Rezepte pro Tag**; bei Workers
+  Paid entspricht das ca. **0,0011 US-Dollar pro Rezept**.
+- `pnpm test`: 1400 Tests bestanden (16 übersprungen, 143 Dateien).
+- `pnpm typecheck` und `pnpm typecheck:worker`: erfolgreich.
+- `pnpm build`: Vite-Build erfolgreich (`✓ built`); die drei Typecheck-/Build-
+  Schritte laufen in der lokalen Umgebung wegen eines offenen Handles des
+  Build-Prozesses gelegentlich nicht von selbst zu Ende, der Build selbst wird
+  in unter einer Sekunde abgeschlossen.

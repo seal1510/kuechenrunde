@@ -357,29 +357,23 @@ export function buildOcrAssemblyPayload(
 }
 
 /** Prompt des zweiten Aufrufs (Zubereitungsschritte aus Transkription + Zutaten). */
-export const OCR_ASSEMBLY_SYSTEM_PROMPT = `Du bist Lektor und Küchenprofi. Du bekommst die originalgetreue, zeilenweise Transkription einer handschriftlichen Rezeptseite ("transcriptionLines", Nummer 1 = erste Zeile) und die daraus erkannte Zutatenliste mit Index, Gruppe, Menge, Einheit und Name ("ingredients"). Beides sind die einzigen Quellen. Erfinde keine Zutaten, Mengen, Temperaturen, Garzeiten, Produktnamen oder Arbeitsschritte.
+export const OCR_ASSEMBLY_SYSTEM_PROMPT = `Du bist Lektor für deutsche Familienrezepte. Du bekommst die originalgetreue, zeilenweise Transkription einer handschriftlichen Rezeptseite ("transcriptionLines", Nummer 1 = erste Zeile) und die daraus erkannte, bereits sprachlich korrigierte Zutatenliste ("ingredients"). Beides sind die einzigen Quellen. Erfinde keine Zutaten, Mengen, Temperaturen, Garzeiten, Produktnamen oder Arbeitsschritte.
 
-Aufgabe: Bereinige die Zutatenliste sprachlich, formuliere die Zubereitung verständlich und prüfe das Rezept als Ganzes auf Plausibilität. Mengen und Einheiten bleiben exakt wie in der Eingabe (sie stehen nicht in der Ausgabe).
-
-Zutatenliste (Feld "ingredients"):
-1. Gib ALLE Zutaten genau einmal mit ihrem "index" (1-basiert) aus: bereinigter "name", korrigierte "group", "uncertain"/"uncertainty". Keine weglassen, ergänzen oder zusammenführen.
-2. Korrigiere Rechtschreibung, Groß-/Kleinschreibung, Getrennt-/Zusammenschreibung, Bindestriche und Leerzeichen. Falsch getrennte Komposita zusammenziehen ("frucht fleisch" → "Fruchtfleisch"). Ein Klammerzusatz, der nur die zweite Hälfte desselben Kompositums ist, wird ohne Klammern direkt angehängt ("Tomaten (frucht fleisch)" → "Tomatenfruchtfleisch"); echte Zusatzinformationen in Klammern bleiben erhalten.
-3. Offensichtliche Lesefehler bei Lebensmittel-/Küchenbegriffen nur korrigieren, wenn die gemeinte Zutat eindeutig ist; sonst Original behalten und uncertain=true setzen. Abkürzungen nur auflösen, wenn die Langform im Rezept vorkommt (z. B. "M." nach "Mischung"). Keine anderen Zutaten, keine geratenen Marken oder Produktnamen.
-4. Gruppen: Leite sie ausschließlich aus den sichtbaren Überschriften und der Reihenfolge der Transkription ab; die Eingabegruppen sind nur Hinweise. Eine Gruppe, die nicht als eigene Überschrift in "transcriptionLines" vorkommt, darf in der Ausgabe nicht vorkommen: Ordne solche Zutaten der letzten sichtbaren Überschrift davor zu (z. B. ein Gewürz/Topping aus dem Soßenblock, das fälschlich in einer erfundenen Gruppe steht, gehört zur Soße). Eine Zutat vor der nächsten Überschrift gehört zur vorherigen Gruppe. Im Zweifel unsicher markieren.
+Zutaten (Feld "ingredients"):
+1. Gib ALLE Zutaten genau einmal mit ihrem "index" aus: "name", "group", "uncertain", "uncertainty". Keine weglassen, ergänzen, zusammenführen oder ersetzen.
+2. Übernimm den Namen wörtlich aus der Eingabe. Korrigiere nur offensichtliche Rechtschreib-, Getrennt-/Zusammenschreib- und Leerzeichenfehler; löse eine Abkürzung nur auf, wenn ihre Langform in einer anderen Zutat der Eingabe vorkommt. Erfinde keine Marken und ersetze kein Produkt durch ein anderes. Falsch getrennte Komposita zusammenziehen ("frucht fleisch" → "Fruchtfleisch"); ein Klammerzusatz, der nur den zweiten Teil desselben Kompositums ausschreibt, wird direkt angehängt ("Pomito Tomaten (frucht fleisch)" → "Pomito Tomatenfruchtfleisch") – auch wenn er in der Eingabe in Klammern steht.
+3. Gruppen nur aus sichtbaren Überschriften der Transkription ableiten; eine Gruppe, die dort nicht als Überschrift steht, ist ungültig. Eine Zutat ohne eigene Gruppenangabe gehört zur letzten sichtbaren Überschrift davor.
 
 Zubereitung (Feld "steps"):
-5. Ordne jede Handlungszeile genau einem Schritt zu, in der Reihenfolge des Originals, und gib "sourceLines" an (Nummern der Transkriptionszeilen; bei einem ergänzten Schritt die Nummer der unleserlichen Zeile, nicht die einer früheren Handlung). Nichts weglassen.
-6. Jeder Schritt ist ein vollständiger, grammatisch korrekter deutscher Satz mit Objekt und Handlung, in verständlicher Kochsprache. Keine Stichwort-, Ein-Wort- oder Fragmentschritte. Nenne Zutaten mit den Namen aus der bereinigten Zutatenliste.
-7. Sprachliche Korrektur ist erwünscht, solange der Inhalt gleich bleibt: falsch getrennte Wörter, Umlaute, Groß-/Kleinschreibung, offensichtlich falsche Küchenbegriffe (z. B. "mit Tomaten löschen" → "mit Tomaten ablöschen", wenn eine Soße abgelöscht wird), unnötige Wiederholungen, sinnvolle Interpunktion.
-8. Prüfe das Rezept als Ganzes kulinarisch:
-   - Passen Handlungen und Zutaten zusammen, und wird jede Zutat sinnvoll verwendet?
-   - Wird eine angebratene oder beiseitegestellte Zutat später korrekt wieder hinzugefügt? Fehlt diese Handlung, ergänze sie nur, wenn sie aus dem Ablauf zwingend folgt, und markiere sie uncertain=true. Eine Zutat mit "herausnehmen"/"beiseitelegen" MUSS später zurück ins Gericht. Ein solcher Rückführ-Schritt steht am Ende der Hauptzubereitung: nach allen Schritten, die Soße, Flüssigkeit oder Joghurt verarbeiten, und vor dem letzten Bestreuen/Servieren; nicht direkt hinter dem Anbraten. Seine "sourceLines" zeigen auf die unleserliche Zeile, nicht auf eine frühere Handlung derselben Zutat.
-   - Wird nichts fälschlich püriert, gekocht oder gebraten, was nur herausgenommen, garniert oder als Beilage serviert wird? Ein Fleischstück, das herausgenommen wurde, darf nicht mit der Soße püriert werden.
-   - Hauptgericht, Soße, Garnitur und Beilage richtig zuordnen; Alternativen ("alternativ: …") im passenden Schritt als Alternative nennen.
-   - Offensichtlich zusammengehörige kurze Notizen sinnvoll verbinden. Die Anzahl der Schritte ergibt sich aus dem Rezept, kein festes Ziel.
-9. "anrichten"/"servieren" nur, wenn die Transkription es klar verlangt. Eine Beilage wird nicht untergemischt. Erfinde keine zusätzlichen Handlungen (z. B. Abschmecken, Würzen, Garnieren), wenn sie nicht in der Transkription stehen. Unleserliche Stellen nicht durch "passend" klingende Handlungen ersetzen: wahrscheinlichste Lesart übernehmen und uncertain=true setzen; Unsicherheit in "uncertainty", nicht in den Schritttext.
-10. Schreibe jeden JSON-Schlüssel und jeden Schritt genau einmal, keine Wiederholungen. Abschlussprüfung: alle Zutaten genau einmal, alle verwendet oder als Beilage/Garnitur begründet, Reihenfolge stimmt, keine Widersprüche, Mengen unverändert, Sätze korrekt.
-11. Antworte ausschließlich mit einem JSON-Objekt nach diesem Schema, ohne Markdown-Zäune und ohne Erklärung:
+4. Jede Handlungszeile der Transkription (Zeilen mit "+", "→", einem Tätigkeitswort oder einer Kochanweisung) wird genau EIN Schritt, in der Reihenfolge der Transkription. Fasse zwei verschiedene Handlungszeilen nicht zusammen und lasse keine weg. Eine unklare Zeile, die erkennbar nur eine bereits formulierte Handlung wiederholt, gibst du nicht zusätzlich aus. Eine Zeile, die keine erkennbare Handlung beschreibt (z. B. "Reich damit anrichten"), übernimmst du nicht als eigenen Schritt, sondern ordnest sie der nächstliegenden Handlung zu und markierst diese mit "uncertain": true.
+5. Behalte die Handlung der Zeile inhaltlich bei und ersetze das Verb nicht durch ein anderes oder allgemeineres Verb. "darüberstreuen" bleibt "darüberstreuen" bzw. "bestreuen", "untermischen" bleibt "untermischen", "pürieren" bleibt "pürieren". "anrichten" und "servieren" nur, wenn die Transkription das klar verlangt.
+6. Formuliere jeden Schritt als vollständigen deutschen Satz im Infinitivstil ("Die Hähnchenbrust … marinieren."). Ergänze nur das Objekt bzw. den Bezug, der sich zwingend aus Zutatenliste und Kontext ergibt. Keine zusätzlichen Handlungen (kein Abschmecken, Würzen, Garnieren, Anrichten). Ein Schritt darf nicht nur aus Zeit-, Mengen- oder Ortsangaben bestehen: Ergänze das Bezugsobjekt aus dem vorherigen Schritt ("10 Minuten kochen" → "Die Soße 10 Minuten kochen.", "Im Pürierglas pürieren." → "Die Soße im Pürierglas pürieren.").
+7. Unleserliche oder mehrdeutige Wörter: Übernimm die wahrscheinlichste Lesart, markiere den Schritt mit "uncertain": true und beschreibe die Unklarheit kurz in "uncertainty". Ersetze eine unklare Handlung nicht durch eine plausibel klingende andere Handlung und fasse sie nicht mit einer anderen Zeile zusammen. Erkennbar falsch gelesene Küchenwörter und Küchengeräte korrigierst du, wenn die gemeinte Handlung eindeutig ist ("dünberstreuen" → "darüberstreuen", "löschen" in einer Soße → "ablöschen", "Pünerglas"/"Punerglas" → "Pürierglas").
+8. Wurde eine Zutat herausgenommen oder beiseitegestellt, muss sie später wieder ins Gericht. Fehlt diese Handlung in der Transkription, ergänze genau einen Rückführ-Schritt (z. B. "Die Hähnchenbrust wieder zur Soße geben und untermischen.") mit "uncertain": true und einer Quellzeile. Dieser Schritt steht nach allen Schritten, die Soße, Flüssigkeit oder Joghurt verarbeiten, und vor dem letzten Bestreuen/Servieren. Beschreibt eine unklare Zeile erkennbar genau diese Rückführung (z. B. "Reich damit …"), formulierst du daraus den Rückführ-Schritt und gibst die unklare Zeile nicht zusätzlich aus.
+9. Nenne Zutaten in den Schritten mit dem Namen aus der (bereinigten) Zutatenliste – keine Synonyme, keine anderen Schreibweisen. Eine Beilage wird nicht untergerührt.
+10. Gib zu jedem Schritt "sourceLines" an (Nummern der verwendeten Transkriptionszeilen). Die Reihenfolge der Schritte muss der Reihenfolge dieser Zeilen entsprechen.
+
+Schreibe jeden JSON-Schlüssel und jeden Schritt genau einmal. Antworte ausschließlich mit einem JSON-Objekt nach diesem Schema, ohne Markdown-Zäune und ohne Erklärung:
 {"ingredients":[{"index":1,"name":"","group":"","uncertain":false,"uncertainty":""}],"steps":[{"text":"","uncertain":false,"uncertainty":"","sourceLines":[1]}]}`
 
 export function buildOcrUserPrompt(pageCount: number): string {
@@ -388,6 +382,141 @@ export function buildOcrUserPrompt(pageCount: number): string {
     { length: count },
     (_, index) => `Seite ${index + 1}`,
   ).join(', ')}. Antworte nur mit dem JSON-Objekt.`
+}
+
+interface TopLevelJsonMember {
+  key: string
+  value: string
+}
+
+/** Index direkt hinter dem schließenden Anführungszeichen eines Strings. */
+function jsonStringEnd(source: string, start: number): number {
+  let index = start + 1
+  while (index < source.length) {
+    const character = source[index]
+    if (character === '\\') {
+      index += 2
+      continue
+    }
+    if (character === '"') return index + 1
+    index += 1
+  }
+  return -1
+}
+
+/** Index direkt hinter dem Ende eines JSON-Werts. */
+function jsonValueEnd(source: string, start: number): number {
+  const first = source[start]
+  if (first === undefined) return -1
+  if (first === '"') return jsonStringEnd(source, start)
+  if (first === '{' || first === '[') {
+    let depth = 0
+    let index = start
+    while (index < source.length) {
+      const character = source[index]
+      if (character === '"') {
+        const end = jsonStringEnd(source, index)
+        if (end < 0) return -1
+        index = end
+        continue
+      }
+      if (character === '{' || character === '[') depth += 1
+      if (character === '}' || character === ']') {
+        depth -= 1
+        if (depth === 0) return index + 1
+      }
+      index += 1
+    }
+    return -1
+  }
+  let index = start
+  while (
+    index < source.length &&
+    source[index] !== ',' &&
+    source[index] !== '}' &&
+    source[index] !== ']'
+  ) {
+    index += 1
+  }
+  return index
+}
+
+/** Liest die Mitglieder der obersten Objektebene; null bei unklarer Struktur. */
+function topLevelJsonMembers(source: string): TopLevelJsonMember[] | null {
+  if (!source.startsWith('{') || !source.endsWith('}')) return null
+  const members: TopLevelJsonMember[] = []
+  let index = 1
+  while (index < source.length - 1) {
+    while (index < source.length && /[\s,]/.test(source[index]!)) index += 1
+    if (index >= source.length - 1) break
+    if (source[index] !== '"') return null
+    const keyEnd = jsonStringEnd(source, index)
+    if (keyEnd < 0) return null
+    let key: unknown
+    try {
+      key = JSON.parse(source.slice(index, keyEnd)) as unknown
+    } catch {
+      return null
+    }
+    if (typeof key !== 'string') return null
+    index = keyEnd
+    while (index < source.length && /\s/.test(source[index]!)) index += 1
+    if (source[index] !== ':') return null
+    index += 1
+    while (index < source.length && /\s/.test(source[index]!)) index += 1
+    const end = jsonValueEnd(source, index)
+    if (end < 0) return null
+    members.push({ key, value: source.slice(index, end) })
+    index = end
+  }
+  return members.length > 0 ? members : null
+}
+
+/**
+ * Gemma 4 wiederholt gelegentlich einen Listen-Schlüssel (`"steps"`) im
+ * selben Objekt. `JSON.parse` behielte dann nur die letzte Liste – aus einem
+ * vollständigen Rezept würde still ein Ein-Schritt-Rezept. Diese Reparatur
+ * führt doppelte Listen-Schlüssel der obersten Ebene zusammen; alles andere
+ * bleibt unangetastet und wird anschließend normal validiert.
+ */
+export function mergeDuplicateTopLevelArrays(source: string): string | null {
+  const members = topLevelJsonMembers(source)
+  if (!members) return null
+  const grouped = new Map<string, TopLevelJsonMember[]>()
+  for (const member of members) {
+    const list = grouped.get(member.key)
+    if (list) list.push(member)
+    else grouped.set(member.key, [member])
+  }
+  let hasDuplicate = false
+  for (const list of grouped.values()) {
+    if (list.length < 2) continue
+    if (
+      !list.every(
+        (member) => member.value.startsWith('[') && member.value.endsWith(']'),
+      )
+    ) {
+      return null
+    }
+    hasDuplicate = true
+  }
+  if (!hasDuplicate) return null
+  const emitted = new Set<string>()
+  const parts: string[] = []
+  for (const member of members) {
+    if (emitted.has(member.key)) continue
+    emitted.add(member.key)
+    const list = grouped.get(member.key)!
+    const value =
+      list.length === 1
+        ? list[0]!.value
+        : `[${list
+            .map((entry) => entry.value.slice(1, -1).trim())
+            .filter((entry) => entry.length > 0)
+            .join(',')}]`
+    parts.push(`${JSON.stringify(member.key)}:${value}`)
+  }
+  return `{${parts.join(',')}}`
 }
 
 /**
@@ -409,8 +538,9 @@ export function extractJsonObject(text: string): unknown {
     throw new OcrFormatError('Die KI-Antwort enthält kein JSON-Objekt.')
   }
   const candidate = source.slice(start, end + 1)
+  const repaired = mergeDuplicateTopLevelArrays(candidate) ?? candidate
   try {
-    return JSON.parse(candidate) as unknown
+    return JSON.parse(repaired) as unknown
   } catch {
     throw new OcrFormatError('Die KI-Antwort enthält kein gültiges JSON.')
   }
@@ -446,6 +576,22 @@ function readBoolean(record: Record<string, unknown>, key: string, field: string
     throw new OcrFormatError(`Das Feld „${field}“ ist kein Wahrheitswert.`)
   }
   return value
+}
+
+/**
+ * Freitext-Feld für Unsicherheitshinweise. Gemma 4 liefert hier gelegentlich
+ * einen Wahrheitswert (`"uncertainty": true`) statt eines Strings. Das ist
+ * kein inhaltlicher Fehler und darf eine ansonsten gültige Aufbereitung nicht
+ * als Formatfehler verwerfen; der Hinweis wird dann als leer behandelt.
+ */
+function readUncertaintyNote(
+  record: Record<string, unknown>,
+  key: string,
+  maxLength: number,
+  field: string,
+): string {
+  if (typeof record[key] === 'boolean') return ''
+  return readString(record, key, maxLength, field)
 }
 
 function readStringArray(
@@ -542,7 +688,7 @@ function readIngredient(value: unknown, index: number): OcrIngredient | null {
     purchaseNote: readString(value, 'purchaseNote', 300, field('purchaseNote')),
     preparationNote: readString(value, 'preparationNote', 300, field('preparationNote')),
     uncertain: readBoolean(value, 'uncertain', field('uncertain')),
-    uncertainty: readString(value, 'uncertainty', 300, field('uncertainty')),
+    uncertainty: readUncertaintyNote(value, 'uncertainty', 300, field('uncertainty')),
   }
 }
 
@@ -556,7 +702,7 @@ function readStep(value: unknown, index: number): OcrStep | null {
   return {
     text,
     uncertain: readBoolean(value, 'uncertain', field('uncertain')),
-    uncertainty: readString(value, 'uncertainty', 300, field('uncertainty')),
+    uncertainty: readUncertaintyNote(value, 'uncertainty', 300, field('uncertainty')),
   }
 }
 
@@ -776,7 +922,6 @@ export function validateOcrAssemblySteps(value: unknown): OcrStep[] {
   const parsed: Array<{
     step: OcrStep
     sourceLine: number | null
-    uncertain: boolean
     rawIndex: number
   }> = []
   stepsValue.forEach((entry, index) => {
@@ -790,82 +935,33 @@ export function validateOcrAssemblySteps(value: unknown): OcrStep[] {
         .filter((item) => item > 0)
       if (numbers.length > 0) sourceLine = Math.min(...numbers)
     }
-    parsed.push({ step, sourceLine, uncertain: step.uncertain, rawIndex: index })
+    parsed.push({ step, sourceLine, rawIndex: index })
   })
   if (parsed.length === 0) {
     throw new OcrFormatError('Die Aufbereitung enthält keine lesbaren Schritte.')
   }
 
-  // Reihenfolge: verlässliche Schritte werden nach ihren Quellzeilen sortiert.
-  // Bei rekonstruierten/unsicheren Schritten sind die Quellzeilen häufig falsch
-  // (sie zeigen auf eine frühere Erwähnung derselben Zutat), deshalb bleiben
-  // sie an ihrer Modellposition – hinter allen verlässlichen Schritten, die im
-  // Modell davor standen. So kann die Sortierung einen korrekt platzierten
-  // Rekonstruktionsschritt nicht nach vorn ziehen.
-  const ordered: Array<{
-    key: number
-    rawIndex: number
-    step: OcrStep
-    sourceLine: number | null
-  }> = []
-  let lastKey = 0
+  // Die Modellreihenfolge bleibt maßgeblich. `sourceLines` sind Modellangaben
+  // und im echten Test nachweislich unzuverlässig: Sie zeigten auf eine frühere
+  // Erwähnung derselben Zutat und zogen einen korrekt platzierten Rückführ-
+  // Schritt fälschlich vor die Soßenzubereitung. Ein stilles Umsortieren auf
+  // dieser Grundlage ist deshalb nicht zulässig. Widersprechen die Quellzeilen
+  // der Reihenfolge, wird der betroffene Schritt als unsicher markiert; die
+  // Unsicherheit bleibt für den Nutzer sichtbar, ohne den Ablauf zu erfinden.
+  let lastSourceLine = 0
   for (const entry of parsed) {
-    if (!entry.uncertain && entry.sourceLine !== null) {
-      lastKey = Math.max(lastKey, entry.sourceLine)
-      ordered.push({
-        key: entry.sourceLine,
-        rawIndex: entry.rawIndex,
-        step: entry.step,
-        sourceLine: entry.sourceLine,
-      })
-    } else {
-      ordered.push({
-        key: lastKey + 0.5 + entry.rawIndex / 1000,
-        rawIndex: entry.rawIndex,
-        step: entry.step,
-        sourceLine: entry.sourceLine,
-      })
+    if (entry.sourceLine === null) continue
+    if (entry.sourceLine < lastSourceLine) {
+      entry.step.uncertain = true
+      if (!entry.step.uncertainty.trim()) {
+        entry.step.uncertainty =
+          'Die angegebene Quellzeile passt nicht zur Reihenfolge dieses Schritts; bitte mit dem Foto abgleichen.'
+      }
+      continue
     }
+    lastSourceLine = entry.sourceLine
   }
-  ordered.sort((left, right) => left.key - right.key || left.rawIndex - right.rawIndex)
-
-  // Einzige zulässige Umordnung: Ein als unsicher markierter Rückführ-Schritt
-  // ("... wieder zur Soße ...") wird nur dann hinter die Soßenverarbeitung
-  // gesetzt, wenn die erkannten Quellzeilen das stützen – also wenn die
-  // Quellzeile des Rückführ-Schritts nach allen Quellzeilen der
-  // Pürier-/Joghurt-Schritte liegt. Ohne diese Bestätigung bleibt die
-  // ursprüngliche Reihenfolge erhalten.
-  const reAdd = /\b(wieder|zurück|zurueck|zur so(?:ß|ss)e|unter die so(?:ß|ss)e|untermisch|vermisch|unterhebe)\b/i
-  const sauceWork = /\b(pürier|purier|joghurt)\b/i
-  const sauceLines = ordered
-    .filter((entry) => sauceWork.test(entry.step.text) && entry.sourceLine !== null)
-    .map((entry) => entry.sourceLine as number)
-  const lastSauceIndex = ordered.reduce(
-    (last, entry, index) => (sauceWork.test(entry.step.text) ? index : last),
-    -1,
-  )
-  const maxSauceLine = sauceLines.length > 0 ? Math.max(...sauceLines) : null
-  const movable = ordered
-    .map((entry, index) => ({ entry, index }))
-    .filter(
-      ({ entry, index }) =>
-        index < lastSauceIndex &&
-        reAdd.test(entry.step.text) &&
-        !sauceWork.test(entry.step.text) &&
-        entry.step.uncertain &&
-        entry.sourceLine !== null &&
-        maxSauceLine !== null &&
-        entry.sourceLine > maxSauceLine,
-    )
-  if (movable.length > 0) {
-    const movableSet = new Set(movable.map(({ entry }) => entry))
-    const anchor = ordered[lastSauceIndex]!
-    const remaining = ordered.filter((entry) => !movableSet.has(entry))
-    const insertAt = Math.max(0, remaining.indexOf(anchor) + 1)
-    remaining.splice(insertAt, 0, ...movable.map(({ entry }) => entry))
-    return remaining.map((entry) => entry.step)
-  }
-  return ordered.map((entry) => entry.step)
+  return parsed.map((entry) => entry.step)
 }
 
 /** Ergebnis der zweiten Stufe: bereinigtes Rezept plus Zähler für das Reporting. */
@@ -923,6 +1019,367 @@ export function isSafeIngredientCleanup(original: string, cleaned: string): bool
   }
   const longest = Math.max(left.length, right.length)
   return 1 - editDistance(left, right) / longest >= 0.72
+}
+
+/* ------------------------------------------------------------------ *
+ * Deterministische Sprachkorrektur mit etablierten Schreibweisen
+ * ------------------------------------------------------------------ */
+
+/**
+ * Ein etablierter Zutatenname aus dem Zutatenkatalog bzw. ein daraus
+ * abgeleiteter Vergleichsschlüssel. Der Katalog bleibt die einzige Quelle für
+ * bekannte Lebensmittelnamen; hier wird er ausschließlich als Wörterbuch für
+ * eindeutige Schreibkorrekturen verwendet (keine Produktumdeutung).
+ */
+export interface OcrSpellingEntry {
+  /** Anzeige-Schreibweise, z. B. "Pfefferminze". */
+  label: string
+  /** Vergleichsschlüssel: klein, ohne Umlaute/ß, ohne Trennzeichen. */
+  key: string
+}
+
+export interface EstablishedSpelling {
+  /** Etablierte Schreibweise oder null, wenn keine eindeutige Korrektur möglich ist. */
+  label: string | null
+  /** true, wenn mehrere gleich nahe Schreibweisen existieren. */
+  ambiguous: boolean
+}
+
+export interface OcrSpellingCorrection {
+  from: string
+  to: string
+}
+
+export interface OcrLanguageCorrectionResult {
+  recipe: OcrRecipe
+  /** Für den Aufbereitungsaufruf korrigierte Transkription. */
+  transcription: string
+  /** Sicher ersetzte Schreibweisen (für Tests und Diagnose). */
+  corrections: OcrSpellingCorrection[]
+}
+
+/** Unter dieser Länge wird nichts fuzzy korrigiert (zu viele Alltagswörter). */
+const SPELLING_MIN_KEY_LENGTH = 6
+/** Ab dieser Länge ist ein zweiter Buchstabendreher noch eindeutig zuordenbar. */
+const SPELLING_LONG_KEY_LENGTH = 10
+/** Für Distanz 2 muss der Wortanfang weitgehend übereinstimmen. */
+const SPELLING_SHARED_PREFIX = 4
+
+function sharedPrefixLength(left: string, right: string): number {
+  const limit = Math.min(left.length, right.length)
+  let index = 0
+  while (index < limit && left[index] === right[index]) index += 1
+  return index
+}
+
+/** Baut ein nach Schreibschlüsseln dedupliziertes Wörterbuch. */
+export function buildOcrSpellingIndex(labels: readonly string[]): OcrSpellingEntry[] {
+  const seen = new Set<string>()
+  const entries: OcrSpellingEntry[] = []
+  for (const raw of labels) {
+    const label = typeof raw === 'string' ? raw.trim() : ''
+    if (!label) continue
+    const key = compactIngredient(label)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    entries.push({ label, key })
+  }
+  return entries
+}
+
+/**
+ * Sucht zu einer OCR-Schreibweise die eindeutige etablierte Schreibweise.
+ * Exakt bekannte Namen bleiben unverändert. Nur wenn genau eine gleich nahe
+ * Schreibweise existiert, wird korrigiert; mehrdeutige Fälle melden
+ * `ambiguous`, damit der Aufrufer Unsicherheit kennzeichnen kann statt zu raten.
+ */
+export function resolveEstablishedSpelling(
+  value: string,
+  index: readonly OcrSpellingEntry[],
+): EstablishedSpelling {
+  const key = compactIngredient(value)
+  if (key.length < SPELLING_MIN_KEY_LENGTH) return { label: null, ambiguous: false }
+  if (index.some((entry) => entry.key === key)) return { label: null, ambiguous: false }
+
+  const limit = key.length >= SPELLING_LONG_KEY_LENGTH ? 2 : 1
+  let best: OcrSpellingEntry | null = null
+  let bestDistance = limit + 1
+  let ambiguous = false
+  for (const entry of index) {
+    if (!entry.key || entry.key[0] !== key[0]) continue
+    if (Math.abs(entry.key.length - key.length) > limit) continue
+    const distance = editDistance(key, entry.key)
+    if (distance > limit) continue
+    if (
+      distance > 1 &&
+      sharedPrefixLength(key, entry.key) < SPELLING_SHARED_PREFIX
+    ) {
+      continue
+    }
+    if (distance < bestDistance) {
+      best = entry
+      bestDistance = distance
+      ambiguous = false
+    } else if (distance === bestDistance) {
+      ambiguous = true
+    }
+  }
+  if (ambiguous) return { label: null, ambiguous: true }
+  return { label: best?.label ?? null, ambiguous: false }
+}
+
+/** Entfernt Leerzeichen um Bindestriche und doppelte Leerzeichen. */
+function normalizeIngredientSpelling(value: string): string {
+  return value
+    .replace(/\s+/g, ' ')
+    .replace(/\s*-\s*/g, '-')
+    .replace(/\s+([,.;:])/g, '$1')
+    .trim()
+}
+
+/**
+ * Zubereitungs- und Zustandswörter, die in Klammern eine echte Zusatzangabe
+ * sind („Tomaten (gehackt)“) und niemals mit dem Produktwort verschmolzen
+ * werden dürfen. Grundlage sind allgemeine deutsche Küchenwörter, keine
+ * rezeptspezifischen Begriffe.
+ */
+const PREPARATION_OR_STATE_WORDS = new Set([
+  'gehackt', 'gehackte', 'gehackter', 'gewürfelt', 'gewürfelte', 'gerieben',
+  'geriebene', 'geschnitten', 'geschnittene', 'geschält', 'geschälte',
+  'entkernt', 'halbiert', 'geviertelt', 'gewaschen', 'geputzt', 'getrocknet',
+  'getrocknete', 'gemahlen', 'gemahlene', 'frisch', 'frische', 'reif', 'reife',
+  'klein', 'kleine', 'groß', 'große', 'fein', 'feine', 'grob', 'grobe',
+  'stückig', 'stückige', 'passiert', 'passierte', 'abgetropft', 'gekocht',
+  'gebraten', 'geröstet', 'zerdrückt', 'gepresst', 'abgerieben', 'optional',
+])
+
+/**
+ * Zieht einen kleingeschriebenen Klammerzusatz in das Wort, wenn er erkennbar
+ * nur der zweite Teil desselben Kompositums ist. Die Handschrift trennt lange
+ * Wörter gelegentlich in Klammern („Pomito Tomaten (frucht fleisch)“); das ist
+ * ein Lesefehler, kein Zusatz. Echte Zubereitungshinweise und bekannte
+ * Synonyme in Klammern bleiben unverändert.
+ */
+export function mergeLowercaseCompoundParentheses(
+  value: string,
+  knownKeys: ReadonlySet<string> = new Set(),
+): string {
+  if (!value || !value.includes('(')) return value
+  return value.replace(
+    /([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß-]*)\s*\(\s*([a-zäöüß]+(?:\s+[a-zäöüß]+)?)\s*\)/gu,
+    (match, head: string, tail: string) => {
+      const words = tail.split(/\s+/).filter(Boolean)
+      // Nur ein zweiteiliger, kleingeschriebener Klammerzusatz ist ein
+      // getrenntes Kompositum („frucht fleisch“). Einzelwörter wie „glatt“
+      // oder „gehackt“ sind echte Zubereitungshinweise und bleiben stehen.
+      if (words.length !== 2) return match
+      if (words.some((word) => PREPARATION_OR_STATE_WORDS.has(word))) return match
+      const tailKey = compactIngredient(words.join(''))
+      if (!tailKey || knownKeys.has(tailKey)) return match
+      if (head.length < 3) return match
+      const merged = `${head}${words.join('')}`
+      if (merged.length > 80) return match
+      return merged
+    },
+  )
+}
+
+function matchSpellingCase(original: string, label: string): string {
+  const first = original.trim().charAt(0)
+  if (!first) return label
+  const lower = first.toLocaleLowerCase('de')
+  const upper = first.toLocaleUpperCase('de')
+  if (first !== lower || first === upper) return label
+  return label.charAt(0).toLocaleLowerCase('de') + label.slice(1)
+}
+
+/** Vergleichsschlüssel-Menge für "unverändert lassen"-Prüfungen. */
+function spellingKeySet(index: readonly OcrSpellingEntry[]): Set<string> {
+  return new Set(index.map((entry) => entry.key))
+}
+
+/**
+ * Wörterbuch der Zutaten des konkreten Rezepts (ganze Namen und Wortteile).
+ * Damit werden Fehlschreibweisen derselben Zutat in Transkription und
+ * Zubereitung korrigiert, ohne fremde Wörter anzufassen.
+ */
+export function buildOcrSpellingVocabulary(names: readonly string[]): OcrSpellingEntry[] {
+  const seen = new Set<string>()
+  const entries: OcrSpellingEntry[] = []
+  const add = (raw: string) => {
+    const label = raw.trim().replace(/^[^A-Za-zÄÖÜäöüß0-9]+|[^A-Za-zÄÖÜäöüß0-9]+$/g, '')
+    if (!label) return
+    const key = compactIngredient(label)
+    if (key.length < SPELLING_MIN_KEY_LENGTH || seen.has(key)) return
+    seen.add(key)
+    entries.push({ label, key })
+  }
+  for (const name of names) {
+    add(name)
+    for (const part of name.split(/\s+/)) add(part)
+    for (const part of name.split('-')) add(part)
+  }
+  return entries
+}
+
+const SPELLING_WORD_PATTERN = /[A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß.-]*/g
+
+/**
+ * Korrigiert in einem Satz ausschließlich Wörter, die eindeutig zu einer
+ * Zutat dieses Rezepts gehören. Exakt bekannte Wörter (Katalog oder Zutaten-
+ * liste) bleiben unangetastet, damit z. B. Singular/Plural oder Markennamen
+ * nicht umgeschrieben werden.
+ */
+export function correctOcrTextSpelling(
+  text: string,
+  vocabulary: readonly OcrSpellingEntry[],
+  knownKeys: ReadonlySet<string> = new Set(),
+): string {
+  if (!text) return text
+  const merged = mergeLowercaseCompoundParentheses(text, knownKeys)
+  if (vocabulary.length === 0) return merged
+  return merged.replace(SPELLING_WORD_PATTERN, (word) => {
+    const trailing = /[.,;:!?]+$/.exec(word)?.[0] ?? ''
+    const core = trailing ? word.slice(0, -trailing.length) : word
+    const key = compactIngredient(core)
+    if (key.length < SPELLING_MIN_KEY_LENGTH) return word
+    if (knownKeys.has(key)) return word
+    if (vocabulary.some((entry) => entry.key === key)) return word
+    const resolved = resolveEstablishedSpelling(core, vocabulary)
+    if (!resolved.label) return word
+    return `${matchSpellingCase(core, resolved.label)}${trailing}`
+  })
+}
+
+const SPELLING_ABBREVIATION = /^([A-ZÄÖÜ][A-Za-zÄÖÜäöüß]{0,2})\.$/
+
+/**
+ * Löst Namens-Abkürzungen innerhalb der Zutatenliste auf, wenn die Langform
+ * eindeutig in einer anderen Zutat vorkommt (z. B. „tandoori Sherwood- M.“
+ * neben „Tandoori Sherwood-Mischung“). Mehrdeutige Abkürzungen bleiben stehen
+ * und werden als unsicher markiert.
+ */
+function expandIngredientAbbreviations(
+  recipe: OcrRecipe,
+  corrections: OcrSpellingCorrection[],
+): void {
+  const words = new Set<string>()
+  for (const ingredient of recipe.ingredients) {
+    for (const part of ingredient.name.split(/[\s/()-]+/)) {
+      const clean = part.replace(/^[^A-Za-zÄÖÜäöüß]+|[^A-Za-zÄÖÜäöüß]+$/g, '')
+      if (clean.length > 1 && !SPELLING_ABBREVIATION.test(clean)) words.add(clean)
+    }
+  }
+  recipe.ingredients.forEach((ingredient, index) => {
+    const tokens = ingredient.name.split(/\s+/)
+    let changed = false
+    const nextTokens = tokens.map((token) => {
+      const parts = token.split('-')
+      const nextParts = parts.map((part) => {
+        const match = SPELLING_ABBREVIATION.exec(part)
+        if (!match) return part
+        const prefix = match[1]!.toLocaleLowerCase('de')
+        const candidates = [...words].filter((word) =>
+          word.toLocaleLowerCase('de').startsWith(prefix),
+        )
+        if (candidates.length !== 1) {
+          if (candidates.length > 1) markIngredientUncertain(recipe, index)
+          return part
+        }
+        changed = true
+        return candidates[0]!
+      })
+      return nextParts.join('-')
+    })
+    if (changed) {
+      const next = nextTokens.join(' ')
+      corrections.push({ from: ingredient.name, to: next })
+      ingredient.name = next.slice(0, 300)
+    }
+  })
+}
+
+function markIngredientUncertain(recipe: OcrRecipe, index: number): void {
+  const ingredient = recipe.ingredients[index]
+  if (!ingredient) return
+  ingredient.uncertain = true
+  if (!ingredient.uncertainty.trim()) {
+    ingredient.uncertainty =
+      'Schreibweise oder Abkürzung nicht eindeutig; bitte mit dem Foto abgleichen.'
+  }
+  const reference = `Zutat ${index + 1}${ingredient.name ? ` (${ingredient.name})` : ''}`
+  const note = ingredient.uncertainty
+  const existing = recipe.uncertainties.some(
+    (entry) => entry.reference === reference && entry.note === note,
+  )
+  if (!existing && recipe.uncertainties.length < PHOTO_OCR_MAX_UNCERTAINTIES) {
+    recipe.uncertainties.push({ reference, note })
+  }
+}
+
+/**
+ * Korrigiert Zutaten-, Transkriptions- und Schritt-Schreibweisen anhand
+ * etablierter Namen (Zutatenkatalog). Die Funktion ist idempotent, erfindet
+ * keine Inhalte und ändert weder Mengen noch Einheiten. Sie ist bewusst Teil
+ * des gemeinsamen Vertrags und benötigt kein Modell.
+ */
+export function applyOcrLanguageCorrections(
+  recipe: OcrRecipe,
+  transcription: string,
+  spellingLabels: readonly string[],
+): OcrLanguageCorrectionResult {
+  const index = buildOcrSpellingIndex(spellingLabels)
+  const corrections: OcrSpellingCorrection[] = []
+  const next: OcrRecipe = {
+    ...recipe,
+    ingredients: recipe.ingredients.map((ingredient) => ({ ...ingredient })),
+    steps: recipe.steps.map((step) => ({ ...step })),
+    uncertainties: recipe.uncertainties.map((entry) => ({ ...entry })),
+    warnings: [...recipe.warnings],
+  }
+
+  const knownKeys = spellingKeySet(index)
+  next.ingredients.forEach((ingredient, ingredientIndex) => {
+    const normalized = mergeLowercaseCompoundParentheses(
+      normalizeIngredientSpelling(ingredient.name),
+      knownKeys,
+    )
+    if (!normalized) return
+    const established = resolveEstablishedSpelling(normalized, index)
+    if (established.label && established.label !== normalized) {
+      corrections.push({ from: ingredient.name, to: established.label })
+      ingredient.name = established.label.slice(0, 300)
+      return
+    }
+    if (established.ambiguous) {
+      markIngredientUncertain(next, ingredientIndex)
+    }
+    if (normalized !== ingredient.name) {
+      corrections.push({ from: ingredient.name, to: normalized })
+      ingredient.name = normalized.slice(0, 300)
+    }
+  })
+
+  expandIngredientAbbreviations(next, corrections)
+
+  const vocabulary = buildOcrSpellingVocabulary(
+    next.ingredients.map((ingredient) => ingredient.name),
+  )
+  const correctedTranscription = String(transcription ?? '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => correctOcrTextSpelling(line, vocabulary, knownKeys))
+    .join('\n')
+
+  for (const step of next.steps) {
+    const corrected = correctOcrTextSpelling(step.text, vocabulary, knownKeys)
+    if (corrected !== step.text) {
+      corrections.push({ from: step.text, to: corrected })
+      step.text = corrected
+    }
+  }
+
+  return { recipe: next, transcription: correctedTranscription, corrections }
 }
 
 /**

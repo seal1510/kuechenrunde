@@ -34,6 +34,7 @@ import {
   PHOTO_OCR_MODEL,
   OcrFormatError,
   applyOcrConsistencyChecks,
+  applyOcrLanguageCorrections,
   extractJsonObject,
   isPlausibleOcrAssemblySteps,
   mergePhotoOcrUsage,
@@ -44,6 +45,7 @@ import {
   type PhotoOcrSuccess,
   type OcrRecipe,
 } from '../../src/import/photo-ocr'
+import { catalogSpellingLabels } from '../../src/domain/ingredientSpelling'
 import {
   clientKey,
   errorResponse,
@@ -235,15 +237,24 @@ export async function handleRecipeOcr(
 
       let recipe = validateOcrRecipe(value)
       let usage = extractPhotoAiUsage(raw)
+      // Deterministische Sprachkorrektur vor der Aufbereitung: Der
+      // Zutatenkatalog liefert etablierte Schreibweisen. Damit sieht das
+      // Textmodell bereits die korrigierte Zutatenliste und die korrigierte
+      // Transkription; offensichtliche OCR-Schreibfehler müssen nicht vom
+      // Modell erraten werden.
+      const spellingLabels = catalogSpellingLabels()
+      const language = applyOcrLanguageCorrections(recipe, transcription, spellingLabels)
+      recipe = language.recipe
+      const assemblyTranscription = language.transcription
       // Zweiter, text-only Aufruf: aus Transkription + validierter
       // Zutatenliste verständliche Schritte bauen. Die Aufbereitung ist
       // verpflichtend: Fällt sie aus, wird NICHT die rohe Erkennung als
       // erfolgreich ausgegeben (sie kann unbrauchbar sein), sondern ein
       // klarer Fehler zurückgegeben. Die Fotos bleiben im Editor erhalten,
       // sodass ohne erneute Fotoauswahl neu gestartet werden kann.
-      if (recipe.recognized && recipe.ingredients.length > 0 && transcription.trim()) {
+      if (recipe.recognized && recipe.ingredients.length > 0 && assemblyTranscription.trim()) {
         try {
-          const assembled = await runPhotoOcrAssembly(ai, recipe, transcription)
+          const assembled = await runPhotoOcrAssembly(ai, recipe, assemblyTranscription)
           if (isTruncatedModelResponse(assembled)) {
             console.warn('[photo-ocr] assembly failed: truncated')
             return errorResponse(
@@ -255,7 +266,7 @@ export async function handleRecipeOcr(
           const polished = validateOcrPolish(
             recipe,
             extractJsonObject(extractModelText(assembled)),
-            transcription,
+            assemblyTranscription,
           )
           // Die Nutzung ist auch bei einer verworfenen Antwort angefallen.
           usage = mergePhotoOcrUsage(usage, extractPhotoAiUsage(assembled))
@@ -267,7 +278,14 @@ export async function handleRecipeOcr(
               PHOTO_OCR_ERROR_MESSAGES['assembly-failed'],
             )
           }
-          recipe = polished.recipe
+          // Zweite Korrektur nach dem Modell: Das Modell darf keine falsche
+          // Schreibweise erneut einführen; zudem werden Schreibfehler in den
+          // Schritttexten an die bereinigten Zutatennamen angeglichen.
+          recipe = applyOcrLanguageCorrections(
+            polished.recipe,
+            assemblyTranscription,
+            spellingLabels,
+          ).recipe
           if (polished.rejectedNames > 0 || polished.rejectedGroups > 0) {
             addPolishWarning(recipe)
           }

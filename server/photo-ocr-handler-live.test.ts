@@ -29,7 +29,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -81,6 +81,12 @@ const LIVE_CASES: LiveCase[] = [
     file: 'handwritten-basic.jpg',
     expectedTitle: 'Gedeckter Apfelkuchen',
   },
+  {
+    // Gegenprobe für die Aufbereitung: schwierige Handschrift, anderes Rezept.
+    name: 'schwierige Handschrift als Gegenprobe',
+    file: 'handwritten-hard.jpg',
+    expectedTitle: 'Mohn-Zitronen-Kuchen',
+  },
 ]
 
 function imagePage(file: string) {
@@ -91,6 +97,122 @@ function imagePage(file: string) {
     width: 1654,
     height: 2339,
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Optionale Qualitätsabnahme mit einem echten Familienfoto
+ *
+ * Das private Foto wird nie committet. Der Lauf ist nur aktiv, wenn
+ * PHOTO_OCR_PRIVATE_IMAGE auf eine vorbereitete JPEG-Datei zeigt (wie im
+ * Browser: EXIF-korrekt, lange Kante 2048 px). Optional lassen sich
+ * Grundwahrheit und Schritt-Anforderungen als JSON übergeben.
+ * ------------------------------------------------------------------ */
+
+const PRIVATE_IMAGE = (process.env.PHOTO_OCR_PRIVATE_IMAGE ?? '').trim()
+const PRIVATE_GROUND_TRUTH = (process.env.PHOTO_OCR_PRIVATE_GROUND_TRUTH ?? '').trim()
+const PRIVATE_STEP_REQUIREMENTS = (process.env.PHOTO_OCR_PRIVATE_STEP_REQUIREMENTS ?? '').trim()
+const PRIVATE_RUNS = Math.max(
+  1,
+  Math.min(5, Number(process.env.PHOTO_OCR_PRIVATE_RUNS ?? '1') || 1),
+)
+const PRIVATE_CONFIGURED = LIVE_RUN_CONFIGURED && PRIVATE_IMAGE.length > 0
+
+function readPage(path: string) {
+  const bytes = readFileSync(path)
+  return { mimeType: 'image/jpeg' as const, dataBase64: bytes.toString('base64') }
+}
+
+function readJson(path: string): unknown {
+  return JSON.parse(readFileSync(path, 'utf8')) as unknown
+}
+
+/** Vergleichsform für Prüfungen (klein, ohne Umlaute/Satzzeichen). */
+function normalize(value: string): string {
+  return value
+    .toLocaleLowerCase('de')
+    .replace(/ß/g, 'ss')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+interface StepRequirement {
+  id: string
+  label: string
+  all: string[]
+  optional?: boolean
+}
+
+function requirementSatisfied(
+  requirement: StepRequirement,
+  steps: readonly string[],
+): boolean {
+  const normalized = steps.map((step) => normalize(step)).join('\n')
+  return requirement.all.every((pattern) => new RegExp(pattern, 'i').test(normalized))
+}
+
+function stepIndex(steps: readonly string[], pattern: RegExp): number {
+  return steps.findIndex((step) => pattern.test(normalize(step)))
+}
+
+/** Prüft die im Auftrag genannten Qualitätskriterien am fertigen Rezept. */
+function assertRecipeQuality(
+  recipe: {
+    title: string
+    ingredients: Array<{ name: string }>
+    steps: Array<{ text: string }>
+  },
+  context: string,
+): void {
+  const steps = recipe.steps.map((step) => step.text)
+  const allText = normalize(steps.join('\n'))
+  const ingredientNames = recipe.ingredients.map((ingredient) => normalize(ingredient.name))
+
+  // 1. Rechtschreibung: der Herbstoff darf nicht als „Pfefferminte“ o. Ä.
+  //    erscheinen; „Pfefferminze“ (oder eine belegte Variante wie
+  //    „Pfefferminzblätter“) muss vorkommen.
+  expect(allText, `${context}: falsche Schreibweise „Pfefferminte“`).not.toContain(
+    'pfefferminte',
+  )
+  expect(allText, `${context}: unvollständige Schreibweise „Pfefferminz“`).not.toMatch(
+    /\bpfefferminz\b/,
+  )
+  expect(allText, `${context}: Pfefferminze fehlt`).toMatch(/pfefferminz/)
+
+  // 2. Reihenfolge: Soße zubereiten, dann Joghurt, dann Fleisch zurück.
+  const sauceIndex = stepIndex(
+    steps,
+    /(so(ss|ß)e|mischung).*(puri|anbrat|ablosch|lösch|kochen)/,
+  )
+  const yoghurtIndex = stepIndex(steps, /joghurt/)
+  const reAddIndex = stepIndex(
+    steps,
+    /hahnchenbrust.*(wieder|zuruck|untermisch|vermisch)/,
+  )
+  const herbIndex = stepIndex(steps, /pfefferminz/)
+  expect(sauceIndex, `${context}: Soßenschritt fehlt`).toBeGreaterThanOrEqual(0)
+  expect(yoghurtIndex, `${context}: Joghurt-Schritt fehlt`).toBeGreaterThanOrEqual(0)
+  expect(reAddIndex, `${context}: Fleisch wird nicht zurückgegeben`).toBeGreaterThanOrEqual(0)
+  expect(sauceIndex, `${context}: Soße nach Fleisch-Rückführung`).toBeLessThan(reAddIndex)
+  expect(yoghurtIndex, `${context}: Joghurt nach Fleisch-Rückführung`).toBeLessThan(reAddIndex)
+  expect(herbIndex, `${context}: Pfefferminze wird nicht darübergestreut`).toBeGreaterThan(
+    reAddIndex,
+  )
+
+  // 3. Vollständigkeit: alle wesentlichen Zutaten sind vorhanden.
+  for (const required of ['hahnchenbrust', 'ingwer', 'zwiebel', 'joghurt', 'pfefferminz', 'basmatireis']) {
+    expect(
+      ingredientNames.some((name) => name.includes(required)),
+      `${context}: Zutat „${required}“ fehlt`,
+    ).toBe(true)
+  }
+
+  // 4. Keine erfundene Anrichte-Handlung: Die Vorlage enthält kein
+  //    „anrichten“/„servieren“. (Die Grundwahrheit wird nur geprüft, wenn
+  //    ein echter Handschriftfall vorliegt.)
+  expect(allText, `${context}: erfundene Anrichte-Handlung`).not.toContain('anrichten')
 }
 
 /**
@@ -213,6 +335,10 @@ describe.skipIf(!LIVE_RUN_CONFIGURED)(
           liveCase.expectedTitle.toLocaleLowerCase('de'),
         )
 
+        for (const [index, step] of recipe.steps.entries()) {
+          console.log(`  ${index + 1}. ${step.text}`)
+        }
+
         const recognition = aiCalls[0]!
         const assembly = aiCalls[1]!
         const totalNeurons = (recognition.neurons ?? 0) + (assembly.neurons ?? 0)
@@ -223,6 +349,76 @@ describe.skipIf(!LIVE_RUN_CONFIGURED)(
             `${assembly.completionTokens} completion · ${totalNeurons.toFixed(2)} Neuronen`,
         )
       }, 180_000)
+    }
+
+    for (let run = 1; PRIVATE_CONFIGURED && run <= PRIVATE_RUNS; run += 1) {
+      it(`echtes Familienfoto: Qualitätskriterien (Lauf ${run}/${PRIVATE_RUNS})`, async () => {
+        const aiCalls: RestCallUsage[] = []
+        const env: Env = { AI: createRestAiBinding(aiCalls) }
+        const request = new Request('https://kuechenrunde.pages.dev/api/recipe-ocr', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Origin: 'https://kuechenrunde.pages.dev',
+            Authorization: 'Bearer live-trial-token',
+          },
+          body: JSON.stringify({ pages: [readPage(PRIVATE_IMAGE)] }),
+        })
+        const response = await handleRecipeOcr(request, env, {
+          authorize: async () => ({ id: 'live-trial-member', email: null }),
+        })
+        expect(response.status, await response.clone().text()).toBe(200)
+        const body = (await response.json()) as { recipe?: unknown }
+        const recipe = validateOcrRecipe(body.recipe)
+        const steps = recipe.steps.map((step) => step.text)
+
+        console.log(
+          `[handler-live-private] ${recipe.title} · ${recipe.ingredients.length} Zutaten · ` +
+            `${recipe.steps.length} Schritte · ${
+              aiCalls.reduce((sum, call) => sum + (call.neurons ?? 0), 0).toFixed(2)
+            } Neuronen`,
+        )
+        console.log(
+          `  Zutaten: ${recipe.ingredients
+            .map((ingredient) =>
+              [ingredient.quantity, ingredient.unit, ingredient.name]
+                .filter((part) => part.trim())
+                .join(' '),
+            )
+            .join(' | ')}`,
+        )
+        for (const [index, step] of steps.entries()) {
+          console.log(`  ${index + 1}. ${step}${recipe.steps[index]?.uncertain ? ' (unsicher)' : ''}`)
+        }
+
+        assertRecipeQuality(recipe, `privates Rezept, Lauf ${run}`)
+
+        if (PRIVATE_STEP_REQUIREMENTS.length > 0 && existsSync(PRIVATE_STEP_REQUIREMENTS)) {
+          const file = readJson(PRIVATE_STEP_REQUIREMENTS) as {
+            requirements?: StepRequirement[]
+          }
+          for (const requirement of file.requirements ?? []) {
+            if (requirement.optional) continue
+            expect(
+              requirementSatisfied(requirement, steps),
+              `Anforderung „${requirement.label}“ nicht erfüllt`,
+            ).toBe(true)
+          }
+        }
+        if (PRIVATE_GROUND_TRUTH.length > 0 && existsSync(PRIVATE_GROUND_TRUTH)) {
+          const groundTruth = readJson(PRIVATE_GROUND_TRUTH) as {
+            mustNotInvent?: string[]
+          }
+          const haystack = normalize(
+            [...recipe.ingredients.map((ingredient) => ingredient.name), ...steps].join(' '),
+          )
+          for (const forbidden of groundTruth.mustNotInvent ?? []) {
+            expect(haystack, `erfundene Zutat „${forbidden}“`).not.toContain(
+              normalize(forbidden),
+            )
+          }
+        }
+      }, 420_000)
     }
   },
 )

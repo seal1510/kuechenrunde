@@ -51,11 +51,11 @@ gespeichert (`importSource: 'photo'`, Rohmetadaten in `raw`).
   1. **Erkennung** (1 Aufruf, mit allen Seitenbildern): Transkription,
      Zutaten, Mengen, Gruppen, vorläufige Schritte.
   2. **Aufbereitung und Plausibilitätsprüfung** (1 text-only Aufruf, nur wenn
-     eine Transkription vorliegt): Aus Transkription + validierter
-     Zutatenliste werden ein sprachlich bereinigtes Rezept und eine
-     ganzheitliche kulinarische Prüfung erstellt. Die fragmentierten
-     Erkennungsschritte gehen dabei bewusst **nicht** ein, weil sie die
-     Formulierung im Test verschlechtert haben.
+     eine Transkription vorliegt): Aus der deterministisch vorbereinigten
+     Transkription + validierten Zutatenliste werden ein sprachlich
+     bereinigtes Rezept und eine ganzheitliche kulinarische Prüfung erstellt.
+     Die fragmentierten Erkennungsschritte gehen dabei bewusst **nicht** ein,
+     weil sie die Formulierung im Test verschlechtert haben.
   Die Seiten werden in der vom Nutzer festgelegten Reihenfolge als ein Rezept
   zusammengeführt.
 - Kein automatischer Modell-Fallback und keine kostenpflichtige Alternative im
@@ -69,35 +69,60 @@ gespeichert (`importSource: 'photo'`, Rohmetadaten in `raw`).
   „+“, „→“ oder Imperativ sind Zubereitungsschritte), exakte Wortwiedergabe
   ohne „Verbesserung“ ähnlicher Wörter, vollständige Brüche („1½“ ist
   eins-einhalb) und sichtbare Zutatengruppen.
-- Der Aufbereitungs-Prompt arbeitet nur mit der Transkription und der
-  Zutatenliste. Er
-  - **bereinigt sprachlich**: Rechtschreibung, Groß-/Kleinschreibung,
-    Getrennt-/Zusammenschreibung, falsch getrennte Komposita, Klammerzusätze,
-    offensichtliche Küchenbegriffe (z. B. „löschen“ → „ablöschen“ bei einer
-    Soße) und Interpunktion;
-  - **korrigiert Gruppenzuordnungen**, wenn die erkannte Gruppe nicht als
-    Überschrift in der Transkription vorkommt (z. B. ein Kraut-Topping, das
-    fälschlich unter „Beilage“ steht) – die zulässigen Gruppen leitet der
-    Server deterministisch aus den sichtbaren Überschriften ab;
-  - **formuliert vollständige Sätze** mit Objekt (keine
-    „Marinieren.“-Fragmente), verbindet zusammengehörige Kurznotizen und
-    prüft die Reihenfolge (z. B. Joghurt vor Fleisch, kein Pürieren bereits
-    herausgenommenen Fleischs);
-  - **erfindet nichts**: Mengen und Einheiten werden vom Modell nicht
-    ausgegeben und bleiben unverändert; fehlende Schritte werden nur aus dem
-    Ablauf rekonstruiert und als unsicher markiert; unleserliche Stellen
-    bleiben unsicher.
-  Die Anzahl der Schritte ergibt sich aus dem Rezept; eine feste Vorgabe gibt
-  es nicht. Eine Zutatenbereinigung wird nur übernommen, wenn sie der
-  Originalbezeichnung sehr ähnlich ist (reine Schreibkorrektur, keine
-  inhaltliche Ersetzung). Zutaten ohne Gruppenangabe zwischen gruppierten
-  Zutaten erben die vorherige Gruppe.
-  Der Aufbereitungsaufruf nutzt zusätzlich `response_format: { type:
-  'json_object' }` und ein deterministisches Plausibilitätsgate: Liefert das
-  Modell eine leere, doppelte, wiederholte (Schleife) oder ungewöhnlich große
-  Antwort, wird sie verworfen. Die Anzahl der Schritte ist **kein**
+- Der Aufbereitungs-Prompt arbeitet nur mit der (vorbereinigten) Transkription
+  und der Zutatenliste. Er
+  - **übernimmt eine Handlungszeile = ein Schritt**: Jede Handlungszeile der
+    Transkription wird genau ein Schritt in der Reihenfolge des Originals;
+    zwei verschiedene Zeilen werden nicht zusammengefasst und keine
+    weggelassen.
+  - **erhält die Kochhandlung**: Das Verb der Vorlage bleibt erhalten
+    („darüberstreuen“ bleibt „darüberstreuen“, „untermischen“ bleibt
+    „untermischen“); „anrichten“/„servieren“ nur, wenn die Vorlage es
+    verlangt. Unklare Zeilen werden nicht durch plausibel klingende andere
+    Handlungen ersetzt.
+  - **formuliert vollständige Sätze** im Infinitivstil mit Bezugsobjekt; reine
+    Zeit-/Mengen-/Ortsangaben („10 Minuten kochen“) werden auf das
+    Bezugsobjekt bezogen („Die Soße 10 Minuten kochen.“).
+  - **bereinigt Zutaten sprachlich**: Rechtschreibung,
+    Getrennt-/Zusammenschreibung, falsch getrennte Komposita in Klammern,
+    eindeutige Abkürzungen; Marken und Produkte werden nicht ersetzt.
+  - **rekonstruiert nur begründet**: Wird eine beiseitegestellte Zutat später
+    nicht zurückgegeben, ergänzt das Modell genau einen Rückführ-Schritt nach
+    der Soßenverarbeitung und markiert ihn als unsicher.
+  - **korrigiert Gruppenzuordnungen** anhand der sichtbaren Überschriften; die
+    zulässigen Gruppen leitet der Server deterministisch aus der Transkription
+    ab.
+  Die Reihenfolge des Modells bleibt maßgeblich. Die vom Modell gelieferten
+  Quellzeilen (`sourceLines`) werden **nicht mehr zum Umsortieren** verwendet:
+  Im echten Test zeigten sie auf eine frühere Erwähnung derselben Zutat und
+  zogen einen korrekt platzierten Rückführ-Schritt fälschlich vor die
+  Soßenzubereitung. Widersprechen die Quellzeilen der Reihenfolge, wird der
+  Schritt sichtbar als unsicher markiert statt still umsortiert.
+- Vor und nach dem Aufbereitungsaufruf läuft eine **deterministische
+  Sprachkorrektur** mit den etablierten Schreibweisen des Zutatenkatalogs
+  (`src/domain/ingredientSpelling.ts` → `applyOcrLanguageCorrections`):
+  - eindeutige OCR-Fehlschreibweisen von Lebensmitteln werden auf die
+    Katalogschreibweise korrigiert (z. B. „Pfefferminz“/„Pfefferminte“ →
+    „Pfefferminze“),
+  - zweiteilige, kleingeschriebene Klammerzusätze werden als getrennt
+    geschriebenes Kompositum zusammengezogen („Pomito Tomaten
+    (frucht fleisch)“ → „Pomito Tomatenfruchtfleisch“),
+  - eindeutige Namensabkürzungen werden aufgelöst („M.“ neben
+    „…-Mischung“ → „Mischung“),
+  - Schreibweisen in den Schritttexten werden an die bereinigte Zutatenliste
+    angeglichen.
+  Mehrdeutige Fälle werden nicht geraten, sondern als unsicher markiert;
+  unbekannte Marken-/Produktnamen bleiben unverändert. Die Korrektur ist
+  idempotent und ändert keine Mengen oder Einheiten.
+- Der Aufbereitungsaufruf nutzt zusätzlich `response_format: { type:
+  'json_object' }` und ein deterministisches Plausibilitätsgate: Verworfen
+  werden nur tatsächliche Fehlerbilder (leer, doppelt, Wiederholungsschleife,
+  ungewöhnlich groß). Die Anzahl der Schritte ist **kein**
   Ausschlusskriterium – auch umfangreiche Rezepte mit 15–20 Schritten werden
-  verarbeitet.
+  verarbeitet. Wiederholt Gemma einen Listen-Schlüssel (`"steps"`) im selben
+  JSON-Objekt, führt der Parser die Listen zusammen, statt still nur die
+  letzte zu behalten. Ein boolescher Wert im Freitextfeld `uncertainty` führt
+  nicht mehr zum Formatfehler.
   Schlägt der zweite Aufruf fehl (Format, Plausibilität, Netzwerk, Kontingent,
   Timeout), wird **nicht** die rohe Erkennung als Erfolg ausgegeben: Die
   Anfrage endet mit `502 assembly-failed` und einer verständlichen Meldung. Es
@@ -142,6 +167,33 @@ Ergebnis (Details und Messwerte in
   Drittanbieter, eigene Datenverarbeitung, und nach dem Gemma-Ergebnis kein
   belegter Bedarf. Er bleibt der nächste Kandidat, falls sich der Engpass bei
   weiteren echten Handschriften bestätigt.
+
+### Aufbereitung: Eignung von Gemma 4 und Alternativen (2026-11-14)
+
+Für die zweite, rein textbasierte Stufe wurde geprüft, ob ein anderes, bereits
+im Free-Tier verfügbares Workers-AI-Textmodell die Aufbereitung deutlich
+zuverlässiger erledigt. Verglichen wurden auf **derselben** Transkription und
+Zutatenliste (Tandoori-Foto, 13 Zutaten) Gemma 4, Llama 3.3 70B,
+Mistral Small 3.1, GLM-4.7-Flash und Qwen 3.8 27B (Details in
+[`docs/photo-ocr-test-results.md`](photo-ocr-test-results.md)):
+
+- **Gemma 4** blieb qualitativ und wirtschaftlich die beste Wahl: gültige
+  JSON-Antworten, korrekte Reihenfolge, niedrigste Kosten (ca. 35–40 Neuronen
+  pro Aufbereitung). Schwächen (gelegentliche Paraphrasen, doppelte
+  JSON-Schlüssel, boolesche `uncertainty`) werden durch Prompt, Parser und die
+  deterministische Sprachkorrektur aufgefangen.
+- **Llama 3.3 70B** kostete ca. das Sechsfache (ca. 250 Neuronen) und war
+  nicht besser: es übernahm OCR-Fehlschreibweisen, normalisierte Bindestriche
+  und erzeugte Grammatikfehler („Die Pfefferminz darüberstreuen“).
+- **Mistral Small 3.1** (ca. 120 Neuronen) korrigierte zwar einmal die
+  Kräuter-Schreibweise, ersetzte aber Markennamen („Tandoori-Mischung“ ohne
+  „Sherwood“) und verschmolz Rückführ- und Garnierhandlung.
+- **GLM-4.7-Flash** und **Qwen 3.8 27B** lieferten über die REST-Schnittstelle
+  in dieser Konfiguration nur abgeschnittene/leere Antworten (`finish_reason:
+  length`) und kamen nicht in Frage; Qwen ist zudem mit ca. 686 Neuronen pro
+  Aufbereitung unwirtschaftlich.
+- Kein kostenpflichtiges Modell wurde aktiviert. Gemma 4 bleibt für beide
+  Stufen im Einsatz.
 
 ## Strukturierte Ausgabe und Validierung
 
@@ -207,12 +259,13 @@ Verarbeitung.
 - Modellpreis laut Cloudflare: **Gemma 4** 9.091 Neuronen pro Mio.
   Input-Tokens und 27.273 pro Mio. Output-Tokens (Llama 4 Scout zum Vergleich:
   24.545 / 77.273).
-- Gemessen in den Live-Tests (Erkennung + Aufbereitung): echte Handschriftseite
-  **rund 120–135 Neuronen** mit Gemma 4 – davon ca. 65–85 für die Erkennung und
-  35–50 für die Aufbereitung. Zum Vergleich: die reine Erkennung ohne
-  Aufbereitung lag bei 52–65 Neuronen, Llama 4 Scout bei 135–169. Das
-  entspricht grob **70–85 vollständigen Rezeptimporten pro Tag** im Free-Tier.
-  Die genauen Messwerte stehen in
+- Gemessen in den Live-Tests (Erkennung + Aufbereitung) mit dem finalen Code:
+  echte Handschriftseite **rund 96–104 Neuronen** mit Gemma 4 – davon ca.
+  62–66 für die Erkennung und 34–40 für die Aufbereitung. Gegenproben mit
+  gedruckten und weiteren handschriftlichen Rezepten lagen bei 80–87 Neuronen.
+  Das entspricht grob **95–100 vollständigen Rezeptimporten pro Tag** im
+  Free-Tier. Bei Workers Paid entspricht das ungefähr **0,0011 US-Dollar pro
+  Rezept**. Die genauen Messwerte stehen in
   [`docs/photo-ocr-test-results.md`](photo-ocr-test-results.md).
 - Bei erschöpftem Kontingent erscheint eine deutsche Meldung mit dem Hinweis,
   dass keine Kosten entstehen, und ein Link zum manuellen Anlegen. Es gibt
@@ -280,13 +333,15 @@ Lesereihenfolge vor der Erkennung prüfen.
 
 - **Handschrift ist naturgemäß schwieriger** als Druck. Sehr kleine, blasse,
   verwackelte oder stark beschriftete Fotos können zu unleserlichen Stellen
-  führen; diese werden markiert, nicht erfunden. Im Test mit einer echten
-  Handschriftseite blieben einzelne sehr schwer lesbare Wörter unsicher bzw.
-  wurden falsch gelesen (z. B. ein Fachwort und eine Zeile ganz unten am
-  Blatt); Zutaten, Mengen und Gruppen waren vollständig. Die Modellwahl stützt
-  sich auf **eine** echte Handschriftseite; ein zweites echtes Handschriftfoto
-  lag nicht vor. Die Vorschau mit Warnungen und Fotoabgleich bleibt deshalb
-  Pflicht.
+  führen; diese werden markiert, nicht erfunden. Auf dem echten Tandoori-Foto
+  liest die Erkennung einzelne Wörter der untersten Zeilen weiterhin
+  gelegentlich falsch (z. B. „Fleisch daruntermischen“ als „Reich damit
+  anrichten“). Die Aufbereitung ergänzt die fehlende Rückführ-Handlung dann
+  begründet und markiert sie als unsicher; erfundene Anrichte-Anweisungen
+  werden nicht mehr übernommen. Die Vorschau mit Warnungen und Fotoabgleich
+  bleibt deshalb Pflicht. Die Modellwahl stützt sich auf **eine** echte
+  Handschriftseite; als Gegenprobe dient ein weiteres handschriftliches sowie
+  ein gedrucktes Rezept aus den synthetischen Fixtures.
 - **Seitenlimit 4**: Rezepte über mehr als vier Seiten müssen auf mehrere
   Importe aufgeteilt oder manuell ergänzt werden.
 - **Latenz**: Erkennung 9–35 s pro Seite plus Aufbereitung 3–25 s, in den
@@ -315,6 +370,13 @@ Automatisiert geprüft werden u. a.:
   Rezepte, unleserliche Angaben, fehlende/falsche Einheiten
   (Live-Tests mit Workers AI, siehe Ergebnisse)
 - strukturierte Ausgabe, JSON-Extraktion und serverseitige Validierung
+- deterministische Sprachkorrektur: Katalogschreibweisen, getrennt
+  geschriebene Komposita in Klammern, Namensabkürzungen, idempotente
+  Anwendung, keine Änderung von Mengen/Marken
+- Reihenfolge: Modellreihenfolge bleibt erhalten, widersprüchliche
+  Quellzeilen werden als unsicher markiert statt still umsortiert
+- Parser-Robustheit: wiederholte Listen-Schlüssel werden zusammengeführt,
+  boolesche `uncertainty`-Werte verwerfen keine gültige Aufbereitung
 - KI-Fehler, erschöpftes Kontingent, Dienst nicht konfiguriert
 - nicht autorisierte Zugriffe (401/403), Body-/Seiten-/Formatlimits
 - Abbrechen ohne Rezeptänderung, Speichern ausschließlich nach Bestätigung
@@ -344,7 +406,27 @@ Der erste Lauf misst die Modellqualität an synthetischen Fixtures, der zweite
 führt den echten Handler aus `functions/api/recipe-ocr.ts` mit einem
 REST-gestützten AI-Binding-Ersatz und gemockter Haushaltsprüfung aus. Der
 Handler-Lauf umfasst seit der Schrittaufbereitung zwei Modellaufrufe pro Fall
-(Erkennung + text-only Aufbereitung) und prüft damit den vollständigen Pfad.
+(Erkennung + text-only Aufbereitung) und prüft damit den vollständigen Pfad;
+neben zwei synthetischen Fällen läuft eine schwierige Handschrift als
+Gegenprobe mit.
+
+Für die Qualitätsabnahme mit dem echten Familienfoto (private Datei, nie im
+Repository) kann der Handler-Lauf zusätzlich ein vorbereitetes Bild
+(EXIF-korrekt, lange Kante 2048 px, JPEG) und die lokale Grundwahrheit
+verwenden:
+
+```bash
+PHOTO_OCR_PRIVATE_IMAGE=/pfad/zu/app-2048.jpg \
+  PHOTO_OCR_PRIVATE_GROUND_TRUTH=fixtures-private/tandoori/ground-truth.json \
+  PHOTO_OCR_PRIVATE_STEP_REQUIREMENTS=fixtures-private/tandoori/steps-ground-truth.json \
+  PHOTO_OCR_PRIVATE_RUNS=3 \
+  CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... \
+  pnpm vitest run server/photo-ocr-handler-live.test.ts
+```
+
+Der Lauf prüft die im Auftrag genannten Kriterien: korrekte Schreibweise
+(keine „Pfefferminte“), Soße vor Joghurt vor Fleisch-Rückführung, tatsächliches
+Darüberstreuen, vollständige Zutaten und keine erfundene Anrichte-Handlung.
 Für Modellvergleiche auf einem echten Foto dient zusätzlich
 `server/photo-ocr-model-compare.test.ts`; Bild und Ground Truth liegen aus
 Datenschutzgründen nur lokal unter `fixtures-private/` und werden nie
